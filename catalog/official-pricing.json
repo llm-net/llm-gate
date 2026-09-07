@@ -1,0 +1,527 @@
+{
+  "schema": "llmgate.official-pricing/v1",
+  "version": 11,
+  "updated_at": "2026-09-07",
+  "currency": "CNY",
+  "unit": "micro_yuan",
+  "notes": [
+    "常用模型的厂商官方目录价，由 LLM Gate官网公开发布；设备通过「数据升级」匿名下载本文件。",
+    "维护源是公开仓库 github.com/llm-net/llm-gate 的 catalog/ 目录（同目录 README.md 与 update-official-pricing.md 是维护说明）；",
+    "  官网 /updates/data/official-pricing.json 是它的逐字节副本。同目录的 platform-models.json 是它的另一半（哪个平台有哪些模型），两份一次同步一起下载。",
+    "金额一律整数微元（1 元 = 1000000 微元），与设备侧 models.pricing 的字段名和单位逐字对齐：",
+    "  in / out / cache_read / cache_write     微元 / 百万 token（cache_write 只在 Anthropic 形口径下计费，缺省按 in）",
+    "  ark_video_token / ark_video_token_ref     微元 / 百万 token（量取 usage.completion_tokens；_ref 是「输入含视频」那一档）",
+    "  ark_image_each                            微元 / 张（量取 usage.generated_images）",
+    "  ark_image_token                           微元 / 百万 token（量取 usage.output_tokens；与 _each 相加，按价签只配其一）",
+    "  minimax_video_sec_768p / _sec_2k          微元 / 秒",
+    "  minimax_video_image_extra                 微元 / 张（超出免费 5 张的部分）",
+    "  minimax_context_ir_in / _out              微元 / 百万 token",
+    "name 是厂商的原始模型名，也就是客户端请求里的 model 值；设备按模型名不分大小写精确匹配，不做别名推断。",
+    "pricing 是厂商的**标准目录价**：全时段默认价，刊例价口径——不折算限时促销、渠道折扣与订阅补贴。",
+    "schedule 段（可选）记厂商按星期与时刻切换的分时段价：timezone 是厂商计费时区（IANA 名）；periods 每条给 days（mon…sun）、",
+    "  hours（若干 [从, 到) 的 HH:MM 区间，「到」可写 24:00，跨午夜拆两段）与该时段的完整 pricing（字段集须与标准价相同）。",
+    "  时段之间不得重叠；不在任何时段内的时刻按 pricing 计。周末全天低价就是 days 为 sat/sun、hours 为 00:00–24:00 的一条。",
+    "  设备当前只把 pricing（标准价）同步进模型目录，分时段价尚未参与记账；同步进设备的价照旧可在模型页改。",
+    "这里记的是模型**厂商**的官方按量目录价。同一个模型经代理平台、订阅套餐或其他转售渠道调用时实际成本可能不同，",
+    "设备侧同步只填充「未定价」的模型，管理员随时可以在模型页改成自己的口径。",
+    "厂商随时可能调价：每条 source 是当次核对的官方页面，checked_at 是核对日期。",
+    "agent 字段取值 codex | grok | claude，标记工具订阅（Agent 订阅）代理的主力文本模型：",
+    "  **建行的权威清单是 platform-models.json 的 agents 段**，",
+    "  由设备侧收敛器按「目录 × 在场订阅」建删，本文件只负责给那些行录名义单价——以官方按量 API 价计（产品",
+    "  口径：不折算订阅补贴，账面用量远大于订阅月费是正常现象）。运行期按名**区分大小写**精确匹配，所以 agent",
+    "  条目的 name 必须与客户端请求的 model 值逐字节一致，也必须与 platform-models.json 那边的写法逐字节一致。",
+    "  固件忽略不认识的 agent 取值。Cursor 订阅整面转发、不解析模型名和 token 用量，本文件不收 Cursor 型号及 token 价格；",
+    "  设备只按「Cursor Agent 对话」统一记录次数与 0 元金额。",
+    "美元价条目按 1 USD = 6.75 CNY 折算（按核对时的中间价取整；汇率变动大时调本文件即可，已同步进设备的价照旧可在模型页改）。"
+  ],
+  "models": [
+    {
+      "name": "deepseek-v4-pro",
+      "kind": "text",
+      "vendor": "DeepSeek",
+      "pricing": {
+        "in": 9000000,
+        "cache_read": 300000,
+        "out": 27000000
+      },
+      "schedule": {
+        "timezone": "Asia/Shanghai",
+        "periods": [
+          {
+            "label": "工作日空闲时段",
+            "days": [
+              "mon",
+              "tue",
+              "wed",
+              "thu",
+              "fri"
+            ],
+            "hours": [
+              [
+                "00:00",
+                "09:00"
+              ],
+              [
+                "12:00",
+                "14:00"
+              ],
+              [
+                "18:00",
+                "24:00"
+              ]
+            ],
+            "pricing": {
+              "in": 4500000,
+              "cache_read": 150000,
+              "out": 13500000
+            }
+          },
+          {
+            "label": "周末全天空闲时段",
+            "days": [
+              "sat",
+              "sun"
+            ],
+            "hours": [
+              [
+                "00:00",
+                "24:00"
+              ]
+            ],
+            "pricing": {
+              "in": 4500000,
+              "cache_read": 150000,
+              "out": 13500000
+            }
+          }
+        ]
+      },
+      "source": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing",
+      "checked_at": "2026-09-07",
+      "note": "官方分高峰 / 空闲两档：高峰时段为北京时间周一至周五 9:00–12:00、14:00–18:00，其余时间（含周末全天）为空闲时段，空闲价为高峰价的 50%，缓存命中、缓存未命中与输出三价同比例。pricing 记高峰价（标准档），schedule 记空闲时段价。"
+    },
+    {
+      "name": "deepseek-v4-flash",
+      "kind": "text",
+      "vendor": "DeepSeek",
+      "pricing": {
+        "in": 3000000,
+        "cache_read": 100000,
+        "out": 9000000
+      },
+      "schedule": {
+        "timezone": "Asia/Shanghai",
+        "periods": [
+          {
+            "label": "工作日空闲时段",
+            "days": [
+              "mon",
+              "tue",
+              "wed",
+              "thu",
+              "fri"
+            ],
+            "hours": [
+              [
+                "00:00",
+                "09:00"
+              ],
+              [
+                "12:00",
+                "14:00"
+              ],
+              [
+                "18:00",
+                "24:00"
+              ]
+            ],
+            "pricing": {
+              "in": 1500000,
+              "cache_read": 50000,
+              "out": 4500000
+            }
+          },
+          {
+            "label": "周末全天空闲时段",
+            "days": [
+              "sat",
+              "sun"
+            ],
+            "hours": [
+              [
+                "00:00",
+                "24:00"
+              ]
+            ],
+            "pricing": {
+              "in": 1500000,
+              "cache_read": 50000,
+              "out": 4500000
+            }
+          }
+        ]
+      },
+      "source": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing",
+      "checked_at": "2026-09-07",
+      "note": "官方分高峰 / 空闲两档：高峰时段为北京时间周一至周五 9:00–12:00、14:00–18:00，其余时间（含周末全天）为空闲时段，空闲价为高峰价的 50%，缓存命中、缓存未命中与输出三价同比例。pricing 记高峰价（标准档），schedule 记空闲时段价。"
+    },
+    {
+      "name": "deepseek-v4-flash-vision-exp",
+      "kind": "text",
+      "vendor": "DeepSeek",
+      "pricing": {
+        "in": 3000000,
+        "cache_read": 100000,
+        "out": 9000000
+      },
+      "schedule": {
+        "timezone": "Asia/Shanghai",
+        "periods": [
+          {
+            "label": "工作日空闲时段",
+            "days": [
+              "mon",
+              "tue",
+              "wed",
+              "thu",
+              "fri"
+            ],
+            "hours": [
+              [
+                "00:00",
+                "09:00"
+              ],
+              [
+                "12:00",
+                "14:00"
+              ],
+              [
+                "18:00",
+                "24:00"
+              ]
+            ],
+            "pricing": {
+              "in": 1500000,
+              "cache_read": 50000,
+              "out": 4500000
+            }
+          },
+          {
+            "label": "周末全天空闲时段",
+            "days": [
+              "sat",
+              "sun"
+            ],
+            "hours": [
+              [
+                "00:00",
+                "24:00"
+              ]
+            ],
+            "pricing": {
+              "in": 1500000,
+              "cache_read": 50000,
+              "out": 4500000
+            }
+          }
+        ]
+      },
+      "source": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing",
+      "checked_at": "2026-09-07",
+      "note": "官方分高峰 / 空闲两档：高峰时段为北京时间周一至周五 9:00–12:00、14:00–18:00，其余时间（含周末全天）为空闲时段，空闲价为高峰价的 50%，缓存命中、缓存未命中与输出三价同比例。pricing 记高峰价（标准档），schedule 记空闲时段价。实验性视觉输入档，价与 deepseek-v4-flash 相同；设备只把它当文本输出的对话模型计价。"
+    },
+    {
+      "name": "kimi-k3",
+      "kind": "text",
+      "vendor": "月之暗面 Kimi",
+      "pricing": {
+        "in": 20000000,
+        "cache_read": 2000000,
+        "out": 100000000
+      },
+      "source": "https://platform.kimi.com/docs/pricing/chat-k3",
+      "checked_at": "2026-08-10",
+      "note": ""
+    },
+    {
+      "name": "kimi-k2.7-code",
+      "kind": "text",
+      "vendor": "月之暗面 Kimi",
+      "pricing": {
+        "in": 6500000,
+        "cache_read": 1300000,
+        "out": 27000000
+      },
+      "source": "https://platform.kimi.com/docs/pricing/chat-k27-code",
+      "checked_at": "2026-08-10",
+      "note": ""
+    },
+    {
+      "name": "kimi-k2.7-code-highspeed",
+      "kind": "text",
+      "vendor": "月之暗面 Kimi",
+      "pricing": {
+        "in": 13000000,
+        "cache_read": 2600000,
+        "out": 54000000
+      },
+      "source": "https://platform.kimi.com/docs/pricing/chat-k27-code",
+      "checked_at": "2026-08-10",
+      "note": "高速版是 kimi-k2.7-code 的两倍单价档。"
+    },
+    {
+      "name": "kimi-k2.6",
+      "kind": "text",
+      "vendor": "月之暗面 Kimi",
+      "pricing": {
+        "in": 6500000,
+        "cache_read": 1100000,
+        "out": 27000000
+      },
+      "source": "https://platform.kimi.com/docs/pricing/chat-k26",
+      "checked_at": "2026-08-10",
+      "note": ""
+    },
+    {
+      "name": "glm-5.2",
+      "kind": "text",
+      "vendor": "智谱 GLM",
+      "pricing": {
+        "in": 8000000,
+        "cache_read": 2000000,
+        "out": 28000000
+      },
+      "source": "https://open.bigmodel.cn/pricing",
+      "checked_at": "2026-08-10",
+      "note": "智谱开放平台公示的按量标准价。该价格页是前端渲染、无法机读，这组数字未从页面原文逐字取得，上线计费前请在控制台核对一次；国际站 Z.ai 的官方美元价是 $1.4 / $0.26 / $4.4，两套价目独立。"
+    },
+    {
+      "name": "gpt-6-astra",
+      "kind": "text",
+      "vendor": "OpenAI",
+      "agent": "codex",
+      "pricing": {
+        "in": 67500000,
+        "cache_read": 6750000,
+        "out": 337500000
+      },
+      "source": "https://developers.openai.com/api/docs/models/gpt-6-astra",
+      "checked_at": "2026-09-05",
+      "note": "官方 API 标准档 $10.00/$1.00/$50.00（输入/缓存命中/输出，每百万 token），按 6.75 折算。Codex 订阅流量按此价记名义金额。输入超过 272K token 时官方整单输入与缓存价为 2 倍、输出价为 1.5 倍；缓存写入另为 $12.50/百万 token。设备当前只记录标准档输入、缓存命中与输出三价，不建模长上下文、缓存写入及 Fast mode 加价。"
+    },
+    {
+      "name": "gpt-5.6-sol",
+      "kind": "text",
+      "vendor": "OpenAI",
+      "agent": "codex",
+      "pricing": {
+        "in": 27000000,
+        "cache_read": 2700000,
+        "out": 135000000
+      },
+      "source": "https://developers.openai.com/api/docs/pricing",
+      "checked_at": "2026-09-05",
+      "note": "官方 API 标准档 $4.00/$0.40/$20.00（输入/缓存命中/输出，每百万 token），按 6.75 折算；该促销价至少持续至 2026-11-21。Codex 订阅流量按此价记名义金额；设备不建模长上下文、缓存写入及 Fast mode 加价。"
+    },
+    {
+      "name": "gpt-5.6-terra",
+      "kind": "text",
+      "vendor": "OpenAI",
+      "agent": "codex",
+      "pricing": {
+        "in": 13500000,
+        "cache_read": 1350000,
+        "out": 81000000
+      },
+      "source": "https://developers.openai.com/api/docs/pricing",
+      "checked_at": "2026-09-05",
+      "note": "官方 API 标准档 $2.00/$0.20/$12.00（输入/缓存命中/输出，每百万 token），按 6.75 折算。Codex 订阅流量按此价记名义金额；设备不建模长上下文、缓存写入及 Fast mode 加价。"
+    },
+    {
+      "name": "gpt-5.6-luna",
+      "kind": "text",
+      "vendor": "OpenAI",
+      "agent": "codex",
+      "pricing": {
+        "in": 1350000,
+        "cache_read": 135000,
+        "out": 8100000
+      },
+      "source": "https://developers.openai.com/api/docs/pricing",
+      "checked_at": "2026-09-05",
+      "note": "官方 API 标准档 $0.20/$0.02/$1.20（输入/缓存命中/输出，每百万 token），按 6.75 折算。Codex 订阅流量按此价记名义金额；设备不建模长上下文、缓存写入及 Fast mode 加价。"
+    },
+    {
+      "name": "grok-4.6",
+      "kind": "text",
+      "vendor": "xAI",
+      "agent": "grok",
+      "pricing": {
+        "in": 13500000,
+        "cache_read": 3375000,
+        "out": 40500000
+      },
+      "source": "https://docs.x.ai/docs/models",
+      "checked_at": "2026-08-13",
+      "note": "官方 API 标准档（<200K token）$2.00/$0.50/$6.00，按 6.75 折算。xAI 对超 200K 的请求整单按翻倍档计费，设备价目形态不建模长上下文档，超长调用会按标准档少记。Grok Build 订阅流量按此价记名义金额。"
+    },
+    {
+      "name": "grok-4.5",
+      "kind": "text",
+      "vendor": "xAI",
+      "agent": "grok",
+      "pricing": {
+        "in": 13500000,
+        "cache_read": 2025000,
+        "out": 40500000
+      },
+      "source": "https://docs.x.ai/docs/models",
+      "checked_at": "2026-08-13",
+      "note": "官方 API 标准档（<200K token）$2.00/$0.30/$6.00，按 6.75 折算。长上下文档同 grok-4.6 的说明。Grok Build 订阅流量按此价记名义金额。"
+    },
+    {
+      "name": "claude-fable-5",
+      "kind": "text",
+      "vendor": "Anthropic",
+      "agent": "claude",
+      "pricing": {
+        "in": 67500000,
+        "cache_read": 6750000,
+        "out": 337500000
+      },
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "checked_at": "2026-08-19",
+      "note": "官方 API 标准档 $10.00/$1.00/$50.00（输入/缓存命中/输出，每百万 token），按 6.75 折算。Claude Code 订阅流量按此价记名义金额。"
+    },
+    {
+      "name": "claude-opus-5",
+      "kind": "text",
+      "vendor": "Anthropic",
+      "agent": "claude",
+      "pricing": {
+        "in": 33750000,
+        "cache_read": 3375000,
+        "out": 168750000
+      },
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "checked_at": "2026-08-19",
+      "note": "官方 API 标准档 $5.00/$0.50/$25.00，按 6.75 折算。Claude Code 里 opus 别名解析到它。"
+    },
+    {
+      "name": "claude-sonnet-5",
+      "kind": "text",
+      "vendor": "Anthropic",
+      "agent": "claude",
+      "pricing": {
+        "in": 13500000,
+        "cache_read": 1350000,
+        "out": 67500000
+      },
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "checked_at": "2026-08-19",
+      "note": "官方 API 标准档 $2.00/$0.20/$10.00，按 6.75 折算。$2/$10 原为发布期引入价，官方已明确它就是标准价，2026-09-01 不再涨到 $3/$15。"
+    },
+    {
+      "name": "claude-haiku-4-5",
+      "kind": "text",
+      "vendor": "Anthropic",
+      "agent": "claude",
+      "pricing": {
+        "in": 6750000,
+        "cache_read": 675000,
+        "out": 33750000
+      },
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "checked_at": "2026-08-19",
+      "note": "官方 API 标准档 $1.00/$0.10/$5.00，按 6.75 折算。这是官方别名写法。"
+    },
+    {
+      "name": "claude-haiku-4-5-20251001",
+      "kind": "text",
+      "vendor": "Anthropic",
+      "agent": "claude",
+      "pricing": {
+        "in": 6750000,
+        "cache_read": 675000,
+        "out": 33750000
+      },
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "checked_at": "2026-08-19",
+      "note": "与上一条是同一个模型的带日期 Claude API ID，价同。设备按名区分大小写精确匹配、不做别名推断，所以两种官方写法各录一条。"
+    },
+    {
+      "name": "MiniMax-H3",
+      "kind": "video",
+      "vendor": "MiniMax",
+      "pricing": {
+        "minimax_video_sec_768p": 500000,
+        "minimax_video_sec_2k": 800000,
+        "minimax_video_image_extra": 200000,
+        "minimax_context_ir_in": 5800000,
+        "minimax_context_ir_out": 23000000
+      },
+      "source": "https://platform.minimaxi.com/document/video_generation",
+      "checked_at": "2026-08-10",
+      "note": "国内站人民币价。参考视频按输入时长、且按输出分辨率单价计费，设备侧已按同一口径计价；再生成接口（¥0.30/秒）设备未挂载，故不录。国际站 api.minimax.io 是另一套美元价目。"
+    },
+    {
+      "name": "doubao-seedance-2.5",
+      "kind": "video",
+      "vendor": "火山方舟",
+      "pricing": {
+        "ark_video_token": 70000000,
+        "ark_video_token_ref": 42000000
+      },
+      "source": "https://www.volcengine.com/docs/82379/1544106",
+      "checked_at": "2026-08-12",
+      "note": "在线推理按量价，无限时优惠。2.5 只有 480p/720p 一档输出分辨率（1080p 与 4k 都不支持），单价表里也只列这一档，所以不像 doubao-seedance-2.0 那样有分辨率歧义，含/不含视频输入两个字段正好装得下。含视频输入反而更便宜，不是笔误。另注：输入含视频时官方有「最低 token 用量」下限，短片的实际 token 会高于按时长×像素的估算——设备按厂商回报的 usage.completion_tokens 记账，这条自动吃进去。"
+    },
+    {
+      "name": "doubao-seedance-2.0",
+      "kind": "video",
+      "vendor": "火山方舟",
+      "pricing": {
+        "ark_video_token": 46000000,
+        "ark_video_token_ref": 28000000
+      },
+      "source": "https://www.volcengine.com/docs/82379/1544106",
+      "checked_at": "2026-08-10",
+      "note": "在线推理按量价，录的是 480p/720p 档。官方按输出分辨率分三档（1080p 是 51.00/31.00，4k 是 26.00/16.00 元/百万token），而设备侧只有含/不含视频输入两个字段、装不下分辨率维度；主要出 1080p 或 4k 的现场请在模型页自行改价。含视频输入反而更便宜，不是笔误。"
+    },
+    {
+      "name": "doubao-seedance-2.0-fast",
+      "kind": "video",
+      "vendor": "火山方舟",
+      "pricing": {
+        "ark_video_token": 37000000,
+        "ark_video_token_ref": 22000000
+      },
+      "source": "https://www.volcengine.com/docs/82379/1544106",
+      "checked_at": "2026-08-10",
+      "note": "在线推理按量价，只有 480p/720p 一档，无分辨率歧义。录的是**原价**：官方限时 75 折（北京时间 2026-08-07 14:00 至 2026-09-07 14:00），折后约 27.75 / 16.50 元/百万token；本文件按「目录价 = 刊例价」口径记原价，促销期想按实付记账请在模型页自行改价，促销结束后记得改回。"
+    },
+    {
+      "name": "doubao-seedance-2.0-mini",
+      "kind": "video",
+      "vendor": "火山方舟",
+      "pricing": {
+        "ark_video_token": 23000000,
+        "ark_video_token_ref": 14000000
+      },
+      "source": "https://www.volcengine.com/docs/82379/1544106",
+      "checked_at": "2026-08-10",
+      "note": "在线推理按量价，只有 480p/720p 一档，无分辨率歧义。录的是**原价**：官方限时 4 折（北京时间 2026-08-07 14:00 至 2026-09-07 14:00），折后约 9.20 / 5.60 元/百万token——折扣力度大，促销期按原价记账会把成本记高约 2.5 倍，介意的现场请在模型页改成折后价，促销结束后改回。"
+    },
+    {
+      "name": "doubao-seedream-5.0-lite",
+      "kind": "image",
+      "vendor": "火山方舟",
+      "pricing": {
+        "ark_image_each": 220000
+      },
+      "source": "https://www.volcengine.com/docs/82379/1544106",
+      "checked_at": "2026-08-10",
+      "note": "官方价签按张：输出图 0.22 元/张，输入图免费，组图按实际生成张数计费，所以只配 ark_image_each、不配 ark_image_token（两项相加，再配就是重复计费）。审核未通过的图不计费。官方价格表写作 doubao-seedream-5-0-lite，而真实 Model ID 是带点的这个。"
+    }
+  ]
+}

@@ -1,0 +1,1688 @@
+{
+  "schema": "llmgate.platform-models/v2",
+  "version": 19,
+  "updated_at": "2026-09-07",
+  "notes": [
+    "「哪儿有哪些模型」的清单，与同目录 official-pricing.json（「一个模型多少钱」）是一对；设备通过「数据升级」匿名下载两份文件。",
+    "维护源是公开仓库 github.com/llm-net/llm-gate 的 catalog/ 目录（README.md 与 update-platform-models.md 是维护说明）；",
+    "  官网 /updates/data/platform-models.json 与固件内嵌副本都是它的逐字节拷贝。官网不可达时设备用内嵌基线；同步下来的版本号更大时以同步的那份为准。",
+    "文件按设备管理台「模型接入」的三个页面分三类，每类都要维护：",
+    "  API 按量计费   platforms 段里 billing_mode = usage 的平台：持按量付费 Key、按 token / 按次 / 按秒计费。",
+    "  API 订阅套餐   platforms 段里 billing_mode = subscription 的平台：已付费套餐专用的 Key 与端点（ark_plan、qwen_plan、opencode_go 及各家 Coding Plan），调度时先用满。",
+    "  工具订阅       agents 段：开发工具订阅（codex | grok | claude）自带的文本模型，设备照着建行。",
+    "  billing_mode = none 只给两条通用兼容适配（openai_compat / anthropic_compat），地址由管理员自填。platforms 段的先后即管理台各组内的展示顺序：按量 → 套餐 → 通用适配。",
+    "平台身份 id 与固件适配器 type 分开：内置平台两者相同；数据新增的平台使用独立 id、type 只能复用 openai_compat 或 anthropic_compat，并给出固定 HTTPS base_url。",
+    "  数据文件只能组合固件内置的适配器与 profile，不能下发脚本；旧固件不认识的 profile 整份拒绝并继续用上一份可用数据。",
+    "固定 base_url 在管理员录入该平台 Key 时快照进设备，后续数据升级不会把已有 Key 静默改发到另一个地址；custom_base_url 只供通用兼容入口。",
+    "同一家厂商的按量与套餐、不同地域、不同协议的入口各占一条平台：Key 与端点互不通用时决不能合并（会把 Key 发到错误站点）。",
+    "  一个套餐同时提供 OpenAI 与 Anthropic 兼容入口时按适配器各建一条（如 kimi_code_plan 与 kimi_code_plan_anthropic）。",
+    "name 是客户端请求里的 model 值，也就是模型在设备目录里的名字；上游那边的真实 ID 与它不同时才写 upstream_model_id（留空 = 与 name 相同）。",
+    "  kind 是 text | video | image；video/image 必须给 family（ark_video | ark_image | minimax_video，即厂商协议面的协议标识），text 不给——设备按 family 决定客户端走哪个厂商协议面。",
+    "upstream_protocols 声明模型实际接受的上游协议；省略时沿用适配器能力，空数组表示没有可用协议。声明只能收窄适配器，不能添加转换算法。",
+    "  目录 OpenAI Responses 通过 Chat 上游转换，因此来源必须支持 openai_chat；原生 openai_responses 不等于接受 Chat 请求。",
+    "platforms 段只是**选单**：管理台的「添加模型」永远同时提供「自定义」，厂商上新而这里还没收录时照样录得进去。",
+    "agents 段不是选单而是**权威清单**：设备上连接了哪份工具订阅，就把对应 provider 的模型自动读出来、在「模型接入 → 工具订阅」显示并建成目录行；",
+    "  管理台对这些行不提供任何编辑入口（不改名、不录价、不启停、不删除），要增减型号改这份文件。provider 只认 codex | grok | claude，不认识的 provider 旧固件一律忽略。",
+    "  agents 段只收文本模型（kind 恒为 text、不带 family）：设备不转发订阅侧的图片/视频，也不建这类行。文本模型的名义金额取 official-pricing.json 里带 agent 标记的同名条目",
+    "  （订阅是包月的，账面金额不是现金支出）。Cursor 是不解析模型名和 token 用量的透明代理，agents 段不收 Cursor 型号；成员侧模型由 cursor-agent 经订阅面自行发现。",
+    "收录纪律同价目文件：每条记当次核对的官方页面与核对日期（agents 段可逐模型写 source 覆盖 provider 那条），没有出处的型号不要往里加；改动后 version 加一。"
+  ],
+  "platforms": [
+    {
+      "id": "deepseek",
+      "type": "deepseek",
+      "vendor": "DeepSeek",
+      "billing_mode": "usage",
+      "suggested_name": "deepseek",
+      "entries": "OpenAI 兼容 与 Anthropic 兼容 双入口",
+      "ability": "支持查询平台余额。",
+      "source": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing",
+      "checked_at": "2026-09-07",
+      "models": [
+        {
+          "name": "deepseek-v4-pro",
+          "kind": "text",
+          "note": "主力对话模型",
+          "capabilities": {
+            "responses_chat": {
+              "profile": "reasoning_replay_v1",
+              "replay_reasoning_content": true,
+              "thinking_type": "enabled",
+              "drop_tool_choice": true,
+              "effort_map": {
+                "minimal": "high",
+                "low": "high",
+                "medium": "high",
+                "high": "high",
+                "xhigh": "max",
+                "max": "max",
+                "ultra": "max"
+              }
+            },
+            "codex": {
+              "default_reasoning_level": "high",
+              "supported_reasoning_levels": [
+                {
+                  "effort": "high",
+                  "description": "Deep reasoning"
+                },
+                {
+                  "effort": "xhigh",
+                  "description": "Maximum reasoning"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "deepseek-v4-flash",
+          "kind": "text",
+          "note": "轻量档，单价低",
+          "capabilities": {
+            "responses_chat": {
+              "profile": "reasoning_replay_v1",
+              "replay_reasoning_content": true,
+              "thinking_type": "enabled",
+              "drop_tool_choice": true,
+              "effort_map": {
+                "minimal": "high",
+                "low": "high",
+                "medium": "high",
+                "high": "high",
+                "xhigh": "max",
+                "max": "max",
+                "ultra": "max"
+              }
+            },
+            "codex": {
+              "default_reasoning_level": "high",
+              "supported_reasoning_levels": [
+                {
+                  "effort": "high",
+                  "description": "Deep reasoning"
+                },
+                {
+                  "effort": "xhigh",
+                  "description": "Maximum reasoning"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "deepseek-v4-flash-vision-exp",
+          "kind": "text",
+          "note": "实验性视觉输入档，按 flash 单价；设备只把它当文本输出的对话模型使用",
+          "capabilities": {
+            "responses_chat": {
+              "profile": "reasoning_replay_v1",
+              "replay_reasoning_content": true,
+              "thinking_type": "enabled",
+              "drop_tool_choice": true,
+              "effort_map": {
+                "minimal": "high",
+                "low": "high",
+                "medium": "high",
+                "high": "high",
+                "xhigh": "max",
+                "max": "max",
+                "ultra": "max"
+              }
+            },
+            "codex": {
+              "default_reasoning_level": "high",
+              "supported_reasoning_levels": [
+                {
+                  "effort": "high",
+                  "description": "Deep reasoning"
+                },
+                {
+                  "effort": "xhigh",
+                  "description": "Maximum reasoning"
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "note": "官方按高峰 / 空闲时段分档计价（含周末全天空闲价），价目见 official-pricing.json 的 schedule 段。"
+    },
+    {
+      "id": "ark",
+      "type": "ark",
+      "vendor": "火山方舟",
+      "billing_mode": "usage",
+      "suggested_name": "ark",
+      "entries": "OpenAI 兼容单入口；另可挂给视频与图片模型",
+      "ability": "平台余额需要火山引擎 AK/SK 签名，设备不查询。",
+      "source": "https://www.volcengine.com/docs/82379/1544106",
+      "checked_at": "2026-08-12",
+      "note": "方舟同时托管豆包自有模型与 DeepSeek 等第三方模型；下列文本条目按厂商同名 Model ID 收录，实际可开通的型号以方舟控制台为准。",
+      "models": [
+        {
+          "name": "deepseek-v4-pro",
+          "kind": "text",
+          "note": "方舟托管的 DeepSeek 模型",
+          "capabilities": {
+            "responses_chat": {
+              "profile": "reasoning_replay_v1",
+              "replay_reasoning_content": true,
+              "thinking_type": "enabled",
+              "drop_tool_choice": true,
+              "effort_map": {
+                "minimal": "high",
+                "low": "high",
+                "medium": "high",
+                "high": "high",
+                "xhigh": "max",
+                "max": "max",
+                "ultra": "max"
+              }
+            },
+            "codex": {
+              "default_reasoning_level": "high",
+              "supported_reasoning_levels": [
+                {
+                  "effort": "high",
+                  "description": "Deep reasoning"
+                },
+                {
+                  "effort": "xhigh",
+                  "description": "Maximum reasoning"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "deepseek-v4-flash",
+          "kind": "text",
+          "note": "方舟托管的 DeepSeek 模型",
+          "capabilities": {
+            "responses_chat": {
+              "profile": "reasoning_replay_v1",
+              "replay_reasoning_content": true,
+              "thinking_type": "enabled",
+              "drop_tool_choice": true,
+              "effort_map": {
+                "minimal": "high",
+                "low": "high",
+                "medium": "high",
+                "high": "high",
+                "xhigh": "max",
+                "max": "max",
+                "ultra": "max"
+              }
+            },
+            "codex": {
+              "default_reasoning_level": "high",
+              "supported_reasoning_levels": [
+                {
+                  "effort": "high",
+                  "description": "Deep reasoning"
+                },
+                {
+                  "effort": "xhigh",
+                  "description": "Maximum reasoning"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "doubao-seedance-2.5",
+          "kind": "video",
+          "family": "ark_video",
+          "note": "Seedance 视频，仅 480p/720p 一档"
+        },
+        {
+          "name": "doubao-seedance-2.0",
+          "kind": "video",
+          "family": "ark_video"
+        },
+        {
+          "name": "doubao-seedance-2.0-fast",
+          "kind": "video",
+          "family": "ark_video"
+        },
+        {
+          "name": "doubao-seedance-2.0-mini",
+          "kind": "video",
+          "family": "ark_video",
+          "note": "最低档，出片最快"
+        },
+        {
+          "name": "doubao-seedream-5.0-lite",
+          "kind": "image",
+          "family": "ark_image",
+          "note": "Seedream 出图，同步返回"
+        }
+      ]
+    },
+    {
+      "id": "minimax",
+      "type": "minimax",
+      "vendor": "MiniMax",
+      "billing_mode": "usage",
+      "suggested_name": "minimax",
+      "entries": "视频模型入口",
+      "ability": "国内站与国际站的账号和 Key 相互独立。",
+      "source": "https://platform.minimaxi.com/document/video_generation",
+      "checked_at": "2026-08-10",
+      "note": "MiniMax 上游只服务 MiniMax 视频协议面（无文本对话入口）。国内站与国际站的型号一致，账号与 Key 各自独立。",
+      "models": [
+        {
+          "name": "MiniMax-H3",
+          "kind": "video",
+          "family": "minimax_video",
+          "note": "按秒计价，768p / 2K 两档"
+        }
+      ]
+    },
+    {
+      "id": "kimi_cn",
+      "type": "openai_compat",
+      "vendor": "Kimi 开放平台",
+      "base_url": "https://api.moonshot.cn/v1",
+      "billing_mode": "usage",
+      "suggested_name": "kimi-cn",
+      "entries": "OpenAI 兼容文本入口",
+      "ability": "平台余额在 Kimi 开放平台控制台查看。",
+      "source": "https://platform.kimi.com/",
+      "checked_at": "2026-09-01",
+      "note": "月之暗面国内 API；目录只提供文本对话型号，不接入图片、视频或声音专用能力。",
+      "models": [
+        {
+          "name": "kimi-k3",
+          "kind": "text",
+          "note": "旗舰模型"
+        },
+        {
+          "name": "kimi-k2.7-code",
+          "kind": "text",
+          "note": "代码模型"
+        },
+        {
+          "name": "kimi-k2.7-code-highspeed",
+          "kind": "text",
+          "note": "代码高速档"
+        },
+        {
+          "name": "kimi-k2.6",
+          "kind": "text",
+          "note": "通用模型"
+        }
+      ]
+    },
+    {
+      "id": "zhipu_cn",
+      "type": "openai_compat",
+      "vendor": "智谱 AI 开放平台",
+      "base_url": "https://open.bigmodel.cn/api/paas/v4",
+      "billing_mode": "usage",
+      "suggested_name": "zhipu-cn",
+      "entries": "OpenAI 兼容文本入口",
+      "ability": "平台余额在智谱 AI 开放平台控制台查看。",
+      "source": "https://docs.bigmodel.cn/cn/guide/models/text/glm-5.3",
+      "checked_at": "2026-09-07",
+      "note": "智谱国内按量 API（Chat 端点 /api/paas/v4）；只收录官方文本输入、文本输出的当前旗舰型号。官方另有 Anthropic Messages 端点 https://open.bigmodel.cn/api/anthropic，可用通用 Anthropic 兼容适配录入。",
+      "models": [
+        {
+          "name": "glm-5.3",
+          "kind": "text",
+          "note": "旗舰文本模型"
+        },
+        {
+          "name": "glm-5.2",
+          "kind": "text",
+          "note": "上一代旗舰"
+        }
+      ]
+    },
+    {
+      "id": "bailian_cn",
+      "type": "openai_compat",
+      "vendor": "阿里云百炼（中国）",
+      "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "billing_mode": "usage",
+      "suggested_name": "bailian-cn",
+      "entries": "OpenAI 兼容文本入口",
+      "ability": "按量付费 API Key；余额与账单在阿里云控制台查看。",
+      "source": "https://help.aliyun.com/zh/model-studio/text-generation-model",
+      "checked_at": "2026-09-01",
+      "note": "百炼华北 2（北京）公共兼容端点；业务空间专属端点仍可通过通用兼容入口录入。",
+      "models": [
+        {
+          "name": "qwen3.8-max",
+          "kind": "text"
+        },
+        {
+          "name": "qwen3.7-plus",
+          "kind": "text"
+        },
+        {
+          "name": "qwen3.7-flash",
+          "kind": "text"
+        },
+        {
+          "name": "deepseek-v4-pro",
+          "kind": "text"
+        },
+        {
+          "name": "deepseek-v4-flash",
+          "kind": "text"
+        },
+        {
+          "name": "glm-5.2",
+          "kind": "text"
+        },
+        {
+          "name": "kimi-k2.7-code",
+          "kind": "text"
+        },
+        {
+          "name": "MiniMax-M3",
+          "kind": "text"
+        }
+      ]
+    },
+    {
+      "id": "bailian_sg",
+      "type": "openai_compat",
+      "vendor": "阿里云百炼（新加坡）",
+      "base_url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+      "billing_mode": "usage",
+      "suggested_name": "bailian-sg",
+      "entries": "OpenAI 兼容文本入口",
+      "ability": "国际站按量付费 API Key；与中国站地域和 Key 分开。",
+      "source": "https://help.aliyun.com/en/model-studio/qwen3-8-max",
+      "checked_at": "2026-09-01",
+      "note": "百炼新加坡公共兼容端点；目录收录国际部署范围可用的常用文本型号。",
+      "models": [
+        {
+          "name": "qwen3.8-max",
+          "kind": "text"
+        },
+        {
+          "name": "qwen3.7-max",
+          "kind": "text"
+        },
+        {
+          "name": "qwen3.7-plus",
+          "kind": "text"
+        },
+        {
+          "name": "qwen3.7-flash",
+          "kind": "text"
+        }
+      ]
+    },
+    {
+      "id": "minimax_text_cn",
+      "type": "openai_compat",
+      "vendor": "MiniMax 开放平台（中国）",
+      "base_url": "https://api.minimaxi.com/v1",
+      "billing_mode": "usage",
+      "suggested_name": "minimax-text-cn",
+      "entries": "OpenAI 兼容文本入口",
+      "ability": "国内站与国际站的账号和 Key 相互独立。",
+      "source": "https://platform.minimaxi.com/docs/api-reference/api-overview",
+      "checked_at": "2026-09-01",
+      "note": "MiniMax 国内站文本对话入口；与现有 MiniMax 视频平台档案分开。",
+      "models": [
+        {
+          "name": "MiniMax-M2.7",
+          "kind": "text"
+        },
+        {
+          "name": "MiniMax-M2.7-highspeed",
+          "kind": "text"
+        },
+        {
+          "name": "MiniMax-M2.5",
+          "kind": "text"
+        },
+        {
+          "name": "MiniMax-M2.5-highspeed",
+          "kind": "text"
+        }
+      ]
+    },
+    {
+      "id": "minimax_text_intl",
+      "type": "openai_compat",
+      "vendor": "MiniMax 开放平台（国际）",
+      "base_url": "https://api.minimax.io/v1",
+      "billing_mode": "usage",
+      "suggested_name": "minimax-text-intl",
+      "entries": "OpenAI 兼容文本入口",
+      "ability": "国际站与国内站的账号和 Key 相互独立。",
+      "source": "https://platform.minimax.io/docs/api-reference/text-chat-openai",
+      "checked_at": "2026-09-01",
+      "note": "MiniMax 国际站文本对话入口；不接入语音、视频、图片和音乐接口。",
+      "models": [
+        {
+          "name": "MiniMax-M2.7",
+          "kind": "text"
+        },
+        {
+          "name": "MiniMax-M2.7-highspeed",
+          "kind": "text"
+        },
+        {
+          "name": "MiniMax-M2.5",
+          "kind": "text"
+        },
+        {
+          "name": "MiniMax-M2.5-highspeed",
+          "kind": "text"
+        }
+      ]
+    },
+    {
+      "id": "siliconflow_cn",
+      "type": "openai_compat",
+      "vendor": "硅基流动",
+      "base_url": "https://api.siliconflow.cn/v1",
+      "billing_mode": "usage",
+      "suggested_name": "siliconflow-cn",
+      "entries": "OpenAI 兼容文本入口",
+      "ability": "聚合平台；可用型号与账户权限以模型列表接口为准。",
+      "source": "https://api-docs.siliconflow.cn/docs/api/models-get",
+      "checked_at": "2026-09-01",
+      "note": "只收录硅基流动对话模型的常用型号；嵌入、重排序及其他模态不进入本目录。",
+      "models": [
+        {
+          "name": "deepseek-ai/DeepSeek-V4-Pro",
+          "kind": "text"
+        },
+        {
+          "name": "deepseek-ai/DeepSeek-V4-Flash",
+          "kind": "text"
+        },
+        {
+          "name": "zai-org/GLM-5.2",
+          "kind": "text"
+        },
+        {
+          "name": "moonshotai/Kimi-K2.7-Code",
+          "kind": "text"
+        },
+        {
+          "name": "Qwen/Qwen3.6-27B",
+          "kind": "text"
+        }
+      ]
+    },
+    {
+      "id": "qianfan_cn",
+      "type": "openai_compat",
+      "vendor": "百度千帆",
+      "base_url": "https://qianfan.baidubce.com/v2",
+      "billing_mode": "usage",
+      "suggested_name": "qianfan-cn",
+      "entries": "OpenAI 兼容文本入口",
+      "ability": "平台余额与账单在百度智能云控制台查看。",
+      "source": "https://intl.cloud.baidu.com/en/doc/qianfan/s/7m95lyy43-intl-en",
+      "checked_at": "2026-09-01",
+      "note": "千帆 v2 文本生成和深度思考共用 OpenAI 兼容对话入口。",
+      "models": [
+        {
+          "name": "ernie-5.0",
+          "kind": "text"
+        },
+        {
+          "name": "deepseek-v4-pro",
+          "kind": "text"
+        },
+        {
+          "name": "deepseek-v4-flash",
+          "kind": "text"
+        },
+        {
+          "name": "glm-5.2",
+          "kind": "text"
+        },
+        {
+          "name": "kimi-k2.6",
+          "kind": "text"
+        }
+      ]
+    },
+    {
+      "id": "stepfun_cn",
+      "type": "openai_compat",
+      "vendor": "阶跃星辰",
+      "base_url": "https://api.stepfun.com/v1",
+      "billing_mode": "usage",
+      "suggested_name": "stepfun-cn",
+      "entries": "OpenAI 兼容文本入口",
+      "ability": "按量付费 API Key；余额与账单在阶跃星辰开放平台查看。",
+      "source": "https://platform.stepfun.com/docs/zh/guides/models/overview",
+      "checked_at": "2026-09-01",
+      "note": "阶跃星辰按量付费文本入口；Step Plan 使用另一套 Key 和端点，可通过通用兼容入口录入。",
+      "models": [
+        {
+          "name": "step-3.5-flash",
+          "kind": "text",
+          "note": "推荐旗舰推理模型"
+        },
+        {
+          "name": "step-3.5-flash-2603",
+          "kind": "text"
+        },
+        {
+          "name": "step-2-mini",
+          "kind": "text"
+        }
+      ]
+    },
+    {
+      "id": "tencent_tokenhub",
+      "type": "openai_compat",
+      "vendor": "腾讯云 TokenHub",
+      "base_url": "https://tokenhub.tencentmaas.com/v1",
+      "billing_mode": "usage",
+      "suggested_name": "tencent-tokenhub",
+      "entries": "OpenAI 兼容文本入口",
+      "ability": "聚合平台；可用型号与账户权限以 TokenHub 模型列表为准。",
+      "source": "https://cloud.tencent.com/document/product/1823/130079",
+      "checked_at": "2026-09-01",
+      "note": "TokenHub 广州站按量入口；不混用 Token Plan 的订阅 Key 和 /plan/v3 端点。",
+      "models": [
+        {
+          "name": "hy4-preview",
+          "kind": "text"
+        },
+        {
+          "name": "hy3",
+          "kind": "text"
+        },
+        {
+          "name": "deepseek-v4-pro",
+          "kind": "text"
+        },
+        {
+          "name": "deepseek-v4-flash",
+          "kind": "text"
+        },
+        {
+          "name": "glm-5.2",
+          "kind": "text"
+        },
+        {
+          "name": "minimax-m2.7",
+          "kind": "text"
+        }
+      ]
+    },
+    {
+      "id": "tencent_lkeap",
+      "type": "openai_compat",
+      "vendor": "腾讯云知识引擎第三方模型",
+      "base_url": "https://api.lkeap.cloud.tencent.com/v3",
+      "billing_mode": "usage",
+      "suggested_name": "tencent-lkeap",
+      "entries": "OpenAI 兼容文本入口",
+      "ability": "只适用于知识引擎第三方模型 API Key；与 TokenHub Key 不通用。",
+      "source": "https://cloud.tencent.com/document/product/1772/130551",
+      "checked_at": "2026-09-01",
+      "note": "LKEAP v3 兼容入口保留为独立档案，避免现有 Key 被误发到 TokenHub。",
+      "models": [
+        {
+          "name": "glm-5",
+          "kind": "text"
+        },
+        {
+          "name": "minimax-m2.5",
+          "kind": "text"
+        },
+        {
+          "name": "kimi-k2.5",
+          "kind": "text"
+        }
+      ]
+    },
+    {
+      "id": "chenyu",
+      "type": "openai_compat",
+      "vendor": "晨羽AI",
+      "base_url": "https://api.chenyu.pro/v1",
+      "billing_mode": "usage",
+      "suggested_name": "chenyu",
+      "entries": "OpenAI 兼容文本入口",
+      "ability": "聚合平台；余额、费用与实际可用型号在晨羽控制台查看。",
+      "source": "https://chenyu.pro/api-docs/docs/models/",
+      "checked_at": "2026-09-01",
+      "note": "多家上游聚合、按官方价格结算；文本模型可用 GET /v1/models 实时发现。目录只收文本对话型号，图片、视频与语音不进入本目录。",
+      "models": [
+        {
+          "name": "deepseek-v4-flash",
+          "kind": "text",
+          "note": "DeepSeek"
+        },
+        {
+          "name": "deepseek-v4-flash-vision-exp",
+          "kind": "text",
+          "note": "DeepSeek"
+        },
+        {
+          "name": "deepseek-v4-pro",
+          "kind": "text",
+          "note": "DeepSeek"
+        },
+        {
+          "name": "doubao-seed-2-0-code-preview-260215",
+          "kind": "text",
+          "note": "火山方舟"
+        },
+        {
+          "name": "doubao-seed-2-0-lite-260215",
+          "kind": "text",
+          "note": "火山方舟"
+        },
+        {
+          "name": "doubao-seed-2-0-mini-260215",
+          "kind": "text",
+          "note": "火山方舟"
+        },
+        {
+          "name": "doubao-seed-2-0-mini-260428",
+          "kind": "text",
+          "note": "火山方舟"
+        },
+        {
+          "name": "doubao-seed-2-0-pro-260215",
+          "kind": "text",
+          "note": "火山方舟"
+        },
+        {
+          "name": "doubao-seed-2-1-pro-260628",
+          "kind": "text",
+          "note": "火山方舟"
+        },
+        {
+          "name": "doubao-seed-2-1-turbo-260628",
+          "kind": "text",
+          "note": "火山方舟"
+        },
+        {
+          "name": "glm-5-2-260617",
+          "kind": "text",
+          "note": "火山方舟"
+        },
+        {
+          "name": "glm-5.3",
+          "kind": "text",
+          "note": "智谱 AI"
+        },
+        {
+          "name": "glm-5.3-flash",
+          "kind": "text",
+          "note": "智谱 AI"
+        },
+        {
+          "name": "kimi-k2.6",
+          "kind": "text",
+          "note": "Kimi"
+        },
+        {
+          "name": "kimi-k2.7-code",
+          "kind": "text",
+          "note": "Kimi"
+        },
+        {
+          "name": "kimi-k2.7-code-highspeed",
+          "kind": "text",
+          "note": "Kimi"
+        },
+        {
+          "name": "kimi-k3",
+          "kind": "text",
+          "note": "Kimi"
+        },
+        {
+          "name": "qwen3-coder-plus",
+          "kind": "text",
+          "note": "阿里云百炼"
+        },
+        {
+          "name": "qwen3-vl-flash",
+          "kind": "text",
+          "note": "阿里云百炼"
+        },
+        {
+          "name": "qwen3-vl-plus",
+          "kind": "text",
+          "note": "阿里云百炼"
+        },
+        {
+          "name": "qwen3.7-flash",
+          "kind": "text",
+          "note": "阿里云百炼"
+        },
+        {
+          "name": "qwen3.7-plus",
+          "kind": "text",
+          "note": "阿里云百炼"
+        },
+        {
+          "name": "qwen3.8-2.4t-a95b",
+          "kind": "text",
+          "note": "阿里云百炼"
+        },
+        {
+          "name": "qwen3.8-27b",
+          "kind": "text",
+          "note": "阿里云百炼"
+        },
+        {
+          "name": "qwen3.8-flash",
+          "kind": "text",
+          "note": "阿里云百炼"
+        },
+        {
+          "name": "qwen3.8-max",
+          "kind": "text",
+          "note": "阿里云百炼"
+        }
+      ]
+    },
+    {
+      "id": "openai",
+      "type": "openai_compat",
+      "vendor": "OpenAI",
+      "base_url": "https://api.openai.com/v1",
+      "billing_mode": "usage",
+      "suggested_name": "openai",
+      "entries": "OpenAI 兼容文本入口",
+      "ability": "API 用量和账单在 OpenAI Platform 查看。",
+      "source": "https://developers.openai.com/api/docs/models/gpt",
+      "checked_at": "2026-09-01",
+      "note": "通过 Chat Completions 调用 GPT 文本模型；设备的 /v1/responses 仍使用固件内置的无状态转换子集。",
+      "models": [
+        {
+          "name": "gpt-5.6-sol",
+          "kind": "text",
+          "note": "旗舰档"
+        },
+        {
+          "name": "gpt-5.6-terra",
+          "kind": "text",
+          "note": "平衡档"
+        },
+        {
+          "name": "gpt-5.6-luna",
+          "kind": "text",
+          "note": "轻量档"
+        }
+      ]
+    },
+    {
+      "id": "anthropic",
+      "type": "anthropic_compat",
+      "vendor": "Anthropic",
+      "base_url": "https://api.anthropic.com/v1",
+      "billing_mode": "usage",
+      "suggested_name": "anthropic",
+      "entries": "Anthropic Messages 文本入口",
+      "ability": "使用 x-api-key 鉴权；API 用量和账单在 Claude Console 查看。",
+      "source": "https://platform.claude.com/docs/en/models/overview",
+      "checked_at": "2026-09-01",
+      "note": "Anthropic 官方 Messages API；只提供文本输出模型，不接入其他模态专用接口。",
+      "models": [
+        {
+          "name": "claude-fable-5",
+          "kind": "text"
+        },
+        {
+          "name": "claude-opus-5",
+          "kind": "text"
+        },
+        {
+          "name": "claude-sonnet-5",
+          "kind": "text"
+        },
+        {
+          "name": "claude-haiku-4-5",
+          "kind": "text",
+          "note": "官方别名"
+        }
+      ]
+    },
+    {
+      "id": "gemini",
+      "type": "openai_compat",
+      "vendor": "Google Gemini API",
+      "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+      "billing_mode": "usage",
+      "suggested_name": "gemini",
+      "entries": "OpenAI 兼容文本入口",
+      "ability": "使用 Gemini API Key；配额和账单在 Google AI Studio / Cloud Console 查看。",
+      "source": "https://ai.google.dev/gemini-api/docs/models",
+      "checked_at": "2026-09-01",
+      "note": "使用 Google 官方 OpenAI 兼容层；目录排除图片生成、实时语音、转写和视频型号。",
+      "models": [
+        {
+          "name": "gemini-3.7-flash",
+          "kind": "text"
+        },
+        {
+          "name": "gemini-3.6-flash",
+          "kind": "text"
+        },
+        {
+          "name": "gemini-3.5-flash",
+          "kind": "text"
+        },
+        {
+          "name": "gemini-3.5-flash-lite",
+          "kind": "text"
+        }
+      ]
+    },
+    {
+      "id": "xai",
+      "type": "openai_compat",
+      "vendor": "xAI",
+      "base_url": "https://api.x.ai/v1",
+      "billing_mode": "usage",
+      "suggested_name": "xai",
+      "entries": "OpenAI 兼容文本入口",
+      "ability": "API 用量和账单在 xAI Console 查看。",
+      "source": "https://docs.x.ai/developers/models",
+      "checked_at": "2026-09-01",
+      "note": "只接入 Grok 文本对话型号；Imagine 和 Voice API 不进入本目录。",
+      "models": [
+        {
+          "name": "grok-4.6",
+          "kind": "text",
+          "note": "当前旗舰"
+        },
+        {
+          "name": "grok-4.5",
+          "kind": "text"
+        }
+      ]
+    },
+    {
+      "id": "openrouter",
+      "type": "openai_compat",
+      "vendor": "OpenRouter",
+      "base_url": "https://openrouter.ai/api/v1",
+      "billing_mode": "usage",
+      "suggested_name": "openrouter",
+      "entries": "OpenAI 兼容文本入口",
+      "ability": "聚合平台；余额、路由和实际可用型号在 OpenRouter 控制台查看。",
+      "source": "https://openrouter.ai/docs/quickstart",
+      "checked_at": "2026-09-01",
+      "note": "目录提供官方路由别名；具体供应商型号可通过「自定义」按 OpenRouter Models API 的 ID 录入。",
+      "models": [
+        {
+          "name": "~openai/gpt-latest",
+          "kind": "text",
+          "note": "OpenAI 最新旗舰路由别名"
+        },
+        {
+          "name": "~anthropic/claude-sonnet-latest",
+          "kind": "text",
+          "note": "Claude Sonnet 最新路由别名"
+        },
+        {
+          "name": "openrouter/auto",
+          "kind": "text",
+          "note": "OpenRouter 自动选路"
+        }
+      ]
+    },
+    {
+      "id": "groq",
+      "type": "openai_compat",
+      "vendor": "GroqCloud",
+      "base_url": "https://api.groq.com/openai/v1",
+      "billing_mode": "usage",
+      "suggested_name": "groq",
+      "entries": "OpenAI 兼容文本入口",
+      "ability": "可用型号和速率限制以 GroqCloud Models API 为准。",
+      "source": "https://console.groq.com/docs/models",
+      "checked_at": "2026-09-01",
+      "note": "只收录 GroqCloud Production Models 中的文本生成型号。",
+      "models": [
+        {
+          "name": "openai/gpt-oss-120b",
+          "kind": "text"
+        },
+        {
+          "name": "openai/gpt-oss-20b",
+          "kind": "text"
+        }
+      ]
+    },
+    {
+      "id": "mistral",
+      "type": "openai_compat",
+      "vendor": "Mistral AI",
+      "base_url": "https://api.mistral.ai/v1",
+      "billing_mode": "usage",
+      "suggested_name": "mistral",
+      "entries": "OpenAI 兼容文本入口",
+      "ability": "API 用量和账单在 Mistral Studio 查看。",
+      "source": "https://docs.mistral.ai/api/endpoint/chat",
+      "checked_at": "2026-09-01",
+      "note": "使用无状态 Chat Completions 文本入口，不接入图片工具和其他专用接口。",
+      "models": [
+        {
+          "name": "mistral-large-latest",
+          "kind": "text"
+        },
+        {
+          "name": "mistral-small-latest",
+          "kind": "text"
+        }
+      ]
+    },
+    {
+      "id": "together",
+      "type": "openai_compat",
+      "vendor": "Together AI",
+      "base_url": "https://api.together.ai/v1",
+      "billing_mode": "usage",
+      "suggested_name": "together",
+      "entries": "OpenAI 兼容文本入口",
+      "ability": "聚合平台；可用型号与账户权限以 Together Models API 为准。",
+      "source": "https://docs.together.ai/docs/serverless/models",
+      "checked_at": "2026-09-01",
+      "note": "只收录 Serverless Chat Models；图像、视觉、视频、音频、嵌入和重排序型号不进入本目录。",
+      "models": [
+        {
+          "name": "MiniMaxAI/MiniMax-M2.7",
+          "kind": "text"
+        },
+        {
+          "name": "moonshotai/Kimi-K2.6",
+          "kind": "text"
+        },
+        {
+          "name": "zai-org/GLM-5.1",
+          "kind": "text"
+        },
+        {
+          "name": "openai/gpt-oss-120b",
+          "kind": "text"
+        },
+        {
+          "name": "deepseek-ai/DeepSeek-V4-Pro",
+          "kind": "text"
+        }
+      ]
+    },
+    {
+      "id": "ark_plan",
+      "type": "ark_plan",
+      "vendor": "火山方舟",
+      "billing_mode": "subscription",
+      "suggested_name": "ark-plan",
+      "entries": "OpenAI 兼容 与 Anthropic 兼容双入口；视频与图片走订阅端点",
+      "ability": "套餐余量在火山方舟控制台查看。",
+      "source": "https://www.volcengine.com/docs/82379/1544106",
+      "checked_at": "2026-08-24",
+      "note": "Coding Plan 订阅：可用型号按方舟套餐清单维护，端点根为 /api/plan/v3；套餐额度与实际可用型号以方舟控制台为准。",
+      "models": [
+        {
+          "name": "deepseek-v4-pro",
+          "kind": "text",
+          "note": "方舟托管的 DeepSeek 模型",
+          "capabilities": {
+            "responses_chat": {
+              "profile": "reasoning_replay_v1",
+              "replay_reasoning_content": true,
+              "thinking_type": "enabled",
+              "drop_tool_choice": true,
+              "effort_map": {
+                "minimal": "high",
+                "low": "high",
+                "medium": "high",
+                "high": "high",
+                "xhigh": "max",
+                "max": "max",
+                "ultra": "max"
+              }
+            },
+            "codex": {
+              "default_reasoning_level": "high",
+              "supported_reasoning_levels": [
+                {
+                  "effort": "high",
+                  "description": "Deep reasoning"
+                },
+                {
+                  "effort": "xhigh",
+                  "description": "Maximum reasoning"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "deepseek-v4-flash",
+          "kind": "text",
+          "note": "方舟托管的 DeepSeek 模型",
+          "capabilities": {
+            "responses_chat": {
+              "profile": "reasoning_replay_v1",
+              "replay_reasoning_content": true,
+              "thinking_type": "enabled",
+              "drop_tool_choice": true,
+              "effort_map": {
+                "minimal": "high",
+                "low": "high",
+                "medium": "high",
+                "high": "high",
+                "xhigh": "max",
+                "max": "max",
+                "ultra": "max"
+              }
+            },
+            "codex": {
+              "default_reasoning_level": "high",
+              "supported_reasoning_levels": [
+                {
+                  "effort": "high",
+                  "description": "Deep reasoning"
+                },
+                {
+                  "effort": "xhigh",
+                  "description": "Maximum reasoning"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "glm-5.3",
+          "kind": "text",
+          "note": "方舟订阅提供的智谱 GLM 模型",
+          "capabilities": {
+            "responses_chat": {
+              "profile": "reasoning_replay_v1",
+              "thinking_type": "enabled",
+              "effort_map": {
+                "minimal": "low",
+                "low": "low",
+                "medium": "medium",
+                "high": "high",
+                "xhigh": "xhigh",
+                "max": "max",
+                "ultra": "max"
+              }
+            },
+            "codex": {
+              "default_reasoning_level": "high",
+              "supported_reasoning_levels": [
+                {
+                  "effort": "low",
+                  "description": "Fast reasoning"
+                },
+                {
+                  "effort": "medium",
+                  "description": "Balanced reasoning"
+                },
+                {
+                  "effort": "high",
+                  "description": "Deep reasoning"
+                },
+                {
+                  "effort": "xhigh",
+                  "description": "Very deep reasoning"
+                },
+                {
+                  "effort": "max",
+                  "description": "Maximum reasoning"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "kimi-k3",
+          "kind": "text",
+          "note": "方舟订阅提供的月之暗面 Kimi 模型",
+          "capabilities": {
+            "responses_chat": {
+              "profile": "reasoning_replay_v1",
+              "thinking_type": "enabled",
+              "effort_map": {
+                "minimal": "minimal",
+                "low": "low",
+                "medium": "medium",
+                "high": "high",
+                "xhigh": "xhigh",
+                "max": "max",
+                "ultra": "max"
+              }
+            },
+            "codex": {
+              "default_reasoning_level": "high",
+              "supported_reasoning_levels": [
+                {
+                  "effort": "minimal",
+                  "description": "Minimal reasoning"
+                },
+                {
+                  "effort": "low",
+                  "description": "Fast reasoning"
+                },
+                {
+                  "effort": "medium",
+                  "description": "Balanced reasoning"
+                },
+                {
+                  "effort": "high",
+                  "description": "Deep reasoning"
+                },
+                {
+                  "effort": "xhigh",
+                  "description": "Very deep reasoning"
+                },
+                {
+                  "effort": "max",
+                  "description": "Maximum reasoning"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "doubao-seedance-2.5",
+          "kind": "video",
+          "family": "ark_video"
+        },
+        {
+          "name": "doubao-seedance-2.0",
+          "kind": "video",
+          "family": "ark_video"
+        },
+        {
+          "name": "doubao-seedance-2.0-fast",
+          "kind": "video",
+          "family": "ark_video"
+        },
+        {
+          "name": "doubao-seedance-2.0-mini",
+          "kind": "video",
+          "family": "ark_video"
+        },
+        {
+          "name": "doubao-seedream-5.0-lite",
+          "kind": "image",
+          "family": "ark_image"
+        }
+      ]
+    },
+    {
+      "id": "qwen_plan",
+      "type": "qwen_plan",
+      "vendor": "阿里云百炼",
+      "billing_mode": "subscription",
+      "suggested_name": "qwen-plan",
+      "entries": "OpenAI 兼容 与 Anthropic 兼容双入口",
+      "ability": "Token Plan 套餐余量在阿里云百炼控制台查看。",
+      "source": "https://help.aliyun.com/zh/model-studio/token-plan-personal-overview",
+      "checked_at": "2026-09-01",
+      "note": "通义千问 Token Plan 文本入口；这里只收录套餐清单里的文本生成与推理型号，其他模态不进入设备目录。",
+      "models": [
+        {
+          "name": "qwen3.8-max",
+          "kind": "text",
+          "note": "千问旗舰推理模型"
+        },
+        {
+          "name": "qwen3.8-flash",
+          "kind": "text",
+          "note": "千问高速推理模型"
+        },
+        {
+          "name": "qwen3.7-max",
+          "kind": "text"
+        },
+        {
+          "name": "qwen3.7-plus",
+          "kind": "text"
+        },
+        {
+          "name": "qwen3.6-flash",
+          "kind": "text"
+        },
+        {
+          "name": "deepseek-v4-pro",
+          "kind": "text"
+        },
+        {
+          "name": "deepseek-v4-pro-0813",
+          "kind": "text"
+        },
+        {
+          "name": "deepseek-v4-flash-0731",
+          "kind": "text"
+        },
+        {
+          "name": "glm-5.2",
+          "kind": "text"
+        }
+      ]
+    },
+    {
+      "id": "opencode_go",
+      "type": "opencode_go",
+      "vendor": "OpenCode",
+      "billing_mode": "subscription",
+      "suggested_name": "opencode-go",
+      "entries": "各模型按上游协议提供 OpenAI Chat 或 Anthropic Messages",
+      "ability": "Go 套餐的 5 小时 / 周 / 月额度在 OpenCode Zen 控制台查看。",
+      "source": "https://opencode.ai/docs/go/",
+      "checked_at": "2026-09-07",
+      "note": "OpenCode Go 包月套餐：同一把 sk- Key，端点根 https://opencode.ai/zen/go/v1；各模型只接受 upstream_protocols 声明的上游协议，Chat 使用 Bearer，Messages 使用 x-api-key；仅原生 Responses 的型号当前不提供目录 API 调用；这里只收录套餐清单里的文本模型，型号名以 GET /zen/go/v1/models 返回的裸名字为准（不带 opencode-go/ 前缀）。Zen 按量余额是另一套权益，不在本档案。",
+      "models": [
+        {
+          "name": "kimi-k3",
+          "kind": "text",
+          "upstream_protocols": [
+            "openai_chat"
+          ],
+          "note": "Kimi 旗舰"
+        },
+        {
+          "name": "kimi-k2.7-code",
+          "kind": "text",
+          "upstream_protocols": [
+            "openai_chat"
+          ],
+          "note": "Kimi 代码模型"
+        },
+        {
+          "name": "kimi-k2.6",
+          "kind": "text",
+          "upstream_protocols": [
+            "openai_chat"
+          ]
+        },
+        {
+          "name": "glm-5.3",
+          "kind": "text",
+          "upstream_protocols": [
+            "openai_chat"
+          ],
+          "note": "GLM 旗舰"
+        },
+        {
+          "name": "glm-5.3-flash",
+          "kind": "text",
+          "upstream_protocols": [
+            "openai_chat"
+          ],
+          "note": "GLM 高速档"
+        },
+        {
+          "name": "glm-5.2",
+          "kind": "text",
+          "upstream_protocols": [
+            "openai_chat"
+          ]
+        },
+        {
+          "name": "glm-5.1",
+          "kind": "text",
+          "upstream_protocols": [
+            "openai_chat"
+          ]
+        },
+        {
+          "name": "deepseek-v4-pro",
+          "kind": "text",
+          "upstream_protocols": [
+            "openai_chat"
+          ]
+        },
+        {
+          "name": "deepseek-v4-flash",
+          "kind": "text",
+          "upstream_protocols": [
+            "openai_chat"
+          ]
+        },
+        {
+          "name": "qwen3.8-max",
+          "kind": "text",
+          "upstream_protocols": [
+            "anthropic_messages"
+          ],
+          "note": "千问旗舰推理模型"
+        },
+        {
+          "name": "qwen3.8-flash",
+          "kind": "text",
+          "upstream_protocols": [
+            "anthropic_messages"
+          ],
+          "note": "千问高速推理模型"
+        },
+        {
+          "name": "qwen3.7-max",
+          "kind": "text",
+          "upstream_protocols": [
+            "anthropic_messages"
+          ]
+        },
+        {
+          "name": "qwen3.7-plus",
+          "kind": "text",
+          "upstream_protocols": [
+            "anthropic_messages"
+          ]
+        },
+        {
+          "name": "qwen3.6-plus",
+          "kind": "text",
+          "upstream_protocols": [
+            "anthropic_messages"
+          ]
+        },
+        {
+          "name": "minimax-m3",
+          "kind": "text",
+          "upstream_protocols": [
+            "anthropic_messages"
+          ],
+          "note": "MiniMax 旗舰"
+        },
+        {
+          "name": "minimax-m2.7",
+          "kind": "text",
+          "upstream_protocols": [
+            "anthropic_messages"
+          ]
+        },
+        {
+          "name": "minimax-m2.5",
+          "kind": "text",
+          "upstream_protocols": [
+            "anthropic_messages"
+          ]
+        },
+        {
+          "name": "mimo-v2.5-pro",
+          "kind": "text",
+          "upstream_protocols": [
+            "openai_chat"
+          ]
+        },
+        {
+          "name": "mimo-v2.5",
+          "kind": "text",
+          "upstream_protocols": [
+            "openai_chat"
+          ]
+        },
+        {
+          "name": "longcat-2.0",
+          "kind": "text",
+          "upstream_protocols": [
+            "openai_chat"
+          ]
+        },
+        {
+          "name": "hy4-preview",
+          "kind": "text",
+          "upstream_protocols": [
+            "openai_chat"
+          ],
+          "note": "混元 Hy4 预览"
+        },
+        {
+          "name": "hy3",
+          "kind": "text",
+          "upstream_protocols": [
+            "openai_chat"
+          ]
+        },
+        {
+          "name": "gpt-5.6-luna",
+          "kind": "text",
+          "upstream_protocols": [
+            "openai_responses"
+          ],
+          "note": "套餐内唯一的 GPT 型号，轻量档"
+        },
+        {
+          "name": "grok-4.6",
+          "kind": "text",
+          "upstream_protocols": [
+            "openai_responses"
+          ],
+          "note": "xAI 当前旗舰"
+        },
+        {
+          "name": "grok-4.5",
+          "kind": "text",
+          "upstream_protocols": [
+            "openai_responses"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "zhipu_coding_plan",
+      "type": "openai_compat",
+      "vendor": "智谱 GLM Coding Plan",
+      "base_url": "https://open.bigmodel.cn/api/coding/paas/v4",
+      "billing_mode": "subscription",
+      "suggested_name": "zhipu-coding-plan",
+      "entries": "OpenAI 兼容文本入口",
+      "ability": "套餐额度（5 小时周期 / 每周）在智谱 BigModel 控制台查看；额度用尽后等待周期恢复，不扣账户余额。",
+      "source": "https://docs.bigmodel.cn/cn/coding-plan/overview",
+      "checked_at": "2026-09-07",
+      "note": "GLM Coding Plan 订阅专用端点，与按量端点 /api/paas/v4 不通用，Key 也不通用。套餐当前提供 GLM-5.3 与 GLM-5.3-Flash，旧型号 GLM-5.2 / 5.1 自动路由到 GLM-5.3、GLM-5-Turbo / 4.7 路由到 GLM-5.3-Flash；官方限定在其支持的编程工具环境内使用。",
+      "models": [
+        {
+          "name": "glm-5.3",
+          "kind": "text",
+          "note": "套餐旗舰"
+        },
+        {
+          "name": "glm-5.3-flash",
+          "kind": "text",
+          "note": "套餐高速档"
+        }
+      ]
+    },
+    {
+      "id": "kimi_code_plan",
+      "type": "openai_compat",
+      "vendor": "Kimi Code 会员",
+      "base_url": "https://api.kimi.com/coding/v1",
+      "billing_mode": "subscription",
+      "suggested_name": "kimi-code-plan",
+      "entries": "OpenAI 兼容文本入口",
+      "ability": "会员额度在 Kimi Code 控制台查看。",
+      "source": "https://www.kimi.com/zh-cn/help/kimi-code/membership-guide",
+      "checked_at": "2026-09-07",
+      "note": "Kimi Code 会员权益的 API 入口，Key 在 Kimi Code 控制台创建，与 Kimi 开放平台（api.moonshot.cn，按量）的 Key 和端点互不通用。第三方工具统一用固定型号名 kimi-for-coding；高速档 kimi-for-coding-highspeed 需 Allegretto 及以上档位，约按 3 倍额度扣减。",
+      "models": [
+        {
+          "name": "kimi-for-coding",
+          "kind": "text",
+          "note": "会员固定型号名"
+        },
+        {
+          "name": "kimi-for-coding-highspeed",
+          "kind": "text",
+          "note": "高速档，Allegretto 及以上会员"
+        }
+      ]
+    },
+    {
+      "id": "kimi_code_plan_anthropic",
+      "type": "anthropic_compat",
+      "vendor": "Kimi Code 会员",
+      "base_url": "https://api.kimi.com/coding/v1",
+      "billing_mode": "subscription",
+      "suggested_name": "kimi-code-plan-anthropic",
+      "entries": "Anthropic Messages 文本入口",
+      "ability": "会员额度在 Kimi Code 控制台查看；使用 x-api-key 鉴权。",
+      "source": "https://www.kimi.com/zh-cn/help/kimi-code/membership-guide",
+      "checked_at": "2026-09-07",
+      "note": "同一份 Kimi Code 会员 Key 的 Anthropic 兼容入口（官方地址根 https://api.kimi.com/coding/，设备在 /v1 后拼 /messages）；只参与 /v1/messages 选路。Kimi Code 会员权益的 API 入口，Key 在 Kimi Code 控制台创建，与 Kimi 开放平台（api.moonshot.cn，按量）的 Key 和端点互不通用。第三方工具统一用固定型号名 kimi-for-coding；高速档 kimi-for-coding-highspeed 需 Allegretto 及以上档位，约按 3 倍额度扣减。",
+      "models": [
+        {
+          "name": "kimi-for-coding",
+          "kind": "text",
+          "note": "会员固定型号名"
+        },
+        {
+          "name": "kimi-for-coding-highspeed",
+          "kind": "text",
+          "note": "高速档，Allegretto 及以上会员"
+        }
+      ]
+    },
+    {
+      "id": "openai_compat",
+      "type": "openai_compat",
+      "vendor": "通用适配",
+      "custom_base_url": true,
+      "billing_mode": "none",
+      "suggested_name": "openai-compat",
+      "entries": "OpenAI 兼容单入口",
+      "ability": "通用适配器；服务地址与 Key 由管理员一起录入。",
+      "source": "https://platform.kimi.com/docs/pricing/chat-k3",
+      "checked_at": "2026-08-10",
+      "note": "通用 OpenAI 兼容适配：能接的模型完全取决于这条账号填的服务地址。下列是常见第三方平台的模型名，按你连的那家挑，其余一律走「自定义」。",
+      "models": [
+        {
+          "name": "kimi-k3",
+          "kind": "text",
+          "note": "月之暗面 Kimi，思考型"
+        },
+        {
+          "name": "kimi-k2.7-code",
+          "kind": "text",
+          "note": "月之暗面 Kimi，代码档"
+        },
+        {
+          "name": "kimi-k2.7-code-highspeed",
+          "kind": "text",
+          "note": "月之暗面 Kimi，代码高速档"
+        },
+        {
+          "name": "kimi-k2.6",
+          "kind": "text",
+          "note": "月之暗面 Kimi，上一代"
+        },
+        {
+          "name": "glm-5.2",
+          "kind": "text",
+          "note": "智谱 GLM"
+        }
+      ]
+    },
+    {
+      "id": "anthropic_compat",
+      "type": "anthropic_compat",
+      "vendor": "Anthropic 兼容",
+      "custom_base_url": true,
+      "billing_mode": "none",
+      "suggested_name": "anthropic-compat",
+      "entries": "Anthropic Messages 兼容单入口",
+      "ability": "通用适配器；服务地址与 Key 由管理员一起录入。",
+      "source": "https://docs.anthropic.com/en/api/messages",
+      "checked_at": "2026-08-24",
+      "note": "适用于使用 x-api-key 鉴权并提供 Anthropic Messages 兼容接口的服务；模型用自定义方式录入。",
+      "models": []
+    }
+  ],
+  "agents": [
+    {
+      "provider": "codex",
+      "vendor": "OpenAI",
+      "source": "https://learn.chatgpt.com/docs/models",
+      "checked_at": "2026-09-05",
+      "note": "Codex 订阅经设备的 /agents/codex/v1/responses 接入面调用；名义金额取 official-pricing.json 里同名的 agent=codex 条目。",
+      "models": [
+        {
+          "name": "gpt-6-astra",
+          "kind": "text",
+          "source": "https://developers.openai.com/api/docs/models/gpt-6-astra",
+          "note": "复杂推理与端到端任务旗舰档；实际可用性由订阅账号权限决定"
+        },
+        {
+          "name": "gpt-5.6-sol",
+          "kind": "text",
+          "note": "GPT-5.6 高性能档"
+        },
+        {
+          "name": "gpt-5.6-terra",
+          "kind": "text",
+          "note": "中间档"
+        },
+        {
+          "name": "gpt-5.6-luna",
+          "kind": "text",
+          "note": "轻量档，单价最低"
+        }
+      ]
+    },
+    {
+      "provider": "grok",
+      "vendor": "xAI",
+      "source": "https://docs.x.ai/docs/models",
+      "checked_at": "2026-08-13",
+      "note": "Grok Build 订阅：文本经 /agents/grok/v1/responses 接入面调用，按 official-pricing.json 的 agent=grok 条目记名义金额。订阅自带的 Grok Imagine 图片/视频生成经同一接入面的 /images/generations、/images/edits、/videos/generations 与 GET /videos/{request_id} 逐字节透传到 xAI 官方接口（客户端把 SDK 的 base_url 换成 <设备>/agents/grok/v1），按 imagine_image / imagine_video 记次、恒 0 元；这里不收录 Imagine 型号，型号名以 xAI 官方文档为准。",
+      "models": [
+        {
+          "name": "grok-4.6",
+          "kind": "text",
+          "note": "当前主力档"
+        },
+        {
+          "name": "grok-4.5",
+          "kind": "text",
+          "note": "上一代"
+        }
+      ]
+    },
+    {
+      "provider": "claude",
+      "vendor": "Anthropic",
+      "source": "https://platform.claude.com/docs/en/about-claude/models/overview",
+      "checked_at": "2026-08-19",
+      "note": "Claude Code 订阅：这里收录的是 Anthropic 官方在售的型号，供设备建计价行——名义金额取 official-pricing.json 里同名的 agent=claude 条目。它是计价清单不是准入白名单：设备只透传 /v1/messages，不按目录选路，成员发没收录的型号照常转发、那次记 0 元；成员 /model 里看得见哪些型号仍由上游 /v1/models 动态发现决定。",
+      "models": [
+        {
+          "name": "claude-fable-5",
+          "kind": "text",
+          "note": "官方价目最高档；Claude Code 里 /model fable 选它"
+        },
+        {
+          "name": "claude-opus-5",
+          "kind": "text",
+          "note": "opus 别名在 Anthropic API 上解析到它"
+        },
+        {
+          "name": "claude-sonnet-5",
+          "kind": "text",
+          "note": "sonnet 别名在 Anthropic API 上解析到它"
+        },
+        {
+          "name": "claude-haiku-4-5",
+          "kind": "text",
+          "note": "轻量档，单价最低；这是官方别名写法"
+        },
+        {
+          "name": "claude-haiku-4-5-20251001",
+          "kind": "text",
+          "note": "同上一条是同一个模型的带日期 Claude API ID。设备按名区分大小写精确匹配、不做别名推断，所以两种官方写法各收一行"
+        }
+      ]
+    }
+  ]
+}
