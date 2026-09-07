@@ -4,7 +4,7 @@
 
 | 文件 | 记什么 | 设备怎么用 |
 |---|---|---|
-| [`official-pricing.json`](official-pricing.json) | 官方目录价：一个模型多少钱，含分时段价 | 数据升级后为设备上「未定价」的模型填目录价；工具订阅的模型按其中带 `agent` 标记的条目记名义金额 |
+| [`official-pricing.json`](official-pricing.json) | 官方目录价：一个模型多少钱，含分时段价 | 数据升级后为设备上「未定价」的模型填目录价；Codex/Grok/Claude 订阅按其中带 `agent` 标记的条目记名义金额；Cursor 的独立订阅价格在平台模型文件维护 |
 | [`platform-models.json`](platform-models.json) | 平台模型信息：哪个平台有哪些模型 | 管理台「模型接入」三个页面的选单，以及工具订阅的权威模型清单 |
 
 官网 `https://llm.net/updates/data/` 下的同名文件与固件内嵌的 `platform-models.json` 都是本目录文件的逐字节副本。**改动只在本目录做**，副本由维护者同步。

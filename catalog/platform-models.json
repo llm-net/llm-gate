@@ -1,6 +1,6 @@
 {
   "schema": "llmgate.platform-models/v2",
-  "version": 19,
+  "version": 20,
   "updated_at": "2026-09-07",
   "notes": [
     "「哪儿有哪些模型」的清单，与同目录 official-pricing.json（「一个模型多少钱」）是一对；设备通过「数据升级」匿名下载两份文件。",
@@ -9,7 +9,7 @@
     "文件按设备管理台「模型接入」的三个页面分三类，每类都要维护：",
     "  API 按量计费   platforms 段里 billing_mode = usage 的平台：持按量付费 Key、按 token / 按次 / 按秒计费。",
     "  API 订阅套餐   platforms 段里 billing_mode = subscription 的平台：已付费套餐专用的 Key 与端点（ark_plan、qwen_plan、opencode_go 及各家 Coding Plan），调度时先用满。",
-    "  工具订阅       agents 段：开发工具订阅（codex | grok | claude）自带的文本模型，设备照着建行。",
+    "  工具订阅       agents 段：开发工具订阅（codex | grok | claude | cursor）的文本计价清单，管理台只读展示。",
     "  billing_mode = none 只给两条通用兼容适配（openai_compat / anthropic_compat），地址由管理员自填。platforms 段的先后即管理台各组内的展示顺序：按量 → 套餐 → 通用适配。",
     "平台身份 id 与固件适配器 type 分开：内置平台两者相同；数据新增的平台使用独立 id、type 只能复用 openai_compat 或 anthropic_compat，并给出固定 HTTPS base_url。",
     "  数据文件只能组合固件内置的适配器与 profile，不能下发脚本；旧固件不认识的 profile 整份拒绝并继续用上一份可用数据。",
@@ -21,11 +21,12 @@
     "upstream_protocols 声明模型实际接受的上游协议；省略时沿用适配器能力，空数组表示没有可用协议。声明只能收窄适配器，不能添加转换算法。",
     "  目录 OpenAI Responses 通过 Chat 上游转换，因此来源必须支持 openai_chat；原生 openai_responses 不等于接受 Chat 请求。",
     "platforms 段只是**选单**：管理台的「添加模型」永远同时提供「自定义」，厂商上新而这里还没收录时照样录得进去。",
-    "agents 段不是选单而是**权威清单**：设备上连接了哪份工具订阅，就把对应 provider 的模型自动读出来、在「模型接入 → 工具订阅」显示并建成目录行；",
-    "  管理台对这些行不提供任何编辑入口（不改名、不录价、不启停、不删除），要增减型号改这份文件。provider 只认 codex | grok | claude，不认识的 provider 旧固件一律忽略。",
-    "  agents 段只收文本模型（kind 恒为 text、不带 family）：设备不转发订阅侧的图片/视频，也不建这类行。文本模型的名义金额取 official-pricing.json 里带 agent 标记的同名条目",
-    "  （订阅是包月的，账面金额不是现金支出）。Cursor 是不解析模型名和 token 用量的透明代理，agents 段不收 Cursor 型号；成员侧模型由 cursor-agent 经订阅面自行发现。",
-    "收录纪律同价目文件：每条记当次核对的官方页面与核对日期（agents 段可逐模型写 source 覆盖 provider 那条），没有出处的型号不要往里加；改动后 version 加一。"
+    "agents 段不是选单而是计价权威清单：连接工具订阅后，对应 provider 的模型在「模型接入 → 工具订阅」自动显示；Codex/Grok/Claude 建成共享目录行，Cursor 直接读取本文件。",
+    "  管理台不提供添加、修改、启停或删除模型价格的入口，要增减型号和改价须更新目录数据。provider 为 codex | grok | claude | cursor。",
+    "  agents 段只收文本模型（kind 恒为 text、不带 family）。Codex/Grok/Claude 的名义价格取 official-pricing.json 里带 agent 标记的同名条目；订阅自带图片/视频不录价格。",
+    "  Cursor 的 models[].pricing 在本文件维护，按 Cursor 官方公示的标准模型价记名义金额，与其他订阅同名的型号也独立计价；仅精确匹配请求模型 ID，不推断别名、Fast、Auto 或套餐附加费。成员侧模型仍由 cursor-agent 经订阅面自行发现。",
+    "收录纪律同价目文件：每条记当次核对的官方页面与核对日期（agents 段可逐模型写 source 覆盖 provider 那条），没有出处的型号不要往里加；改动后 version 加一。",
+    "Cursor pricing 使用 in / out / cache_read / cache_write，单位为整数微元 / 百万 token；in/out 必填，缓存读写价缺省用输入价，显式 0 免费。美元价沿用 official-pricing.json 的固定汇率 1 USD = 6.75 CNY，目录金额不是订阅现金账单。"
   ],
   "platforms": [
     {
@@ -1681,6 +1682,131 @@
           "name": "claude-haiku-4-5-20251001",
           "kind": "text",
           "note": "同上一条是同一个模型的带日期 Claude API ID。设备按名区分大小写精确匹配、不做别名推断，所以两种官方写法各收一行"
+        }
+      ]
+    },
+    {
+      "provider": "cursor",
+      "vendor": "Cursor",
+      "source": "https://cursor.com/docs/models-and-pricing",
+      "checked_at": "2026-09-07",
+      "note": "Cursor 订阅文本计价清单；按官方标准模型价格记名义金额，只读且随数据升级更新，不创建共享 API 模型、不改变 CLI 的模型发现与选择。未收录的请求 ID 照常转发并标为未定价。",
+      "models": [
+        {
+          "name": "grok-4.6",
+          "kind": "text",
+          "source": "https://cursor.com/docs/models/grok-4-6",
+          "pricing": {
+            "in": 13500000,
+            "out": 40500000,
+            "cache_read": 3375000
+          }
+        },
+        {
+          "name": "grok-4.5",
+          "kind": "text",
+          "source": "https://cursor.com/docs/models/grok-4-5",
+          "pricing": {
+            "in": 13500000,
+            "out": 40500000,
+            "cache_read": 3375000
+          }
+        },
+        {
+          "name": "composer-2.5",
+          "kind": "text",
+          "source": "https://cursor.com/docs/models/cursor-composer-2-5",
+          "pricing": {
+            "in": 3375000,
+            "out": 16875000,
+            "cache_read": 1350000
+          }
+        },
+        {
+          "name": "claude-fable-5-1",
+          "kind": "text",
+          "source": "https://cursor.com/docs/models/claude-fable-5-1",
+          "pricing": {
+            "in": 67500000,
+            "out": 337500000,
+            "cache_read": 1687500,
+            "cache_write": 84375000
+          }
+        },
+        {
+          "name": "claude-opus-5",
+          "kind": "text",
+          "source": "https://cursor.com/docs/models/claude-opus-5",
+          "pricing": {
+            "in": 33750000,
+            "out": 168750000,
+            "cache_read": 3375000,
+            "cache_write": 42187500
+          }
+        },
+        {
+          "name": "claude-sonnet-5",
+          "kind": "text",
+          "source": "https://cursor.com/docs/models/claude-sonnet-5",
+          "pricing": {
+            "in": 13500000,
+            "out": 67500000,
+            "cache_read": 1350000,
+            "cache_write": 16875000
+          }
+        },
+        {
+          "name": "gemini-3.1-pro",
+          "kind": "text",
+          "source": "https://cursor.com/docs/models/gemini-3-1-pro",
+          "pricing": {
+            "in": 13500000,
+            "out": 81000000,
+            "cache_read": 1350000
+          }
+        },
+        {
+          "name": "gemini-3.8-flash",
+          "kind": "text",
+          "source": "https://cursor.com/docs/models/gemini-3-8-flash",
+          "pricing": {
+            "in": 5062500,
+            "out": 23625000,
+            "cache_read": 506250
+          }
+        },
+        {
+          "name": "gpt-5.6-sol",
+          "kind": "text",
+          "source": "https://cursor.com/docs/models/gpt-5-6-sol",
+          "pricing": {
+            "in": 27000000,
+            "out": 135000000,
+            "cache_read": 2700000,
+            "cache_write": 33750000
+          }
+        },
+        {
+          "name": "gpt-5.6-terra",
+          "kind": "text",
+          "source": "https://cursor.com/docs/models/gpt-5-6-terra",
+          "pricing": {
+            "in": 13500000,
+            "out": 81000000,
+            "cache_read": 1350000,
+            "cache_write": 16875000
+          }
+        },
+        {
+          "name": "gpt-5.6-luna",
+          "kind": "text",
+          "source": "https://cursor.com/docs/models/gpt-5-6-luna",
+          "pricing": {
+            "in": 1350000,
+            "out": 8100000,
+            "cache_read": 135000,
+            "cache_write": 1687500
+          }
         }
       ]
     }

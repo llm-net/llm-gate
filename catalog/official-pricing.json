@@ -1,6 +1,6 @@
 {
   "schema": "llmgate.official-pricing/v1",
-  "version": 11,
+  "version": 12,
   "updated_at": "2026-09-07",
   "currency": "CNY",
   "unit": "micro_yuan",
@@ -101,6 +101,71 @@
       "note": "官方分高峰 / 空闲两档：高峰时段为北京时间周一至周五 9:00–12:00、14:00–18:00，其余时间（含周末全天）为空闲时段，空闲价为高峰价的 50%，缓存命中、缓存未命中与输出三价同比例。pricing 记高峰价（标准档），schedule 记空闲时段价。"
     },
     {
+      "name": "deepseek-v4-pro-0813",
+      "kind": "text",
+      "vendor": "DeepSeek",
+      "pricing": {
+        "in": 9000000,
+        "cache_read": 300000,
+        "out": 27000000
+      },
+      "schedule": {
+        "timezone": "Asia/Shanghai",
+        "periods": [
+          {
+            "label": "工作日空闲时段",
+            "days": [
+              "mon",
+              "tue",
+              "wed",
+              "thu",
+              "fri"
+            ],
+            "hours": [
+              [
+                "00:00",
+                "09:00"
+              ],
+              [
+                "12:00",
+                "14:00"
+              ],
+              [
+                "18:00",
+                "24:00"
+              ]
+            ],
+            "pricing": {
+              "in": 4500000,
+              "cache_read": 150000,
+              "out": 13500000
+            }
+          },
+          {
+            "label": "周末全天空闲时段",
+            "days": [
+              "sat",
+              "sun"
+            ],
+            "hours": [
+              [
+                "00:00",
+                "24:00"
+              ]
+            ],
+            "pricing": {
+              "in": 4500000,
+              "cache_read": 150000,
+              "out": 13500000
+            }
+          }
+        ]
+      },
+      "source": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing",
+      "checked_at": "2026-09-07",
+      "note": "官方分高峰 / 空闲两档：高峰时段为北京时间周一至周五 9:00–12:00、14:00–18:00，其余时间（含周末全天）为空闲时段，空闲价为高峰价的 50%，缓存命中、缓存未命中与输出三价同比例。pricing 记高峰价（标准档），schedule 记空闲时段价。这是官方价格表里 deepseek-v4-pro 当前对应的带日期模型 ID，与不带日期的别名同价。"
+    },
+    {
       "name": "deepseek-v4-flash",
       "kind": "text",
       "vendor": "DeepSeek",
@@ -164,6 +229,71 @@
       "source": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing",
       "checked_at": "2026-09-07",
       "note": "官方分高峰 / 空闲两档：高峰时段为北京时间周一至周五 9:00–12:00、14:00–18:00，其余时间（含周末全天）为空闲时段，空闲价为高峰价的 50%，缓存命中、缓存未命中与输出三价同比例。pricing 记高峰价（标准档），schedule 记空闲时段价。"
+    },
+    {
+      "name": "deepseek-v4-flash-0731",
+      "kind": "text",
+      "vendor": "DeepSeek",
+      "pricing": {
+        "in": 3000000,
+        "cache_read": 100000,
+        "out": 9000000
+      },
+      "schedule": {
+        "timezone": "Asia/Shanghai",
+        "periods": [
+          {
+            "label": "工作日空闲时段",
+            "days": [
+              "mon",
+              "tue",
+              "wed",
+              "thu",
+              "fri"
+            ],
+            "hours": [
+              [
+                "00:00",
+                "09:00"
+              ],
+              [
+                "12:00",
+                "14:00"
+              ],
+              [
+                "18:00",
+                "24:00"
+              ]
+            ],
+            "pricing": {
+              "in": 1500000,
+              "cache_read": 50000,
+              "out": 4500000
+            }
+          },
+          {
+            "label": "周末全天空闲时段",
+            "days": [
+              "sat",
+              "sun"
+            ],
+            "hours": [
+              [
+                "00:00",
+                "24:00"
+              ]
+            ],
+            "pricing": {
+              "in": 1500000,
+              "cache_read": 50000,
+              "out": 4500000
+            }
+          }
+        ]
+      },
+      "source": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing",
+      "checked_at": "2026-09-07",
+      "note": "官方分高峰 / 空闲两档：高峰时段为北京时间周一至周五 9:00–12:00、14:00–18:00，其余时间（含周末全天）为空闲时段，空闲价为高峰价的 50%，缓存命中、缓存未命中与输出三价同比例。pricing 记高峰价（标准档），schedule 记空闲时段价。这是官方价格表里 deepseek-v4-flash 当前对应的带日期模型 ID，与不带日期的别名同价。"
     },
     {
       "name": "deepseek-v4-flash-vision-exp",
@@ -283,6 +413,32 @@
       "note": ""
     },
     {
+      "name": "glm-5.3",
+      "kind": "text",
+      "vendor": "智谱 GLM",
+      "pricing": {
+        "in": 9450000,
+        "cache_read": 1755000,
+        "out": 29700000
+      },
+      "source": "https://docs.z.ai/guides/overview/pricing",
+      "checked_at": "2026-09-07",
+      "note": "官方美元价 $1.4 / $0.26 / $4.4（输入 / 缓存命中 / 输出，每百万 token）。国内开放平台（open.bigmodel.cn/pricing）的价格页是前端渲染、无法机读，本条按国际站 Z.ai 官方美元价目按 6.75 折算；两套价目独立，国内站单价可能低于这里，上线计费前请在控制台核对一次。"
+    },
+    {
+      "name": "glm-5.3-flash",
+      "kind": "text",
+      "vendor": "智谱 GLM",
+      "pricing": {
+        "in": 1012500,
+        "cache_read": 202500,
+        "out": 3375000
+      },
+      "source": "https://docs.z.ai/guides/overview/pricing",
+      "checked_at": "2026-09-07",
+      "note": "官方标准价 $0.15 / $0.03 / $0.50，官方文档另注「定价为 GLM-5.3 的 1/10」。当前有限时五折（$0.075 / $0.015 / $0.25），按刊例价口径不录促销价。国内开放平台（open.bigmodel.cn/pricing）的价格页是前端渲染、无法机读，本条按国际站 Z.ai 官方美元价目按 6.75 折算；两套价目独立，国内站单价可能低于这里，上线计费前请在控制台核对一次。"
+    },
+    {
       "name": "glm-5.2",
       "kind": "text",
       "vendor": "智谱 GLM",
@@ -294,6 +450,317 @@
       "source": "https://open.bigmodel.cn/pricing",
       "checked_at": "2026-08-10",
       "note": "智谱开放平台公示的按量标准价。该价格页是前端渲染、无法机读，这组数字未从页面原文逐字取得，上线计费前请在控制台核对一次；国际站 Z.ai 的官方美元价是 $1.4 / $0.26 / $4.4，两套价目独立。"
+    },
+    {
+      "name": "glm-5",
+      "kind": "text",
+      "vendor": "智谱 GLM",
+      "pricing": {
+        "in": 6750000,
+        "cache_read": 1350000,
+        "out": 21600000
+      },
+      "source": "https://docs.z.ai/guides/overview/pricing",
+      "checked_at": "2026-09-07",
+      "note": "上一代旗舰，官方美元价 $1 / $0.2 / $3.2。国内开放平台（open.bigmodel.cn/pricing）的价格页是前端渲染、无法机读，本条按国际站 Z.ai 官方美元价目按 6.75 折算；两套价目独立，国内站单价可能低于这里，上线计费前请在控制台核对一次。"
+    },
+    {
+      "name": "qwen3.8-max",
+      "kind": "text",
+      "vendor": "阿里云 通义千问",
+      "pricing": {
+        "in": 12000000,
+        "cache_read": 1500000,
+        "out": 36000000
+      },
+      "source": "https://help.aliyun.com/zh/model-studio/qwen3-8-max",
+      "checked_at": "2026-09-07",
+      "note": "阿里云百炼华北2（北京）地域的模型调用原价，不含限时优惠；国际地域另有价目。缓存命中记隐式缓存价 1.5 元/百万 token；显式缓存写入 15、显式缓存命中 1，设备不建模。Batch 档（6 / 18）同样不建模。"
+    },
+    {
+      "name": "qwen3.8-flash",
+      "kind": "text",
+      "vendor": "阿里云 通义千问",
+      "pricing": {
+        "in": 800000,
+        "cache_read": 100000,
+        "out": 2700000
+      },
+      "source": "https://help.aliyun.com/zh/model-studio/qwen3-8-flash",
+      "checked_at": "2026-09-07",
+      "note": "阿里云百炼华北2（北京）地域的模型调用原价，不含限时优惠；国际地域另有价目。单一档，无上下文分档；显式缓存写入 1.25，设备不建模。"
+    },
+    {
+      "name": "qwen3.8-2.4t-a95b",
+      "kind": "text",
+      "vendor": "阿里云 通义千问",
+      "pricing": {
+        "in": 12000000,
+        "cache_read": 1500000,
+        "out": 36000000
+      },
+      "source": "https://help.aliyun.com/zh/model-studio/qwen3-8-2-4t-a95b",
+      "checked_at": "2026-09-07",
+      "note": "阿里云百炼华北2（北京）地域的模型调用原价，不含限时优惠；国际地域另有价目。开源版旗舰，价同 qwen3.8-max。"
+    },
+    {
+      "name": "qwen3.8-27b",
+      "kind": "text",
+      "vendor": "阿里云 通义千问",
+      "pricing": {
+        "in": 3000000,
+        "cache_read": 600000,
+        "out": 12000000
+      },
+      "source": "https://help.aliyun.com/zh/model-studio/qwen3-8-27b",
+      "checked_at": "2026-09-07",
+      "note": "阿里云百炼华北2（北京）地域的模型调用原价，不含限时优惠；国际地域另有价目。开源版轻量档。"
+    },
+    {
+      "name": "qwen3.7-max",
+      "kind": "text",
+      "vendor": "阿里云 通义千问",
+      "pricing": {
+        "in": 12000000,
+        "cache_read": 2400000,
+        "out": 36000000
+      },
+      "source": "https://help.aliyun.com/zh/model-studio/qwen3-7-max",
+      "checked_at": "2026-09-07",
+      "note": "阿里云百炼华北2（北京）地域的模型调用原价，不含限时优惠；国际地域另有价目。显式缓存写入 15、显式缓存命中 1.2，设备不建模。"
+    },
+    {
+      "name": "qwen3.7-plus",
+      "kind": "text",
+      "vendor": "阿里云 通义千问",
+      "pricing": {
+        "in": 2000000,
+        "cache_read": 400000,
+        "out": 8000000
+      },
+      "source": "https://help.aliyun.com/zh/model-studio/qwen3-7-plus",
+      "checked_at": "2026-09-07",
+      "note": "阿里云百炼华北2（北京）地域的模型调用原价，不含限时优惠；国际地域另有价目。pricing 记输入 ≤256K 档；256K–1M 档为 6 / 1.2 / 24，设备不建模上下文分档。"
+    },
+    {
+      "name": "qwen3.7-flash",
+      "kind": "text",
+      "vendor": "阿里云 通义千问",
+      "pricing": {
+        "in": 200000,
+        "cache_read": 40000,
+        "out": 800000
+      },
+      "source": "https://help.aliyun.com/zh/model-studio/qwen3-7-flash",
+      "checked_at": "2026-09-07",
+      "note": "阿里云百炼华北2（北京）地域的模型调用原价，不含限时优惠；国际地域另有价目。pricing 记输入 ≤32K 档；32K–256K 为 0.6 / 0.12 / 2.4，256K–1M 为 1.2 / 0.24 / 4.8。"
+    },
+    {
+      "name": "qwen3.6-plus",
+      "kind": "text",
+      "vendor": "阿里云 通义千问",
+      "pricing": {
+        "in": 2000000,
+        "cache_read": 200000,
+        "out": 12000000
+      },
+      "source": "https://help.aliyun.com/zh/model-studio/qwen3-6-plus",
+      "checked_at": "2026-09-07",
+      "note": "阿里云百炼华北2（北京）地域的模型调用原价，不含限时优惠；国际地域另有价目。pricing 记输入 ≤256K 档；256K–1M 档为 8 / 0.8 / 48。"
+    },
+    {
+      "name": "qwen3.6-flash",
+      "kind": "text",
+      "vendor": "阿里云 通义千问",
+      "pricing": {
+        "in": 1200000,
+        "cache_read": 120000,
+        "out": 7200000
+      },
+      "source": "https://help.aliyun.com/zh/model-studio/qwen3-6-flash",
+      "checked_at": "2026-09-07",
+      "note": "阿里云百炼华北2（北京）地域的模型调用原价，不含限时优惠；国际地域另有价目。pricing 记输入 ≤256K 档；256K–1M 档为 4.8 / 0.48 / 28.8。"
+    },
+    {
+      "name": "qwen3-coder-plus",
+      "kind": "text",
+      "vendor": "阿里云 通义千问",
+      "pricing": {
+        "in": 4000000,
+        "cache_read": 800000,
+        "out": 16000000
+      },
+      "source": "https://help.aliyun.com/zh/model-studio/qwen3-coder-plus",
+      "checked_at": "2026-09-07",
+      "note": "阿里云百炼华北2（北京）地域的模型调用原价，不含限时优惠；国际地域另有价目。pricing 记输入 ≤32K 档；32K–128K 为 6 / 1.2 / 24，128K–256K 为 10 / 2 / 40，256K–1M 为 20 / 4 / 200。"
+    },
+    {
+      "name": "qwen3-vl-plus",
+      "kind": "text",
+      "vendor": "阿里云 通义千问",
+      "pricing": {
+        "in": 1000000,
+        "cache_read": 200000,
+        "out": 10000000
+      },
+      "source": "https://help.aliyun.com/zh/model-studio/qwen3-vl-plus",
+      "checked_at": "2026-09-07",
+      "note": "阿里云百炼华北2（北京）地域的模型调用原价，不含限时优惠；国际地域另有价目。pricing 记输入 ≤32K 档；32K–128K 为 1.5 / 0.3 / 15，128K–256K 为 3 / 0.6 / 30。视觉输入按同一 token 单价计。"
+    },
+    {
+      "name": "qwen3-vl-flash",
+      "kind": "text",
+      "vendor": "阿里云 通义千问",
+      "pricing": {
+        "in": 150000,
+        "cache_read": 30000,
+        "out": 1500000
+      },
+      "source": "https://help.aliyun.com/zh/model-studio/qwen3-vl-flash",
+      "checked_at": "2026-09-07",
+      "note": "阿里云百炼华北2（北京）地域的模型调用原价，不含限时优惠；国际地域另有价目。pricing 记输入 ≤32K 档；32K–128K 为 0.3 / 0.06 / 3，128K–256K 为 0.6 / 0.12 / 6。"
+    },
+    {
+      "name": "MiniMax-M3",
+      "kind": "text",
+      "vendor": "MiniMax",
+      "pricing": {
+        "in": 2100000,
+        "cache_read": 420000,
+        "out": 8400000
+      },
+      "source": "https://platform.minimaxi.com/docs/guides/pricing-paygo",
+      "checked_at": "2026-09-07",
+      "note": "国内站人民币价，价目标注「永久五折」，这就是当前公示单价。pricing 记输入 ≤512K 档；>512K 档为 4.2 / 0.84 / 16.8。"
+    },
+    {
+      "name": "MiniMax-M2.7",
+      "kind": "text",
+      "vendor": "MiniMax",
+      "pricing": {
+        "in": 2100000,
+        "cache_read": 420000,
+        "out": 8400000
+      },
+      "source": "https://platform.minimaxi.com/docs/guides/pricing-paygo",
+      "checked_at": "2026-09-07",
+      "note": "国内站人民币价。缓存写入 2.625 元/百万 token 只在 Anthropic 形口径下才有对应字段，本条不配；优先级服务档为标准价的 1.5 倍，设备不建模。"
+    },
+    {
+      "name": "MiniMax-M2.7-highspeed",
+      "kind": "text",
+      "vendor": "MiniMax",
+      "pricing": {
+        "in": 4200000,
+        "cache_read": 420000,
+        "out": 16800000
+      },
+      "source": "https://platform.minimaxi.com/docs/guides/pricing-paygo",
+      "checked_at": "2026-09-07",
+      "note": "国内站人民币价。高速档是 MiniMax-M2.7 输入 / 输出的两倍单价，缓存命中价与标准档相同。"
+    },
+    {
+      "name": "MiniMax-M2.5",
+      "kind": "text",
+      "vendor": "MiniMax",
+      "pricing": {
+        "in": 2100000,
+        "cache_read": 210000,
+        "out": 8400000
+      },
+      "source": "https://platform.minimaxi.com/docs/guides/pricing-paygo",
+      "checked_at": "2026-09-07",
+      "note": "国内站人民币价。"
+    },
+    {
+      "name": "MiniMax-M2.5-highspeed",
+      "kind": "text",
+      "vendor": "MiniMax",
+      "pricing": {
+        "in": 4200000,
+        "cache_read": 210000,
+        "out": 16800000
+      },
+      "source": "https://platform.minimaxi.com/docs/guides/pricing-paygo",
+      "checked_at": "2026-09-07",
+      "note": "国内站人民币价。高速档是 MiniMax-M2.5 输入 / 输出的两倍单价，缓存命中价与标准档相同。"
+    },
+    {
+      "name": "ernie-5.0",
+      "kind": "text",
+      "vendor": "百度 文心",
+      "pricing": {
+        "in": 6000000,
+        "out": 24000000
+      },
+      "source": "https://cloud.baidu.com/doc/qianfan/s/wmh4sv6ya",
+      "checked_at": "2026-09-07",
+      "note": "千帆后付费刊例价：输入 0.006、输出 0.024 元/千 token，即 6 / 24 元每百万 token。pricing 记输入 ≤32K 档；32K–128K 档为 10 / 40。价格表未单列该型号的缓存命中价，故不配 cache_read（设备缺省按输入价计）。"
+    },
+    {
+      "name": "step-3.5-flash",
+      "kind": "text",
+      "vendor": "阶跃星辰",
+      "pricing": {
+        "in": 700000,
+        "cache_read": 140000,
+        "out": 2100000
+      },
+      "source": "https://platform.stepfun.com/docs/zh/pricing/details",
+      "checked_at": "2026-09-07",
+      "note": "官方按量价，人民币每百万 token。"
+    },
+    {
+      "name": "step-3.5-flash-2603",
+      "kind": "text",
+      "vendor": "阶跃星辰",
+      "pricing": {
+        "in": 700000,
+        "cache_read": 140000,
+        "out": 2100000
+      },
+      "source": "https://platform.stepfun.com/docs/zh/pricing/details",
+      "checked_at": "2026-09-07",
+      "note": "官方价格表与 step-3.5-flash 同价，这是带版本号的模型 ID。"
+    },
+    {
+      "name": "hy4-preview",
+      "kind": "text",
+      "vendor": "腾讯混元",
+      "pricing": {
+        "in": 6000000,
+        "cache_read": 300000,
+        "out": 18000000
+      },
+      "source": "https://cloud.tencent.com/document/product/1823/130055",
+      "checked_at": "2026-09-07",
+      "note": "TokenHub 在线推理（广州）后付费价，无上下文分档。"
+    },
+    {
+      "name": "hy3",
+      "kind": "text",
+      "vendor": "腾讯混元",
+      "pricing": {
+        "in": 1000000,
+        "cache_read": 250000,
+        "out": 4000000
+      },
+      "source": "https://cloud.tencent.com/document/product/1823/130055",
+      "checked_at": "2026-09-07",
+      "note": "TokenHub 在线推理（广州）后付费价，无上下文分档。"
+    },
+    {
+      "name": "glm-5.1",
+      "kind": "text",
+      "vendor": "智谱 GLM",
+      "pricing": {
+        "in": 9450000,
+        "cache_read": 1755000,
+        "out": 29700000
+      },
+      "source": "https://docs.z.ai/guides/overview/pricing",
+      "checked_at": "2026-09-07",
+      "note": "官方美元价与 glm-5.3、glm-5.2 同档：$1.4 / $0.26 / $4.4。国内开放平台（open.bigmodel.cn/pricing）的价格页是前端渲染、无法机读，本条按国际站 Z.ai 官方美元价目按 6.75 折算；两套价目独立，国内站单价可能低于这里，上线计费前请在控制台核对一次。"
     },
     {
       "name": "gpt-6-astra",
@@ -350,6 +817,58 @@
       "source": "https://developers.openai.com/api/docs/pricing",
       "checked_at": "2026-09-05",
       "note": "官方 API 标准档 $0.20/$0.02/$1.20（输入/缓存命中/输出，每百万 token），按 6.75 折算。Codex 订阅流量按此价记名义金额；设备不建模长上下文、缓存写入及 Fast mode 加价。"
+    },
+    {
+      "name": "gemini-3.7-flash",
+      "kind": "text",
+      "vendor": "Google",
+      "pricing": {
+        "in": 5062500,
+        "cache_read": 506250,
+        "out": 25312500
+      },
+      "source": "https://ai.google.dev/gemini-api/docs/pricing",
+      "checked_at": "2026-09-07",
+      "note": "官方付费档美元价，按 6.75 折算。当前价 $0.75 / $0.075 / $3.75（输入 / 缓存命中 / 输出，每百万 token），官方公示 2027-01-01 起涨为 $1.50 / $0.15 / $7.50。"
+    },
+    {
+      "name": "gemini-3.6-flash",
+      "kind": "text",
+      "vendor": "Google",
+      "pricing": {
+        "in": 5062500,
+        "cache_read": 506250,
+        "out": 25312500
+      },
+      "source": "https://ai.google.dev/gemini-api/docs/pricing",
+      "checked_at": "2026-09-07",
+      "note": "官方付费档美元价，按 6.75 折算。与 gemini-3.7-flash 同档：当前 $0.75 / $0.075 / $3.75，官方公示 2027-01-01 起涨为 $1.50 / $0.15 / $7.50。"
+    },
+    {
+      "name": "gemini-3.5-flash",
+      "kind": "text",
+      "vendor": "Google",
+      "pricing": {
+        "in": 10125000,
+        "cache_read": 1012500,
+        "out": 60750000
+      },
+      "source": "https://ai.google.dev/gemini-api/docs/pricing",
+      "checked_at": "2026-09-07",
+      "note": "官方付费档美元价，按 6.75 折算。$1.50 / $0.15 / $9.00。"
+    },
+    {
+      "name": "gemini-3.5-flash-lite",
+      "kind": "text",
+      "vendor": "Google",
+      "pricing": {
+        "in": 2025000,
+        "cache_read": 202500,
+        "out": 16875000
+      },
+      "source": "https://ai.google.dev/gemini-api/docs/pricing",
+      "checked_at": "2026-09-07",
+      "note": "官方付费档美元价，按 6.75 折算。$0.30 / $0.03 / $2.50。"
     },
     {
       "name": "grok-4.6",
@@ -448,6 +967,32 @@
       "source": "https://platform.claude.com/docs/en/about-claude/pricing",
       "checked_at": "2026-08-19",
       "note": "与上一条是同一个模型的带日期 Claude API ID，价同。设备按名区分大小写精确匹配、不做别名推断，所以两种官方写法各录一条。"
+    },
+    {
+      "name": "mistral-large-latest",
+      "kind": "text",
+      "vendor": "Mistral AI",
+      "pricing": {
+        "in": 3375000,
+        "cache_read": 337500,
+        "out": 10125000
+      },
+      "source": "https://mistral.ai/pricing/api",
+      "checked_at": "2026-09-07",
+      "note": "官方按量美元价 $0.5 / $1.5（输入 / 输出，每百万 token），按 6.75 折算；缓存命中按官方公示的「缓存输入减 90%」折算为输入价的 10%（$0.05）。Batch 五折不建模。"
+    },
+    {
+      "name": "mistral-small-latest",
+      "kind": "text",
+      "vendor": "Mistral AI",
+      "pricing": {
+        "in": 1012500,
+        "cache_read": 101250,
+        "out": 4050000
+      },
+      "source": "https://mistral.ai/pricing/api",
+      "checked_at": "2026-09-07",
+      "note": "官方按量美元价 $0.15 / $0.6，按 6.75 折算；缓存命中按官方公示的「缓存输入减 90%」折算为输入价的 10%（$0.015）。"
     },
     {
       "name": "MiniMax-H3",

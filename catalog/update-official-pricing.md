@@ -6,7 +6,7 @@
 
 1. **复核已有条目**：文件里每一条都按其 `source` 打开官方页面，重新核对 `pricing`、`schedule` 与 `note`；页面地址变了就改 `source`。
 2. **补齐缺价的型号**：对照 `platform-models.json`，厂商原生平台（`platforms` 段里 `vendor` 就是模型厂商的平台，如 DeepSeek、Kimi、智谱、MiniMax、阿里云百炼的通义千问、OpenAI、Anthropic、Google Gemini、xAI、阶跃星辰、百度千帆的 ERNIE）与 `agents` 段列出的型号，凡厂商公示了按量价而本文件没有的，补一条。
-3. **不录**：聚合与转售平台（晨羽AI、硅基流动、OpenRouter、Together、Groq、腾讯 TokenHub / LKEAP，以及百炼、方舟托管的第三方模型）经它们调用的价格；订阅套餐与工具订阅的月费；图片生成、视频生成以外的多模态价（语音、嵌入、重排序）；Cursor 型号。
+3. **不录**：聚合与转售平台（晨羽AI、硅基流动、OpenRouter、Together、Groq、腾讯 TokenHub / LKEAP，以及百炼、方舟托管的第三方模型）经它们调用的价格；订阅套餐与工具订阅的月费；图片生成、视频生成以外的多模态价（语音、嵌入、重排序）；Cursor 订阅型号的价格（由 `platform-models.json` 的 Cursor 分组维护）。
 4. 一个型号只有一条：设备按名不分大小写精确匹配。同一模型的官方别名与带日期 ID 各自成条（如 `claude-haiku-4-5` 与 `claude-haiku-4-5-20251001`）；`agents` 段里有的名字必须逐字节一致。
 
 ## 文件形态
