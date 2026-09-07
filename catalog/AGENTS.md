@@ -1,20 +1,30 @@
 # catalog — 开发工具工作规则
 
-本目录维护 LLM Gate 的官方目录价（`official-pricing.json`）与平台模型信息（`platform-models.json`）。在这里工作的开发工具（缺省 Grok Build，也可以是 Codex）只做一种事：按任务文档查询厂商官方页面、改写两份 JSON、跑校验、给出变更摘要。任务文档是 [update-official-pricing.md](update-official-pricing.md) 与 [update-platform-models.md](update-platform-models.md)，背景见 [README.md](README.md)。
+本目录维护 LLM Gate 的官方目录价（`official-pricing.json`）与平台模型信息（`platform-models.json`）。开发工具按任务文档查询厂商官方页面、改写数据、跑校验、给出变更摘要。任务文档是 [update-official-pricing.md](update-official-pricing.md) 与 [update-platform-models.md](update-platform-models.md)，快速入口与校验方法见 [README.md](README.md)。同目录 `CLAUDE.md` 必须是指向 `AGENTS.md` 的相对软链接，不能保存另一份指令正文。
+
+## 开始时
+
+1. 先看 `git status --short` 与两份 JSON 的 `notes`、版本，保留已有改动。用户指定厂商或型号时只处理该范围及必要的两份数据联动；未限定的完整更新才覆盖全目录。
+2. 查价先对照**全部平台型号**与价目表，运行价目任务中的缺价检查命令；平台更新先核对端点与型号，再检查涉及型号的厂商官方价。
+3. 按模型厂商与官方页面分组，同一张价目表一次读取后核对多个型号。已有 `source` 与 README 的官方入口用于定位；必须打开当前页面正文，不能把旧值或搜索摘要当作本次证据。
 
 ## 边界
 
-- 只改 `official-pricing.json` 与 `platform-models.json`。不改固件源码，不新建文件，不留笔记或临时文件。
+- 常规数据更新只改 `official-pricing.json` 与 `platform-models.json`。用户明确要求维护指引时，可改本目录相关文档与上述软链接。不改固件源码，不留笔记或临时文件。
 - 只用厂商官方页面作依据：官方文档站、定价页、控制台公告、官方帮助中心。第三方博客、聚合站、社区帖子、搜索摘要都不算出处。官方页面打不开或读不出数字时保留原条目，在摘要里列为「未能核对」；不猜、不编、不按记忆填。
 - 不需要登录的页面才是可用出处。不写入任何 API Key、账号、邀请码或个人信息。
+- `platforms[].vendor` 是接入平台名，不一定是模型厂商。只在聚合或套餐清单出现的型号也要查模型厂商官方按量价；不录转售价，不以缺少厂商平台条目为由跳过该型号。
+- 先确认地域、币种、计费单位与标准档，再核对输入、缓存读写、输出列。厂商公示国内人民币价时直接使用，不将海外美元价折算后代替国内价。按量、套餐、限时优惠分别判断，细则见价目任务。
 - 金额只用整数微元（1 元 = 1 000 000 微元），不出现小数；美元价按价目文件 `notes` 里的固定汇率折算后取整。
-- 每条改动都更新 `source` 与 `checked_at`（当天，`YYYY-MM-DD`）；每份改过的文件 `version` 加一、`updated_at` 改当天。没改的条目不动 `checked_at`。
+- 每条改动都更新 `source` 与 `checked_at`（当天，`YYYY-MM-DD`）；每份改过的数据文件 `version` 加一、`updated_at` 改当天。没改的条目不动 `checked_at`；只改文档不递增数据版本。
 - 名称逐字节：模型 `name` 按厂商文档原样书写，区分大小写；两份文件里同一个型号写法必须相同。
 - 只描述固件已经实现的形态。平台的 `type` 只能是文件里已出现的适配器；数据新增的平台只能用 `openai_compat` / `anthropic_compat` 并给固定 HTTPS `base_url`。模型的 `capabilities`、`upstream_protocols` 只从同型号的既有条目照抄，不发明新 profile。价格字段只用价目文件 `notes` 列出的字段名。
 - 不删除仍在售的条目。厂商明确下架或文档已移除的型号才删，并在摘要里说明出处。
 
 ## 完成前必须
 
-1. 在固件源码目录执行 `go run ./tools/catalogcheck -fix ../catalog`，0 错误（提示可以有）。本仓库的 `firmware/` 就是固件源码目录。
-2. 摘要按「新增 / 改价或改端点 / 下架 / 未能核对」四组列出，每条带出处链接与核对日期。
-3. 不提交、不推送；由维护者审阅 diff。
+1. 按 README 的路径说明，在含 `tools/catalogcheck` 的固件源码目录校验本次维护目录，0 错误（提示逐条判断）。不得假定当前检出必有 `firmware/`；找不到校验工具时明确报告未校验。
+2. 重新检查本次范围内的缺价候选：有官方标准价的补齐；不能收录或无法核实的逐项说明原因。`catalogcheck` 通过只说明结构及既有交叉规则通过，不证明普通平台型号价格齐全、数字正确或外部 API 已实测。
+3. 审阅 `git diff` 并执行 `git diff --check`；检查型号拼写、价格字段与单位、版本、来源及未涉及条目不变。文档只写当前规则，不重复抄一份易过期的价格表，不记实测日期或操作经过。
+4. 摘要按「新增 / 改价或改端点 / 下架 / 未能核对」四组列出；数据条目带出处链接与核对日期，说明校验结果及剩余缺价原因。仅改文档时报告文档与软链接检查结果即可。
+5. 默认不提交、不推送、不发布；由维护者审阅 diff，用户已有明确授权时按授权执行。

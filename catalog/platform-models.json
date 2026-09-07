@@ -1,6 +1,6 @@
 {
   "schema": "llmgate.platform-models/v2",
-  "version": 20,
+  "version": 21,
   "updated_at": "2026-09-07",
   "notes": [
     "「哪儿有哪些模型」的清单，与同目录 official-pricing.json（「一个模型多少钱」）是一对；设备通过「数据升级」匿名下载两份文件。",
@@ -1014,6 +1014,35 @@
         {
           "name": "deepseek-ai/DeepSeek-V4-Pro",
           "kind": "text"
+        }
+      ]
+    },
+    {
+      "id": "xiaomi_mimo",
+      "type": "openai_compat",
+      "vendor": "小米 MiMo 开放平台",
+      "base_url": "https://api.xiaomimimo.com/v1",
+      "billing_mode": "usage",
+      "suggested_name": "mimo",
+      "entries": "OpenAI Chat 协议面",
+      "ability": "普通 API Key 按量消耗账户余额，账单以小米 MiMo 开放平台为准。",
+      "source": "https://mimo.mi.com/docs/zh-CN/api/chat/openai-api",
+      "checked_at": "2026-09-07",
+      "note": "普通 API 按量计费，使用 Bearer 鉴权；Token Plan 的 Key、端点与额度独立。设备的 OpenAI Responses 协议面经 Chat 上游承载。",
+      "models": [
+        {
+          "name": "mimo-v2.5-pro",
+          "kind": "text",
+          "upstream_protocols": [
+            "openai_chat"
+          ]
+        },
+        {
+          "name": "mimo-v2.5",
+          "kind": "text",
+          "upstream_protocols": [
+            "openai_chat"
+          ]
         }
       ]
     },

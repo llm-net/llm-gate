@@ -4,10 +4,57 @@
 
 ## 范围
 
-1. **复核已有条目**：文件里每一条都按其 `source` 打开官方页面，重新核对 `pricing`、`schedule` 与 `note`；页面地址变了就改 `source`。
-2. **补齐缺价的型号**：对照 `platform-models.json`，厂商原生平台（`platforms` 段里 `vendor` 就是模型厂商的平台，如 DeepSeek、Kimi、智谱、MiniMax、阿里云百炼的通义千问、OpenAI、Anthropic、Google Gemini、xAI、阶跃星辰、百度千帆的 ERNIE）与 `agents` 段列出的型号，凡厂商公示了按量价而本文件没有的，补一条。
+1. **复核已有条目**：本次范围内每条按其 `source` 打开官方页面，重新核对 `pricing`、`schedule` 与 `note`；页面地址变了就改 `source`。用户指定厂商或型号时只核对指定范围及必要联动，完整更新才覆盖全部条目。
+2. **补齐缺价的型号**：对照 `platform-models.json` 的全部 `platforms[].models` 与 Codex/Grok/Claude 的 `agents[].models`，凡模型厂商公示了可收录的按量价而本文件没有的，补一条。候选包括聚合、转售、套餐与通用适配里的型号；不能因为没有厂商原生平台条目就跳过。`platforms[].vendor` 是接入平台名，须另外确认模型厂商，例如 MiMo 查小米、Kimi 查月之暗面。
 3. **不录**：聚合与转售平台（晨羽AI、硅基流动、OpenRouter、Together、Groq、腾讯 TokenHub / LKEAP，以及百炼、方舟托管的第三方模型）经它们调用的价格；订阅套餐与工具订阅的月费；图片生成、视频生成以外的多模态价（语音、嵌入、重排序）；Cursor 订阅型号的价格（由 `platform-models.json` 的 Cursor 分组维护）。
 4. 一个型号只有一条：设备按名不分大小写精确匹配。同一模型的官方别名与带日期 ID 各自成条（如 `claude-haiku-4-5` 与 `claude-haiku-4-5-20251001`）；`agents` 段里有的名字必须逐字节一致。
+
+## 先查缺价，再按厂商核对
+
+在 `catalog/` 执行以下只读命令，需要 Node.js。它按完整名称找缺价与大小写差异，并列出所在平台及 `upstream_model_id`，不修改文件、不去掉组织前缀、不推断别名：
+
+```sh
+node --input-type=module <<'JS'
+import { readFileSync } from 'node:fs';
+const read = (name) => JSON.parse(readFileSync(name, 'utf8'));
+const pricing = new Map(read('official-pricing.json').models.map((m) => [m.name.toLowerCase(), m]));
+const catalog = read('platform-models.json');
+const pending = new Map();
+function inspect(model, location) {
+  const price = pricing.get(model.name.toLowerCase());
+  if (price?.name === model.name) return;
+  const row = pending.get(model.name) ?? {
+    name: model.name,
+    status: price ? '大小写待核对' : '缺价候选',
+    pricing_name: price?.name,
+    locations: [],
+  };
+  row.locations.push({ location, upstream_model_id: model.upstream_model_id });
+  pending.set(model.name, row);
+}
+for (const platform of catalog.platforms) {
+  for (const model of platform.models) inspect(model, `platform:${platform.id}`);
+}
+for (const agent of catalog.agents) {
+  if (agent.provider === 'cursor') continue;
+  for (const model of agent.models) inspect(model, `agent:${agent.provider}`);
+}
+console.log(JSON.stringify([...pending.values()], null, 2));
+JS
+```
+
+按任务范围筛选输出，再按**模型厂商**归组；相同官方价目页面只需打开一次。每个候选都要归入「补价」「已有同名价但需核对拼写」「不收录并说明原因」或「未能核对」。平台特有的命名空间、路由别名不自动继承厂商型号的价格；先用官方文档确认身份，只有厂商原始型号或官方别名进入价目表，不为消除候选而录入平台自定义名字。
+
+本命令仅做名称对照；`catalogcheck` 也不验证全部普通平台型号的价格覆盖率或网页数字。命令无输出、校验通过均不能代替对现有价格的官方核对。
+
+## 价格口径核对
+
+- 优先读取现有 `source` 与 [README 官方入口](README.md#小米-mimo-官方入口)。搜索只用于寻找官方页面；页面动态渲染时检查表格标签、国内/海外切换与鉴权示例选项，再试同厂商模型页或有效公告。
+- **地域与币种**：有国内人民币标准价时直接使用；不要拿海外美元价按固定汇率折算成国内价。只有美元价的条目才按 `notes` 换算，并在 `note` 写清地域、原币种和汇率。
+- **列名与单位**：`in` 对应未命中缓存的输入，`cache_read` 对应缓存命中输入，`out` 对应输出；`cache_write` 是独立缓存写入价。先确认每百万、每千、每次或每秒的单位，不能按网页列顺序盲填，也不能把缓存命中价当作写入价。
+- **标准价与优惠**：官方已生效的永久调价属于标准价；限时促销、赠送额度和套餐 Credits 不折算进 `pricing`。只公示「缓存写入限时免费」而没有独立标准价时不填 `cache_write: 0`，在 `note` 说明，不能把暂时免费视为长期价。
+- **档位与附加费**：确认是否按输入长度、时段、模式分档；只保留当前仍有效的档位说明。联网搜索等按次费用不混入 token 价，没有受支持字段的费用写在 `note`。
+- **证据冲突**：页面读不到数字、地域不明或定价页与公告冲突未能厘清时，保留原值并列为「未能核对」；缺价条目保持缺价，不用零元代替未知。
 
 ## 文件形态
 
@@ -83,14 +130,14 @@
 
 ## 步骤
 
-1. 读文件 `notes`，确认单位、汇率与 `agent` 约定。
-2. 按 `vendor` 分组，逐组打开官方定价页。页面是前端渲染而读不出数字时，试厂商文档站的模型页、公告或 API 文档；仍读不出就列为「未能核对」，保留原条目。
-3. 逐条核对并改写 `pricing`、`schedule`（有分时段就写，没有就删）、`source`、`checked_at`、`note`；把设备不建模的价签细节写进 `note`。
-4. 补新条目；官方已下架的型号删除，但 `agents` 段仍列出的先在摘要里提出，不删。
-5. `version` 加一，`updated_at` 改当天。
-6. 在固件源码目录执行 `go run ./tools/catalogcheck -fix ../catalog`，直到 0 错误。
-7. 输出摘要：新增 / 改价 / 下架 / 未能核对，每条带出处与核对日期。
+1. 看工作树已有改动，读文件 `notes`，确认本次范围、单位、汇率与 `agent` 约定；运行上面的缺价检查。
+2. 合并本次现有价目与缺价候选，按模型厂商归组；按上面的口径读取官方页面并逐项核对。
+3. 只对有证据的变化改写 `pricing`、`schedule`、`source`、`checked_at`、`note`；确认取消分时段价后才删除 `schedule`，未改条目不刷新日期。
+4. 补新条目；官方已下架的型号删除，但 `agents` 段仍列出的先在摘要里提出，不删。重跑缺价检查，对本次范围内剩余候选逐项说明原因。
+5. 改过的数据文件 `version` 加一，`updated_at` 改当天；未改文件不动版本。
+6. 按 [README 校验](README.md#校验) 在实际固件源码目录运行 `catalogcheck -fix` 校验本目录，直到 0 错误；审阅 diff 并执行 `git diff --check`。
+7. 输出摘要：新增 / 改价或改端点 / 下架 / 未能核对，每条带出处与核对日期，说明校验结果与剩余缺价原因。
 
 ## 汇率与取整
 
-美元价按 `notes` 里的汇率折算：微元 = 美元价 × 汇率 × 1 000 000，向下取整。汇率只由维护者改 `notes`，本任务不改汇率。
+美元价按 `notes` 里的汇率折算：微元 = 美元价 × 汇率 × 1 000 000，向下取整。使用十进制定点或整数运算，避免二进制浮点造成微元误差；核对原始单位后再换算。汇率只由维护者改 `notes`，本任务不改汇率。

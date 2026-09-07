@@ -1,6 +1,6 @@
 {
   "schema": "llmgate.official-pricing/v1",
-  "version": 12,
+  "version": 13,
   "updated_at": "2026-09-07",
   "currency": "CNY",
   "unit": "micro_yuan",
@@ -993,6 +993,32 @@
       "source": "https://mistral.ai/pricing/api",
       "checked_at": "2026-09-07",
       "note": "官方按量美元价 $0.15 / $0.6，按 6.75 折算；缓存命中按官方公示的「缓存输入减 90%」折算为输入价的 10%（$0.015）。"
+    },
+    {
+      "name": "mimo-v2.5-pro",
+      "kind": "text",
+      "vendor": "小米",
+      "pricing": {
+        "in": 3000000,
+        "cache_read": 25000,
+        "out": 6000000
+      },
+      "source": "https://mimo.mi.com/docs/zh-CN/price/pay-as-you-go",
+      "checked_at": "2026-09-07",
+      "note": "国内普通 API 按量人民币标准价，输入长度不分档；Token Plan 套餐独立计费，不折算套餐补贴。缓存写入仅公示限时免费，不设独立标准价字段；联网搜索按次另计，不包含在 token 价格中。"
+    },
+    {
+      "name": "mimo-v2.5",
+      "kind": "text",
+      "vendor": "小米",
+      "pricing": {
+        "in": 1000000,
+        "cache_read": 20000,
+        "out": 2000000
+      },
+      "source": "https://mimo.mi.com/docs/zh-CN/price/pay-as-you-go",
+      "checked_at": "2026-09-07",
+      "note": "国内普通 API 按量人民币标准价，输入长度不分档；Token Plan 套餐独立计费，不折算套餐补贴。缓存写入仅公示限时免费，不设独立标准价字段；联网搜索按次另计，不包含在 token 价格中。"
     },
     {
       "name": "MiniMax-H3",
