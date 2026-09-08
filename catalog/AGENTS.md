@@ -18,6 +18,7 @@
 - 金额只用整数微元（1 元 = 1 000 000 微元），不出现小数；美元价按价目文件 `notes` 里的固定汇率折算后取整。
 - 每条改动都更新 `source` 与 `checked_at`（当天，`YYYY-MM-DD`）；每份改过的数据文件 `version` 加一、`updated_at` 改当天。没改的条目不动 `checked_at`；只改文档不递增数据版本。
 - 名称逐字节：模型 `name` 按厂商文档原样书写，区分大小写；两份文件里同一个型号写法必须相同。
+- Cursor 的 `cursor-auto` 是明确的本地统计名例外：`default` / `auto` 请求归入该行，不是上游模型 ID。官方未公布独立 Auto 标准价时，`pricing` 与 `composer-2.5` 标准价同步；具体口径与官方出处见 [README](README.md#cursor-auto-统计口径)，不得将其当作实际路由模型或现金账单。
 - 只描述固件已经实现的形态。平台的 `type` 只能是文件里已出现的适配器；数据新增的平台只能用 `openai_compat` / `anthropic_compat` 并给固定 HTTPS `base_url`。模型的 `capabilities`、`upstream_protocols` 只从同型号的既有条目照抄，不发明新 profile。价格字段只用价目文件 `notes` 列出的字段名。
 - 不删除仍在售的条目。厂商明确下架或文档已移除的型号才删，并在摘要里说明出处。
 

@@ -1,0 +1,25 @@
+// polkit 本地授权（polkit 0.106+ 的 rules.d/JS 机制）：允许服务用户 llmgate
+// （gatewayd，NoNewPrivileges 下无法 sudo）经 NetworkManager D-Bus 修改系统
+// 连接与控制网络——管理台「设备设置」页查看/修改设备 IP 的授权基础。只放行
+// 这两个动作；读取设备/连接状态本就无需授权。
+//
+// 与同目录 50-llmgate-network.pkla 是**同一条授权的两种机制，按板卡系统二选一**：
+//   - Debian 11 / polkit 0.105（cubie-a7a）：只认 localauthority/*.pkla，
+//     不认 rules.d/*.rules（JS 引擎是 0.106 才引入的）→ 装 .pkla
+//   - Debian 12 / polkit 122（rk3576-evb1）：pkla 支持已被移除且该镜像没有
+//     polkit-pkla-compat，/etc/polkit-1/ 下只有 rules.d → 装本文件
+// 装错那一份不会报错，只会静默不生效：读得到网卡、一改就是「Insufficient
+// privileges」。两块板都装上也无妨（各自只有一份被自己的 polkitd 认得）。
+//
+// 本文件是 JavaScript（不是 pkla 的 keyfile），注释用 //；polkitd 按需启动
+// 并自动加载，无需 reload。
+polkit.addRule(function (action, subject) {
+    if (subject.user !== "llmgate") {
+        return undefined;
+    }
+    if (action.id === "org.freedesktop.NetworkManager.settings.modify.system" ||
+        action.id === "org.freedesktop.NetworkManager.network-control") {
+        return polkit.Result.YES;
+    }
+    return undefined;
+});

@@ -1,0 +1,11 @@
+# polkit 本地授权（Debian 11 polkit 0.105 的 localauthority/.pkla 机制，
+# GLib keyfile 格式——注释只认行首 #）：允许服务用户 llmgate（gatewayd，
+# NoNewPrivileges 下无法 sudo）经 NetworkManager D-Bus 修改系统连接与
+# 控制网络——管理台「设备设置」页查看/修改设备 IP 的授权基础。只放行
+# 这两个动作；读取设备/连接状态本就无需授权。
+[llmgate-network]
+Identity=unix-user:llmgate
+Action=org.freedesktop.NetworkManager.settings.modify.system;org.freedesktop.NetworkManager.network-control
+ResultAny=yes
+ResultInactive=yes
+ResultActive=yes

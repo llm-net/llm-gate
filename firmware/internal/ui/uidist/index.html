@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
+    <meta name="color-scheme" content="light" />
+    <!-- public/favicon.svg 与 src/assets/logo.svg 均与 docs/logo.svg 母版逐字相同。
+         写根路径让 Vite 按 base 改写成 /ui/favicon.svg，确保 SPA 深链也能加载。 -->
+    <link rel="icon" type="image/svg+xml" href="/ui/favicon.svg" />
+    <title>LLM Gate</title>
+    <!-- 首帧配色：主题类要赶在首帧前挂上 <html>，挂晚了蓝/金/夜间用户每次进来都先
+         闪一帧绿。键名与「主题→类名」映射和 src/lib/theme.ts 是同一份真值，两处同步改。
+         不写 type="module"：模块脚本延迟执行，防不住首帧。 -->
+    <script>
+      try {
+        var uiTheme = localStorage.getItem("llmgate.ui.theme");
+        if (uiTheme === "blue" || uiTheme === "gold") {
+          document.documentElement.classList.add("theme-" + uiTheme);
+        } else if (uiTheme === "night") {
+          document.documentElement.classList.add("dark");
+        }
+      } catch (e) {
+        /* storage 不可用（隐私模式等）就用缺省绿 */
+      }
+    </script>
+    <script type="module" crossorigin src="/ui/assets/index-zePTpuxC.js"></script>
+    <link rel="modulepreload" crossorigin href="/ui/assets/i18n-B52SDIZ1.js">
+    <link rel="stylesheet" crossorigin href="/ui/assets/index-CbwSuzjz.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>

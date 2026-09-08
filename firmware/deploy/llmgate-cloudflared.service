@@ -1,0 +1,68 @@
+[Unit]
+Description=llmgate cloudflared — Cloudflare Tunnel connector
+Documentation=https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/
+After=network-online.target llmgate-gatewayd.service
+Wants=network-online.target
+# 不写 Requires/PartOf/BindsTo：Tunnel 不是网关的前置条件，也不随网关一起停。
+# 本 unit **不 enable**：由 llmgate-updated（升级引擎）按管理台的启用/停用经
+# systemctl start/stop 管理；每次启动前引擎先把运行期 token 写到
+# /run/llmgate-cloudflared/token（0600 llmgate-tunnel）。
+
+[Service]
+Type=simple
+User=llmgate-tunnel
+Group=llmgate-tunnel
+# 启动参数固定（docs-dev/firmware-cloudflare-tunnel.md §7.2）：不让上游程序自更新；
+# metrics 只绑定 loopback 固定端口供就绪探针；token 只从文件读，不进 argv/环境变量。
+ExecStart=/opt/llmgate/components/cloudflared/current/cloudflared tunnel --no-autoupdate --metrics 127.0.0.1:20241 --loglevel error --protocol auto run --token-file /run/llmgate-cloudflared/token
+Restart=on-failure
+RestartSec=5
+# 不把 cloudflared 原始 stdout/stderr 写 journal（§8）：那里面可能带 hostname 与请求 URL。
+StandardOutput=null
+StandardError=null
+Environment=NO_AUTOUPDATE=true
+Environment=TUNNEL_METRICS=127.0.0.1:20241
+
+# ---- 权限与沙箱（§8）----
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources @mount
+UMask=0077
+# 只暴露 §4.1 的文件：设备数据库、device-key、TLS 私钥、网关配置与升级引擎 socket
+# 对 connector 不可见；resolv.conf 换成固定公共解析器（cloudflared-resolv.conf）。
+InaccessiblePaths=-/var/lib/llmgate -/var/lib/llmgate-updated -/run/llmgate-updated -/etc/llmgate/gatewayd.yaml -/etc/llmgate/tls
+BindReadOnlyPaths=/etc/llmgate/cloudflared-resolv.conf:/etc/resolv.conf
+# 出站边界（§8）：只允许 Cloudflare Tunnel edge（TCP/UDP 7844）与固定 DNS 解析器；
+# loopback 只为 metrics 探针放行，到设备 80/443 的回连由 llmgate-cloudflared.nft
+# 按 uid 与端口拦下（systemd 的 IP 过滤不认端口）。
+IPAddressDeny=any
+IPAddressAllow=127.0.0.1 198.41.192.0/24 198.41.200.0/24 2606:4700:a0::/48 2606:4700:a8::/48 1.1.1.1 1.0.0.1 2606:4700:4700::1111 2606:4700:4700::1001
+# 资源上限（H618：4×A53 / 2 GB）
+MemoryMax=256M
+TasksMax=64
+LimitNOFILE=16384
+TimeoutStopSec=15
+
+[Install]
+WantedBy=multi-user.target

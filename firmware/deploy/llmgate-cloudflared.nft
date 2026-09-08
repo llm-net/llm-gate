@@ -1,0 +1,23 @@
+#!/usr/sbin/nft -f
+# llmgate-cloudflared.nft — connector 的 origin SSRF 隔离（docs-dev/firmware-cloudflare-tunnel.md §8）。
+#
+# remotely-managed tunnel 的 origin route 由 Cloudflare 侧配置：账号或 token 被攻破时，
+# 攻击者可能把 route 改向 http://127.0.0.1:80 之类的本机/局域网服务。unit 里的
+# IPAddressDeny/Allow 挡住了局域网与任意公网，但它不认端口，而 metrics 探针又需要
+# loopback；这里按 **发起进程的 uid** 与端口把 loopback 收窄到只剩 metrics 的应答：
+#
+#   - llmgate-tunnel 发往 loopback 的新连接一律丢弃（它只该被动应答 20241）；
+#   - 已建立连接的回包放行（gatewayd → 20241 的探针由 gatewayd 发起）。
+#
+# 落位：/etc/nftables.d/llmgate-cloudflared.nft（或 include 进 /etc/nftables.conf），
+# `nft -f` 加载后 `systemctl enable nftables`。规则只针对该 uid，不影响 NetworkManager、
+# gatewayd 或其他进程。
+table inet llmgate_cloudflared {
+	chain output {
+		type filter hook output priority filter; policy accept;
+		ct state established,related accept
+		meta skuid "llmgate-tunnel" oifname "lo" ct state new counter drop
+		meta skuid "llmgate-tunnel" ip daddr { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10, 224.0.0.0/4 } counter drop
+		meta skuid "llmgate-tunnel" ip6 daddr { fc00::/7, fe80::/10, ff00::/8 } counter drop
+	}
+}

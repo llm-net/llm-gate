@@ -1,0 +1,831 @@
+@import "tailwindcss";
+/* tw-animate-css 供给 shadcn 浮层用的 animate-in / fade-in-0 / zoom-in-95 /
+   slide-in-from-* 这批类——它们不在 Tailwind v4 核心里，缺了不会报错，只会让
+   dialog / dropdown-menu / tooltip / sheet / sonner 的进出场动画静默失效。
+   包在 node_modules 里，构建期由 Tailwind 解析，不产生任何外部请求。 */
+@import "tw-animate-css";
+
+/* ---------------------------------------------------------------------------
+   板上 Agent 产品面主题：shadcn New York 结构 + 科技绿 token
+   （Agent 产品面见 docs-dev/agent-app-server.md §5；2026-08 起整面从中性 zinc 改为科技绿）。
+
+   基调是「电路板绿」：中性骨架整体压一层极淡的绿底（oklch hue ≈ 155–165，
+   与 Logo 的绿色系协调），主色、聚焦环、悬停与选中态统一走科技绿。底色仍然
+   近白、面板仍然安静——绿意做氛围，对话内容照旧优先，不做满屏荧光。字体只用
+   系统字体栈（含 CJK 回退），不拉 Google Fonts 或任何外部资源——板子在客户内网
+   里可能完全不出网，页面必须离线自洽。
+
+   外观共四种，互斥，类挂在 `<html>` 上：缺省绿（`:root` 这套，不挂类）、
+   `.theme-blue` 与 `.theme-gold`（整组换 hue 的浅色方案）、`.dark`（夜间模式，
+   启用下面预置的深色 token）。切换入口有两个，共用 lib/theme.ts：登录后在顶栏
+   账户菜单，登录前在登录页面板底部那条铭牌上。选择存 localStorage，index.html
+   里的内联脚本赶在首帧前把类挂上。整机那两块深色机身（顶栏、登录页面板）跟着
+   配色走，各自只从一组变量取色：顶栏 --topbar-*、登录页 --auth-*。LED 信号色
+   （--color-signal-*）是状态灯，不随主题走。
+--------------------------------------------------------------------------- */
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --radius: 0.625rem;
+  /* 贯通整幅的顶栏高度。`.app-topbar` 按它长高，外壳把它传成侧栏的
+     `--sidebar-top`（features/layout/app-shell.tsx），两处只有这一个真值。 */
+  --topbar-h: 3.5rem;
+
+  --background: oklch(0.99 0.005 160);
+  --foreground: oklch(0.16 0.02 166);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.16 0.02 166);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.16 0.02 166);
+  --primary: oklch(0.53 0.15 155);
+  --primary-foreground: oklch(0.985 0.005 155);
+  --secondary: oklch(0.963 0.012 158);
+  --secondary-foreground: oklch(0.26 0.05 160);
+  --muted: oklch(0.965 0.008 158);
+  --muted-foreground: oklch(0.52 0.03 162);
+  --accent: oklch(0.95 0.025 157);
+  --accent-foreground: oklch(0.26 0.06 158);
+  --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.985 0 0);
+  --border: oklch(0.92 0.012 160);
+  --input: oklch(0.92 0.012 160);
+  --ring: oklch(0.66 0.14 156);
+
+  --sidebar: oklch(0.975 0.01 158);
+  --sidebar-foreground: oklch(0.16 0.02 166);
+  --sidebar-primary: oklch(0.53 0.15 155);
+  --sidebar-primary-foreground: oklch(0.985 0.005 155);
+  --sidebar-accent: oklch(0.936 0.03 156);
+  --sidebar-accent-foreground: oklch(0.24 0.06 158);
+  --sidebar-border: oklch(0.913 0.015 158);
+  --sidebar-ring: oklch(0.66 0.14 156);
+
+  /* 顶栏面板条的机身色与两团辉光（.app-topbar 只从这三个变量取色）。缺省是
+     墨绿石墨 + 翠绿；蓝 / 金主题整组换色，夜间模式沿用缺省。登录页那块面板
+     不走这些变量，它另有一组同样跟着配色走的 --auth-*，见下。 */
+  --topbar-bg: #0b1e17;
+  --topbar-glow-a: rgb(74 222 128 / 0.2);
+  --topbar-glow-b: rgb(16 185 129 / 0.24);
+
+  /* 登录页「设备正面」的机身色与两档信号色：.auth-* 一节全部只从这三个变量
+     取色，透明度用 color-mix 现兑。缺省是墨绿机身 + 翠绿 / 荧光绿；蓝 / 金主题
+     整组换色，夜间模式沿用缺省（那块面板本来就是深色的，夜间只换底纹与大字标
+     的墨色两端）。面板头部那盏「在线」LED 不在此列——它是状态灯，恒为信号绿。 */
+  --auth-body: #0b1e17;
+  --auth-brand: #059669;
+  --auth-neon: #4ade80;
+}
+
+.dark {
+  --background: oklch(0.145 0.02 168);
+  --foreground: oklch(0.975 0.008 155);
+  --card: oklch(0.205 0.025 165);
+  --card-foreground: oklch(0.975 0.008 155);
+  --popover: oklch(0.205 0.025 165);
+  --popover-foreground: oklch(0.975 0.008 155);
+  --primary: oklch(0.78 0.17 152);
+  --primary-foreground: oklch(0.17 0.04 162);
+  --secondary: oklch(0.27 0.025 163);
+  --secondary-foreground: oklch(0.975 0.008 155);
+  --muted: oklch(0.27 0.025 163);
+  --muted-foreground: oklch(0.71 0.03 158);
+  --accent: oklch(0.29 0.04 160);
+  --accent-foreground: oklch(0.975 0.008 155);
+  --destructive: oklch(0.704 0.191 22.216);
+  --destructive-foreground: oklch(0.985 0 0);
+  --border: oklch(0.92 0.06 155 / 12%);
+  --input: oklch(0.92 0.06 155 / 16%);
+  --ring: oklch(0.6 0.13 154);
+
+  --sidebar: oklch(0.205 0.025 165);
+  --sidebar-foreground: oklch(0.975 0.008 155);
+  --sidebar-primary: oklch(0.78 0.17 152);
+  --sidebar-primary-foreground: oklch(0.17 0.04 162);
+  --sidebar-accent: oklch(0.29 0.04 160);
+  --sidebar-accent-foreground: oklch(0.975 0.008 155);
+  --sidebar-border: oklch(0.92 0.06 155 / 12%);
+  --sidebar-ring: oklch(0.6 0.13 154);
+}
+
+/* 蓝色主题：同一副骨架，hue 整体转到海蓝（≈ 240–250），明度与彩度逐项对位
+   绿色那套；card / popover / destructive 与绿色同值，不重复声明。顶栏换成
+   墨蓝石墨 + 天蓝辉光。 */
+.theme-blue {
+  --background: oklch(0.99 0.005 240);
+  --foreground: oklch(0.16 0.02 252);
+  --card-foreground: oklch(0.16 0.02 252);
+  --popover-foreground: oklch(0.16 0.02 252);
+  --primary: oklch(0.52 0.16 250);
+  --primary-foreground: oklch(0.985 0.005 245);
+  --secondary: oklch(0.963 0.012 243);
+  --secondary-foreground: oklch(0.26 0.05 248);
+  --muted: oklch(0.965 0.008 243);
+  --muted-foreground: oklch(0.52 0.03 248);
+  --accent: oklch(0.95 0.025 242);
+  --accent-foreground: oklch(0.26 0.06 246);
+  --border: oklch(0.92 0.012 243);
+  --input: oklch(0.92 0.012 243);
+  --ring: oklch(0.64 0.13 248);
+
+  --sidebar: oklch(0.975 0.01 243);
+  --sidebar-foreground: oklch(0.16 0.02 252);
+  --sidebar-primary: oklch(0.52 0.16 250);
+  --sidebar-primary-foreground: oklch(0.985 0.005 245);
+  --sidebar-accent: oklch(0.936 0.03 242);
+  --sidebar-accent-foreground: oklch(0.24 0.06 246);
+  --sidebar-border: oklch(0.913 0.015 243);
+  --sidebar-ring: oklch(0.64 0.13 248);
+
+  --topbar-bg: #0b1624;
+  --topbar-glow-a: rgb(96 165 250 / 0.22);
+  --topbar-glow-b: rgb(14 165 233 / 0.24);
+
+  --auth-body: #0b1624;
+  --auth-brand: #0284c7;
+  --auth-neon: #60a5fa;
+}
+
+/* 金色主题：暖金（hue ≈ 80–92）。浅金做氛围；主按钮压到深鎏金——同明度的
+   正黄在白字下对比不够，金色的「金」由大面积浅金 + 深金交互色共同读出。
+   顶栏换成墨金石墨 + 鎏金辉光。 */
+.theme-gold {
+  --background: oklch(0.99 0.006 92);
+  --foreground: oklch(0.17 0.02 84);
+  --card-foreground: oklch(0.17 0.02 84);
+  --popover-foreground: oklch(0.17 0.02 84);
+  --primary: oklch(0.56 0.12 80);
+  --primary-foreground: oklch(0.99 0.008 92);
+  --secondary: oklch(0.963 0.016 92);
+  --secondary-foreground: oklch(0.28 0.05 84);
+  --muted: oklch(0.965 0.012 92);
+  --muted-foreground: oklch(0.52 0.035 84);
+  --accent: oklch(0.95 0.032 92);
+  --accent-foreground: oklch(0.28 0.06 84);
+  --border: oklch(0.92 0.018 92);
+  --input: oklch(0.92 0.018 92);
+  --ring: oklch(0.7 0.13 85);
+
+  --sidebar: oklch(0.975 0.014 92);
+  --sidebar-foreground: oklch(0.17 0.02 84);
+  --sidebar-primary: oklch(0.56 0.12 80);
+  --sidebar-primary-foreground: oklch(0.99 0.008 92);
+  --sidebar-accent: oklch(0.936 0.04 91);
+  --sidebar-accent-foreground: oklch(0.26 0.06 84);
+  --sidebar-border: oklch(0.913 0.02 92);
+  --sidebar-ring: oklch(0.7 0.13 85);
+
+  --topbar-bg: #1e1708;
+  --topbar-glow-a: rgb(250 204 21 / 0.17);
+  --topbar-glow-b: rgb(217 119 6 / 0.2);
+
+  /* 大字标要在瓷白底上读得出来，所以金的这两档比顶栏辉光沉一点：亮黄只做辉光
+     时够用，填进字形就发飘。 */
+  --auth-body: #1e1708;
+  --auth-brand: #b45309;
+  --auth-neon: #eab308;
+}
+
+/* 登录页面板整块挂 `dark`，卡内 shadcn 组件因此拿的是上面 `.dark` 那套深色
+   token——那一套是绿的。蓝 / 金主题下把「有颜色的那几个」拉回当前配色：主按钮与
+   聚焦环。其余深色 token（边框、输入底、muted 文字）彩度都在 0.03 以下，在哪种
+   机身上都读作中性灰，不值得为它们各复制一整套。
+
+   这两条必须与 `.dark` 同样**不进 @layer**：Tailwind 的分层样式一律压不过无层
+   样式，写进 `@layer components` 的话再高的权重也叫不动面板里的 `.dark`。同在无层
+   里才轮到权重说话——`.theme-* .auth-panel`（0,2,0）压得过 `.dark`（0,1,0）。
+   夜间模式不需要这两条：它本来就用 `.dark` 这套。 */
+.theme-blue .auth-panel {
+  --primary: oklch(0.72 0.13 258);
+  --primary-foreground: oklch(0.17 0.04 252);
+  --ring: oklch(0.6 0.13 248);
+}
+
+.theme-gold .auth-panel {
+  --primary: oklch(0.79 0.155 88);
+  --primary-foreground: oklch(0.19 0.04 84);
+  --ring: oklch(0.68 0.12 85);
+}
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+@theme {
+  /* LED 语义色，取自管理台 style.css 的 :root 信号色一组：设备界面的状态读数
+     （在线/离线、预算三窗、温度、余额）需要「正常 / 告警 / 故障」三档，shadcn
+     主题 token 只给了 destructive 一档。面板底色与文字色不从那边搬——那些与
+     background / card / border / foreground / muted-foreground 是同一件事，
+     搬过来会变成两套并行的真值。
+
+     signal-ok 与主题主色同为绿系（hue 156.5 vs 155），状态灯语义不变；品牌与
+     交互上的绿一律走 --primary，别拿状态灯色当品牌色用。 */
+  --color-signal-ok: oklch(0.7 0.163 156.5);
+  --color-signal-alert: oklch(0.769 0.161 70.08);
+  --color-signal-danger: oklch(0.577 0.213 27.325);
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", "Source Han Sans SC",
+    "Noto Sans CJK SC", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  html {
+    min-width: 320px;
+    color-scheme: light;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  /* 夜间模式连 UA 自绘件（滚动条、表单控件、自动填充）一起切深色。只挂在
+     html 上：登录页面板那个自带 .dark 的 Card 里的输入框仍按面板自己的
+     autofill 覆写走。 */
+  html.dark {
+    color-scheme: dark;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    margin: 0;
+    font-family: var(--font-sans);
+  }
+
+  /* 选中高亮也归进科技绿：跟着 --primary 走，light/dark 两套 token 都对。
+     色值用 color-mix 兑透明——Tailwind v4 的透明度修饰符同一机制，浏览器
+     支持面一致。 */
+  ::selection {
+    background-color: color-mix(in oklab, var(--primary) 22%, transparent);
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   设备信号色（机身 → 品牌色 → 高光）：只在「设备本体」露面——登录页的大字标、
+   底纹与右列操作面板，加外壳顶栏那一条。产品面其余部分走上面那套安静的中性
+   token，让对话内容而不是高饱和品牌色占注意力。
+
+   登录页「设备正面」：左列大字标 + 整页底纹 + 右列深色操作面板。三档色一律从
+   --auth-body / --auth-brand / --auth-neon 取（缺省为墨绿 #0b1e17、翠绿 #059669
+   与荧光绿 #4ade80，与 Logo 的绿色系协调），
+   透明度用 color-mix 现兑，所以整台设备跟着界面配色一起换色，这一节不再有第二
+   处写死的色值。
+
+   大字标是全站唯一一处放开了做的字——两行超大（LLM / Gate，按产品名原样
+   大小写），机身→品牌色→高光的渐变填进字形并缓慢横移，像通电的电路板。渐变
+   落在每一行 .auth-wordmark-line 上而不是整块 <h1>：Logo 与 LLM 同行，套进带
+   background-clip:text 的层会被裁成透明。不支持 background-clip:text 的浏览器
+   退回 color 的墨色实心字。
+--------------------------------------------------------------------------- */
+
+@layer components {
+  /* 标题栏是页面级横条，始终使用主区的全部可用宽度；普通表单和清单正文仍限在
+     5xl 行宽内。wide 页面只解除正文限宽，不改变标题栏。React Fragment 不生成
+     DOM，ResourceGate 展开的正文仍是 page-container 的直接子节点。 */
+  .page-container:not(.page-container-wide) > :not([data-slot="page-header"]) {
+    width: 100%;
+    max-width: 64rem;
+    margin-inline: auto;
+  }
+
+  /* 顶栏是设备的面板条：墨绿石墨底 + 同一套机加工点阵（这次是暗底上的亮点）+
+     左右两团翠绿辉光。整幅横过去的深色条把「整机读数」与下面的白色工作区分开，
+     一眼就知道那一行说的是设备本身、不是当前这一页。
+
+     文字色写死成白色透明度而不是走 token：这一条在所有主题下恒为深色，跟着
+     foreground 走会在夜间模式下变成深底深字。机身色与两团辉光从 --topbar-* 取
+     （:root 缺省墨绿翠绿，蓝 / 金主题各自整组换色）。 */
+  .app-topbar {
+    height: var(--topbar-h);
+    background-color: var(--topbar-bg);
+    background-image:
+      radial-gradient(rgb(255 255 255 / 0.05) 1px, transparent 1.4px),
+      radial-gradient(540px 200px at 3% 150%, var(--topbar-glow-a), transparent 70%),
+      radial-gradient(760px 240px at 58% -70%, var(--topbar-glow-b), transparent 72%);
+    background-size: 22px 22px, auto, auto;
+    background-repeat: repeat, no-repeat, no-repeat;
+    /* 下沿那条线走 inset 阴影，不用 border-bottom：border 会吃掉 1px 内容高，
+       56px 的条只剩 55px 可居中，里面每一件都往上偏半像素——顶栏最容易被看出
+       "没对齐"的就是这半像素。阴影不参与盒模型，内容盒恒是整 56px。 */
+    box-shadow:
+      inset 0 -1px 0 rgb(255 255 255 / 0.1),
+      0 10px 26px -22px rgb(11 30 23 / 0.9);
+  }
+
+  /* 机加工点阵 + 两角光晕：整片瓷白机身都有质感，而不只是中间一块。 */
+  .auth-backdrop {
+    background-image:
+      radial-gradient(color-mix(in srgb, var(--auth-body) 4.5%, transparent) 1px, transparent 1.4px),
+      radial-gradient(
+        1100px 540px at 16% -10%,
+        color-mix(in srgb, var(--auth-neon) 12%, transparent),
+        transparent 64%
+      ),
+      radial-gradient(
+        960px 600px at 106% 112%,
+        color-mix(in srgb, var(--auth-brand) 7%, transparent),
+        transparent 72%
+      );
+    background-size: 26px 26px, auto, auto;
+    background-repeat: repeat, no-repeat, no-repeat;
+  }
+
+  /* 夜间模式补两处深底适配：暗点点阵在深底上看不见，换成亮点；大字标的墨色
+     两端同理，换成瓷白，渐变成「白→品牌色→高光」的夜光字。 */
+  .dark .auth-backdrop {
+    background-image:
+      radial-gradient(rgb(255 255 255 / 0.045) 1px, transparent 1.4px),
+      radial-gradient(
+        1100px 540px at 16% -10%,
+        color-mix(in srgb, var(--auth-neon) 10%, transparent),
+        transparent 64%
+      ),
+      radial-gradient(
+        960px 600px at 106% 112%,
+        color-mix(in srgb, var(--auth-brand) 8%, transparent),
+        transparent 72%
+      );
+  }
+
+  .dark .auth-mark {
+    --wordmark-ink: oklch(0.96 0.01 155);
+  }
+
+  .auth-mark {
+    --wordmark-size: clamp(52px, 15vw, 92px);
+    --wordmark-shift: calc(var(--wordmark-size) * 0.32);
+    --wordmark-ink: var(--auth-body);
+    --wordmark-brand: var(--auth-brand);
+    --wordmark-neon: var(--auth-neon);
+    min-width: 0;
+    overflow: visible;
+  }
+
+  /* 两列摆得下时才放到最大：单行 LLM Gate 在左列里只能缩到很小，两行加上这个
+     字号才撑得住「一眼看见的大字」。断点对齐外层的 lg。 */
+  @media (width >= 64rem) {
+    .auth-mark {
+      --wordmark-size: clamp(60px, 10.6vw, 160px);
+    }
+  }
+
+  .auth-wordmark {
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    font-size: var(--wordmark-size);
+    font-weight: 900;
+    line-height: 1.12;
+    letter-spacing: -0.035em;
+    color: var(--wordmark-ink);
+    overflow: visible;
+    filter: drop-shadow(0 16px 38px color-mix(in srgb, var(--auth-brand) 20%, transparent));
+  }
+
+  /* Logo 挂在 LLM 那一行右上角，与字形同高缩放（em）。 */
+  .auth-wordmark-gate {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    width: max-content;
+  }
+
+  .auth-wordmark-logo {
+    flex: none;
+    width: 0.42em;
+    height: 0.42em;
+    margin: 0.04em 0 0 0.1em;
+  }
+
+  .auth-wordmark-line {
+    background-image: linear-gradient(
+      100deg,
+      var(--wordmark-ink) 0%,
+      var(--wordmark-brand) 26%,
+      var(--wordmark-neon) 44%,
+      var(--wordmark-brand) 62%,
+      var(--wordmark-ink) 100%
+    );
+    background-size: 200% 100%;
+    background-position: 0% 50%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: wordmark-sheen 14s linear infinite;
+  }
+
+  /* Gate 相对 LLM 再往右错开一截。 */
+  .auth-wordmark-agent {
+    margin-left: var(--wordmark-shift);
+    padding-bottom: 0.08em;
+  }
+
+  /* 右列操作面板外圈：一道缓慢巡回的能量光带。做法是「border beam」——比裁切
+     框大得多的一整块 conic 渐变自转，面板盖住中间，只露出 1px 外缘；纯 transform
+     动画，不依赖 @property，老浏览器退化成静止的渐变描边也成立。绿色环境辉光
+     放这层的 box-shadow 上（overflow 不裁阴影），把黑面板从瓷白底上托起来。 */
+  .auth-edge {
+    position: relative;
+    border-radius: 24px;
+    padding: 1.5px;
+    isolation: isolate;
+    animation: auth-arrive 650ms cubic-bezier(0.16, 1, 0.3, 1) both;
+    overflow: clip;
+    box-shadow:
+      0 30px 80px -32px color-mix(in srgb, var(--auth-brand) 55%, transparent),
+      0 0 46px -16px color-mix(in srgb, var(--auth-neon) 40%, transparent);
+  }
+
+  /* 光带写法：暗描边打底，一道「亮核 + 长尾」的主光束加对侧一道弱回波。
+     头亮尾暗的不对称让旋转方向读得出来，比均匀亮段更像能量在跑。 */
+  .auth-edge::before {
+    content: "";
+    position: absolute;
+    width: 200%;
+    aspect-ratio: 1;
+    left: -50%;
+    top: 50%;
+    translate: 0 -50%;
+    pointer-events: none;
+    background-image: conic-gradient(
+      from 0deg,
+      rgb(255 255 255 / 0.06) 0deg,
+      var(--auth-neon) 16deg,
+      color-mix(in srgb, var(--auth-neon) 40%, white) 24deg,
+      color-mix(in srgb, var(--auth-neon) 85%, transparent) 34deg,
+      color-mix(in srgb, var(--auth-brand) 30%, transparent) 74deg,
+      rgb(255 255 255 / 0.06) 112deg,
+      rgb(255 255 255 / 0.06) 184deg,
+      color-mix(in srgb, var(--auth-neon) 50%, transparent) 206deg,
+      color-mix(in srgb, var(--auth-brand) 22%, transparent) 234deg,
+      rgb(255 255 255 / 0.06) 262deg
+    );
+    animation: auth-edge-orbit 12s linear infinite;
+  }
+
+  /* 面板机身质感：机加工点阵 + 两角辉光，与 .app-topbar 同一套语言。底色由
+     JSX 里的 bg-(--auth-body) 出——utilities 层的 bg-* 会盖掉这里写的
+     background-color，所以这个类只管 background-image。 */
+  .auth-panel {
+    background-image:
+      radial-gradient(rgb(255 255 255 / 0.05) 1px, transparent 1.4px),
+      radial-gradient(
+        560px 300px at 88% -20%,
+        color-mix(in srgb, var(--auth-neon) 16%, transparent),
+        transparent 70%
+      ),
+      radial-gradient(
+        620px 400px at -25% 125%,
+        color-mix(in srgb, var(--auth-brand) 14%, transparent),
+        transparent 72%
+      );
+    background-size: 22px 22px, auto, auto;
+    background-repeat: repeat, no-repeat, no-repeat;
+  }
+
+  .auth-ambient {
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    overflow: clip;
+    pointer-events: none;
+  }
+
+  .auth-ambient span {
+    position: absolute;
+    width: min(70vw, 850px);
+    aspect-ratio: 1;
+    border-radius: 50%;
+    background: radial-gradient(ellipse, color-mix(in srgb, var(--auth-neon) 13%, transparent), transparent 68%);
+    animation: auth-drift 20s ease-in-out infinite alternate;
+  }
+
+  .auth-ambient span:first-child { left: -15%; top: -25%; }
+  .auth-ambient span:last-child { right: -20%; bottom: -40%; animation-delay: -10s; }
+
+  .auth-layout { position: relative; }
+
+  .auth-orbits {
+    position: absolute;
+    z-index: -1;
+    width: 115%;
+    aspect-ratio: 1;
+    top: 50%;
+    left: 42%;
+    translate: -50% -50%;
+    pointer-events: none;
+    mask-image: linear-gradient(135deg, black, transparent 82%);
+  }
+
+  .auth-orbits span {
+    position: absolute;
+    inset: 0;
+    border: 1px solid color-mix(in srgb, var(--auth-brand) 14%, transparent);
+    border-radius: 50%;
+  }
+
+  .auth-orbits span:nth-child(2) { inset: 10%; border-style: dashed; opacity: 0.6; }
+  .auth-orbits span:nth-child(3) { inset: 20%; opacity: 0.4; }
+
+  .auth-orbits span:first-child::after {
+    content: "";
+    position: absolute;
+    left: 14.6%;
+    top: 14.6%;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--auth-brand);
+    box-shadow: 0 0 20px color-mix(in srgb, var(--auth-neon) 60%, transparent);
+  }
+
+  .auth-eyebrow {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 28px;
+    color: var(--muted-foreground);
+    font-size: 12px;
+    letter-spacing: 0.24em;
+  }
+
+  .auth-eyebrow::before {
+    content: "";
+    width: 24px;
+    height: 1px;
+    background: var(--auth-brand);
+  }
+
+  .auth-tagline {
+    margin: 20px 0 0 5px;
+    color: var(--muted-foreground);
+    font-size: clamp(14px, 1.2vw, 17px);
+    letter-spacing: 0.16em;
+  }
+
+  .auth-circuit {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 140px;
+    margin: 28px 0 0 5px;
+  }
+
+  .auth-circuit span { height: 3px; width: 5px; border-radius: 2px; background: var(--auth-brand); opacity: 0.35; }
+  .auth-circuit span:first-child { width: 70px; background: linear-gradient(90deg, var(--auth-brand), var(--auth-neon)); opacity: 0.7; }
+
+  .auth-heading-icon {
+    display: grid;
+    place-items: center;
+    width: 42px;
+    height: 42px;
+    border-radius: 13px;
+    color: var(--auth-neon);
+    border: 1px solid color-mix(in srgb, var(--auth-neon) 18%, transparent);
+    background: color-mix(in srgb, var(--auth-neon) 7%, transparent);
+  }
+
+  .auth-status {
+    color: rgb(255 255 255 / 65%);
+    border: 1px solid rgb(255 255 255 / 8%);
+    border-radius: 999px;
+    padding: 6px 10px;
+    background: rgb(0 0 0 / 12%);
+  }
+
+}
+
+/* 登录控件的局部覆盖不放进 layer，才能覆盖 vendored 组件的默认 utility。 */
+/* 用一个持续挂载的滑块表示选中项，按钮本身只过渡文字颜色。 */
+.auth-tabs .auth-methods {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  height: 48px;
+  padding: 4px;
+  border: 1px solid rgb(255 255 255 / 9%);
+  border-radius: 13px;
+  background: rgb(0 0 0 / 20%);
+}
+
+.auth-method-indicator {
+  position: absolute;
+  inset: 4px auto 4px 4px;
+  width: calc((100% - 8px) / 2);
+  border-radius: 9px;
+  border: 1px solid color-mix(in srgb, var(--auth-neon) 25%, transparent);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--auth-neon) 15%, transparent), rgb(255 255 255 / 5%));
+  box-shadow: 0 2px 8px rgb(0 0 0 / 15%), inset 0 1px rgb(255 255 255 / 6%);
+  transition: transform 340ms cubic-bezier(0.22, 1, 0.36, 1);
+  pointer-events: none;
+}
+
+.auth-methods[data-method="api-key"] .auth-method-indicator { transform: translateX(100%); }
+
+.auth-tabs .auth-methods [data-slot="tabs-trigger"] {
+  height: 100%;
+  min-width: 0;
+  padding-inline: 4px;
+  padding-block: 2px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  box-shadow: none;
+  font-size: 13px;
+  line-height: 1.25;
+  white-space: normal;
+  transition: color 200ms ease;
+}
+
+.auth-tabs .auth-methods [data-state="active"] { color: var(--auth-neon); }
+
+/* 隐藏面板仍参与网格测量；没有固定卡片高度，长译文与缩放可自然撑开。 */
+.auth-form-stage { display: grid; }
+.auth-form-panel { display: flex; grid-area: 1 / 1; min-width: 0; }
+.auth-form-panel[data-state="inactive"] { visibility: hidden; pointer-events: none; }
+.auth-form-body { display: flex; flex: 1; min-width: 0; }
+.auth-form-panel[data-state="active"] .auth-form-body { animation: auth-form-enter 280ms cubic-bezier(0.22, 1, 0.36, 1); }
+
+.auth-form {
+  display: grid;
+  grid-template-rows: auto auto 1fr auto auto;
+  gap: 16px;
+  width: 100%;
+  min-width: 0;
+}
+
+@supports (grid-template-rows: subgrid) {
+  .auth-form-stage { grid-template-rows: auto auto 1fr auto auto; row-gap: 16px; }
+  .auth-form-panel, .auth-form-body, .auth-form {
+    display: grid;
+    grid-row: 1 / span 5;
+    grid-template-rows: subgrid;
+  }
+}
+
+.auth-form-intro { min-height: 2.8em; color: rgb(255 255 255 / 62%); font-size: 14px; line-height: 1.6; }
+.auth-form-hint { color: rgb(255 255 255 / 48%); font-size: 12px; line-height: 1.8; }
+.auth-form-message { min-height: 20px; }
+.auth-field { display: flex; flex-direction: column; gap: 10px; font-size: 13px; font-weight: 500; }
+.auth-input-wrap { position: relative; display: block; }
+.auth-input-wrap > svg { position: absolute; left: 15px; top: 50%; translate: 0 -50%; width: 17px; height: 17px; color: rgb(255 255 255 / 40%); pointer-events: none; transition: color 180ms ease; }
+.auth-input-wrap:focus-within > svg { color: var(--auth-neon); }
+
+.auth-panel .auth-input {
+  height: 50px;
+  padding-left: 43px;
+  border-radius: 11px;
+  border-color: rgb(255 255 255 / 14%);
+  background: rgb(0 0 0 / 15%);
+  transition: border-color 180ms ease, box-shadow 180ms ease, background-color 180ms ease;
+}
+
+.auth-panel .auth-input:hover { border-color: rgb(255 255 255 / 27%); }
+.auth-panel .auth-input:focus-visible { border-color: var(--auth-neon); box-shadow: 0 0 0 3px color-mix(in srgb, var(--auth-neon) 12%, transparent); }
+.auth-panel .auth-input[aria-invalid="true"] { border-color: var(--destructive); }
+
+.auth-panel .auth-submit {
+  position: relative;
+  height: 50px;
+  width: 100%;
+  overflow: hidden;
+  border-radius: 11px;
+  font-size: 15px;
+  font-weight: 600;
+  background-image: linear-gradient(110deg, rgb(255 255 255 / 13%), transparent 55%);
+  box-shadow: 0 5px 24px -9px color-mix(in srgb, var(--auth-neon) 55%, transparent), inset 0 1px rgb(255 255 255 / 25%);
+  transition: transform 180ms ease, box-shadow 220ms ease, background-color 180ms ease;
+}
+
+.auth-submit-arrow { position: absolute; right: 18px; transition: transform 180ms ease; }
+.auth-panel .auth-submit:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 8px 30px -8px color-mix(in srgb, var(--auth-neon) 65%, transparent); }
+.auth-submit:hover .auth-submit-arrow { transform: translateX(3px); }
+.auth-panel .auth-submit:active:not(:disabled) { transform: translateY(0) scale(0.99); }
+
+@media (width < 64rem) {
+  .auth-mark { --wordmark-size: clamp(46px, 12vw, 68px); }
+  .auth-wordmark { flex-direction: row; align-items: baseline; gap: 0.25em; }
+  .auth-wordmark-agent { margin-left: 0; padding-bottom: 0; }
+  .auth-wordmark-logo { width: 0.34em; height: 0.34em; }
+  .auth-eyebrow { margin-bottom: 12px; font-size: 10px; }
+  .auth-tagline { margin-top: 8px; font-size: 12px; }
+  .auth-orbits { width: 85%; left: 75%; }
+  .auth-circuit { display: none; }
+}
+
+@media (width < 24rem) {
+  .auth-panel .auth-submit { font-size: 14px; }
+  .auth-submit-arrow { position: static; }
+}
+
+/* 面板头部的在线 LED：辉光 + 呼吸。它是状态灯不是机身，四种配色下恒为信号绿。 */
+.auth-led {
+  box-shadow: 0 0 10px 2px rgb(74 222 128 / 0.5);
+  animation: auth-led-breathe 2.8s ease-in-out infinite;
+}
+
+/* 浏览器记住密码后的自动填充会把输入框刷成亮底，在深色面板上像一块补丁。
+   标准 hack：拿超大 inset 阴影盖回面板同族的暗底。UA 对 :-webkit-autofill 与
+   :autofill 支持不一，两条选择器必须分开写——合写会让不认识的 UA 废掉整条规则。 */
+.auth-panel .auth-input:-webkit-autofill {
+  -webkit-text-fill-color: oklch(0.975 0.008 155);
+  caret-color: oklch(0.975 0.008 155);
+  box-shadow: inset 0 0 0 1000px color-mix(in srgb, var(--auth-body) 96%, white);
+}
+
+.auth-panel .auth-input:autofill {
+  caret-color: oklch(0.975 0.008 155);
+  box-shadow: inset 0 0 0 1000px color-mix(in srgb, var(--auth-body) 96%, white);
+}
+
+@keyframes auth-arrive {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes auth-form-enter {
+  from { opacity: 0.45; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes auth-drift {
+  from { transform: translate3d(0, 0, 0); }
+  to { transform: translate3d(7%, 5%, 0); }
+}
+
+@keyframes wordmark-sheen {
+  from {
+    background-position: 0% 50%;
+  }
+
+  to {
+    background-position: 200% 50%;
+  }
+}
+
+@keyframes auth-edge-orbit {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+@keyframes auth-led-breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.4;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .auth-wordmark-line,
+  .auth-ambient span,
+  .auth-edge,
+  .auth-form-panel[data-state="active"] .auth-form-body,
+  .auth-edge::before,
+  .auth-led {
+    animation: none;
+  }
+
+  .auth-backdrop *,
+  .auth-backdrop *::before,
+  .auth-backdrop *::after { transition: none !important; }
+}

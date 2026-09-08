@@ -1,0 +1,56 @@
+name: Close pull requests
+
+on:
+  pull_request_target:
+    types: [opened, reopened]
+
+permissions:
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: close-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  close:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # No checkout: never execute code from a pull request.
+      - name: Explain policy and close
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          number = int(os.environ["PR_NUMBER"])
+          base = "https://api.github.com/repos/" + os.environ["GH_REPOSITORY"]
+          headers = {
+              "Authorization": "Bearer " + os.environ["GH_TOKEN"],
+              "Accept": "application/vnd.github+json",
+              "Content-Type": "application/json",
+          }
+
+          def send(path, method, body):
+              request = urllib.request.Request(
+                  base + path, data=json.dumps(body).encode(), headers=headers, method=method
+              )
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  response.read()
+
+          body = (
+              "LLM Gate does not accept external contributions or pull requests. "
+              "This pull request is closed according to CONTRIBUTING.md. "
+              "Please use Issues for ordinary feedback and SECURITY.md for private security reports.\n\n"
+              "LLM Gate 不接受外部贡献或 Pull Request，本 PR 按 CONTRIBUTING.md 关闭。"
+              "普通反馈请使用 Issue，私密安全报告请遵循 SECURITY.md。"
+          )
+          send(f"/issues/{number}/comments", "POST", {"body": body})
+          send(f"/pulls/{number}", "PATCH", {"state": "closed"})
+          PY

@@ -1,0 +1,62 @@
+[Unit]
+Description=llmgate mihomo — 板上代理内核（Clash 订阅）
+Documentation=https://github.com/MetaCubeX/mihomo
+After=network-online.target
+Wants=network-online.target
+# 不写 Requires/PartOf/BindsTo：内核不是网关的前置条件，也不随网关一起停。
+# 本 unit **不 enable**：由 llmgate-updated（升级引擎）按管理台的启用/停用经
+# systemctl start/stop 管理；每次启动前引擎先把固件生成的受限配置写到
+# /run/llmgate-mihomo/config.yaml（0600 llmgate-proxy）并让内核 -t 自检。
+
+[Service]
+Type=simple
+User=llmgate-proxy
+Group=llmgate-proxy
+# 启动参数固定：工作目录与配置都在 tmpfs 运行期目录；配置只绑 127.0.0.1 的 SOCKS 端口，
+# 无 LAN 入站、TUN、redir/tproxy、DNS 劫持、external controller（由固件生成，不接受任意 YAML）。
+ExecStart=/opt/llmgate/components/mihomo/current/mihomo -d /run/llmgate-mihomo -f /run/llmgate-mihomo/config.yaml
+Restart=on-failure
+RestartSec=5
+# 不把内核原始 stdout/stderr 写 journal：那里面会带节点名与目标地址。
+StandardOutput=null
+StandardError=null
+Environment=HOME=/run/llmgate-mihomo
+# 内核不自更新 Geo 数据（受限配置里没有 GEO 规则，也不会去下载）。
+Environment=SKIP_SAFE_PATH_CHECK=1
+
+# ---- 权限与沙箱 ----
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources @mount
+UMask=0077
+ReadWritePaths=/run/llmgate-mihomo
+# 设备数据库、device-key、TLS 私钥、网关配置与升级引擎 socket 对内核不可见。
+InaccessiblePaths=-/var/lib/llmgate -/var/lib/llmgate-updated -/run/llmgate-updated -/etc/llmgate/gatewayd.yaml -/etc/llmgate/tls
+# 资源上限（H618：4×A53 / 2 GB）
+MemoryMax=384M
+TasksMax=128
+LimitNOFILE=65536
+TimeoutStopSec=15
+
+[Install]
+WantedBy=multi-user.target

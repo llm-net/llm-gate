@@ -1,0 +1,27 @@
+# Build output and dependencies; keep embedded UI and gate archives tracked.
+/firmware/bin/
+node_modules/
+*.test
+coverage.out
+*.coverprofile
+*.prof
+
+# Local configuration, runtime data, and credentials.
+*.local.yaml
+.env
+.env.*
+.dev.vars
+.dev.vars.*
+.cf-token*
+.github-token*
+.component-signing-key*
+/data/
+/firmware/data/
+
+# Editor and OS files.
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~

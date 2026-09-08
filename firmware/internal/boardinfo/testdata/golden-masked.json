@@ -1,0 +1,13 @@
+{
+  "schema": "llmgate.board-info/v1",
+  "model": "cubie-a7a",
+  "vendor": "Radxa Computer",
+  "sku": "RS501-D4S8R42W28",
+  "pcb_version": "V1.10D",
+  "board_serial": "B697657O",
+  "soc_platform": "A733",
+  "soc_serial": "0123…",
+  "soc_chiptype": "00005100",
+  "soc_batchno": "0x19030001",
+  "wifi_mac": "9c:04:b6:84:3d:72"
+}

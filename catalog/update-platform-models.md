@@ -75,7 +75,9 @@
 
 设备解析时整份拒绝超限的文件：平台不超过 64 条，每平台模型不超过 300 条；订阅不超过 16 条，每订阅模型不超过 100 条；文件不超过 256 KiB。同一平台内型号不重名；Codex/Grok/Claude 的型号全局不重名；Cursor 组内不重名，可与其他订阅同名。
 
-Cursor 的 `pricing` 只收 `in`、`out`、`cache_read`、`cache_write`，单位为整数微元 / 百万 token。输入与输出必填，缓存价省略时用输入价，显式 0 免费；美元价使用 `official-pricing.json` 声明的固定汇率。只收官方页面可核实的请求 ID 与标准价，不推断别名、Fast、Auto、长上下文或套餐附加费；未知 ID 的调用照常转发并标为未定价。
+Cursor 的 `pricing` 只收 `in`、`out`、`cache_read`、`cache_write`，单位为整数微元 / 百万 token。输入与输出必填，缓存价省略时用输入价，显式 0 免费；美元价使用 `official-pricing.json` 声明的固定汇率。除下述 Auto 统计名外，只收官方页面可核实的请求 ID 与标准价，不推断其他别名、Fast、长上下文或套餐附加费；未知 ID 的调用照常转发并标为未定价。
+
+`cursor-auto` 是本地计量名称，归集 Cursor Auto 的 `default` / `auto` 请求，不改变 CLI 的模型发现或上游请求。官方 Auto 按实际路由模型计价、未公布统一单价时，采用 `composer-2.5` 标准价作名义统计；核对 Composer 价格时同步两行 `pricing`。Auto 有独立官方标准价时才改用该价格，不能从展示名猜实际路由模型。官方出处及边界见 [README](README.md#cursor-auto-统计口径)。
 
 ## 步骤
 

@@ -1,0 +1,121 @@
+# llmgate gatewayd 开发配置样例：指向本地 mock 上游（tools/mock-openai），
+# 无真实 Key 也能完成全量走查。
+#
+# 真实上游 Key 不入库：复制本文件为 configs/dev.local.yaml（*.local.yaml
+# 已被 .gitignore 排除）再填入真实 api_key，并把 type 换成 deepseek/ark。
+#
+# 启动：go run ./cmd/llmgate gatewayd --config configs/dev.example.yaml
+
+# 明文监听地址。数据面 /v1/* 与管理面 /admin/*（管理 API + 管理界面）
+# 共用 handler、按路径前缀分域。
+# 开发机默认只监听回环；板上改为内网地址（板上为 0.0.0.0:80）。
+listen: "127.0.0.1:8080"
+
+# 运行数据目录（板上部署约定 /var/lib/llmgate）。
+# 库文件 llmgate.db 与上游凭证的设备密钥 device-key（0600）都在这里。
+data_dir: "./data"
+
+# 日志级别：debug|info|warn|error。
+# §15.1 硬规则：debug 也不放宽脱敏——提示词/响应/密钥在任何级别不落日志。
+log_level: "debug"
+
+# 可选：本地 HTTPS 联调。三项必须同时给出；证书与私钥文件保持 gitignored。
+# tls:
+#   listen: "127.0.0.1:8443"
+#   cert_file: "./configs/dev-cert.pem"
+#   key_file: "./configs/dev-key.pem"
+
+# 「设备状态」历史保留天数（0–60；整行省略取缺省 7；0 = 关闭后台采样与
+# 归档）。开启时每分钟采样进内存，每 10 分钟聚合一行追加到
+# <data_dir>/history/YYYY-MM-DD.jsonl（约 90 KB/天，过期按天删除）。
+# history_days: 7
+
+# 用量小时聚合（usage_hourly）的保留天数（31–366；整行省略取缺省 90）。
+# 与 history_days 的两处不同都是有意的：**没有 0 这个关闭档**（计量是预算
+# 准入与用量页的地基，不是可选监控），**下限 31 天**——预算窗口含「本地
+# 自然月」，保留期短于一个最长自然月，重启播种就播不出完整的当月消费，
+# 月预算会静默缩水（只会变松，现场极难察觉）。
+# usage_days: 90
+
+# LLM Gate官网只读入口。整段可省略，缺省 https://llm.net；开发机联调
+# 静态升级文件时可覆盖为本地 HTTP 服务。请求不携带设备身份或任何凭据。
+official_site:
+  # base_url: "http://127.0.0.1:9090"
+
+# Agents / Codex 订阅代理（迭代 11）：**没有配置项**。client_id、OpenAI 签发方
+# （auth.openai.com）与订阅后端（chatgpt.com）都是编译进去的常量，零新增环境
+# 变量。订阅在管理台「Agents账号」页关联，句柄封存进 SQLite 的 agent_accounts。
+# 出网须知：用到该功能时设备要能出境访问上面那两个域名（登录/刷新走前者，
+# 代理 Responses 流量走后者）；没关联订阅就一个字节都不发。本机开发不受影响。
+
+# 上游 HTTP 客户端分层超时（整块可省略，右侧为缺省值）。
+# response_header 须覆盖非流式的上游整个生成期（上游生成完才回响应头）；
+# overall 是单次请求整体硬上限，SSE 长流同样受它约束。
+# upstream_timeouts:
+#   connect: "10s"
+#   tls_handshake: "10s"
+#   response_header: "5m"
+#   overall: "10m"
+
+# ---------------------------------------------------------------------------
+# 以下三段（upstreams / logical_models / api_keys）都是**启动导入表**，整段
+# 可选；导入后 SQLite 是唯一事实源，正式管理经管理界面
+# http://<listen>/admin/。两类语义不同：
+#
+#   - upstreams / logical_models 是 **seed**：只在 upstreams 与 models 两表
+#     **皆空**时导入一次（空库首启，含板上升级后的第一次启动），此后整段被
+#     跳过并记一条 INFO（reason=bootstrap_skipped）。因此在管理台删掉或改名的
+#     上游/模型不会被下次重启的 YAML 复活；代价是 seed 之后往这两段新增条目也
+#     不再生效——请直接在管理台录入（要重新 seed 只能清空这两张表或重置库）。
+#   - api_keys 仍按摘要幂等导入：已存在的摘要整条跳过，停用状态不被复活。
+# ---------------------------------------------------------------------------
+
+# 上游账户 seed 表（仅空库首启导入一次）。
+# type 可选 deepseek|ark|ark_plan|qwen_plan|opencode_go|minimax|openai_compat|mock；除
+# openai_compat 与 mock 外都走内置 (type, 协议) 二维端点表——ark 为方舟按量
+# （openai 协议 + 视频/图片任务），ark_plan 为方舟 Agent Plan 套餐（双文本协议），
+# qwen_plan 为阿里云百炼通义千问 Token Plan 套餐（双文本协议），opencode_go 为
+# OpenCode Go 包月套餐（双文本协议，同一端点根），minimax 只服务
+# 视频任务入口（但本 seed 的 logical_models 只描述文本面，视频/图片模型请在
+# 管理台建）。openai_compat 是通用 OpenAI 兼容适配：base_url 必填、仅 chat 单入口。
+# base_url 仅 dev 覆盖用（如指向 mock，覆盖时该类型的全部协议共用同一地址——
+# 故不要拿它覆盖 qwen_plan 这类两协议不同段的类型）。
+# api_key 明文经设备密钥封存后入库，任何接口都不回显。
+upstreams:
+  - name: mock-main
+    type: mock
+    # mock 类型必须给 base_url；与 tools/mock-openai 的默认监听保持一致。
+    base_url: "http://127.0.0.1:18080/v1"
+    # mock 上游不校验 Key，此处留占位演示字段；真实 Key 只写 *.local.yaml。
+    api_key: "mock-key-placeholder"
+
+# 模型目录 seed 表（历史形态，自动转换；仅空库首启导入一次）：客户端可见名
+# 就是上游原始模型名，导入时模型名取 upstream_model_id，左侧的键名（历史逻辑名）
+# 被丢弃；同一 upstream_model_id 挂在不同上游时合并为同一模型的多条来源，
+# 优先级按段内出现序 100/200/300…（小者先），来源侧模型 ID 留空表示与模型名相同。
+# protocol 字段仍被校验但导入时忽略——一个模型能走哪个入口，由它各条来源的
+# 上游 type 在运行时决定（deepseek/ark_plan/qwen_plan/opencode_go/mock 双入口，
+# ark 与 openai_compat 仅 chat）；某个
+# 入口一条支持的来源都没有时返回 404 protocol_mismatch 并指向另一入口。
+#
+# 这里刻意让键名 = upstream_model_id：导入后客户端请求的就是同一个名字。
+# 破坏性变更：iteration-5 起旧逻辑名（ds-chat/cc-ds/ark-chat/cc-ark 之类）
+# 一律 404，客户端必须改用原始模型名。
+logical_models:
+  mock-gpt-4o-mini:
+    upstream: mock-main
+    upstream_model_id: mock-gpt-4o-mini
+  mock-gpt-4o:
+    upstream: mock-main
+    upstream_model_id: mock-gpt-4o
+  # anthropic 侧样例：mock 上游两协议共用 base_url，故这个模型 chat 与
+  # messages 两个入口都可调（protocol 字段只是被容忍的历史字段，删掉也一样）。
+  mock-claude-mini:
+    upstream: mock-main
+    upstream_model_id: mock-claude-mini
+    protocol: anthropic_messages
+
+# 客户端 Key 导入表：启动时按摘要幂等导入 SQLite——已存在的摘要整条跳过
+# （禁用状态不会被导入复活）。正式 Key 经管理界面签发；此处仅展示开发环境的假 Key。
+api_keys:
+  - key: "sk_example_only"

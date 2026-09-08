@@ -1,0 +1,6 @@
+sunxi_platform    : A733
+sunxi_secure      : normal
+sunxi_serial      : 0123456789abcdef0123456789abcdef
+sunxi_chiptype    : 00005100
+sunxi_batchno     : 0x19030001
+sunxi_soc_ver    : 0x1

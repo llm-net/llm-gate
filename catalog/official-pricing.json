@@ -1,7 +1,7 @@
 {
   "schema": "llmgate.official-pricing/v1",
-  "version": 13,
-  "updated_at": "2026-09-07",
+  "version": 15,
+  "updated_at": "2026-09-08",
   "currency": "CNY",
   "unit": "micro_yuan",
   "notes": [
@@ -899,18 +899,32 @@
       "note": "官方 API 标准档（<200K token）$2.00/$0.30/$6.00，按 6.75 折算。长上下文档同 grok-4.6 的说明。Grok Build 订阅流量按此价记名义金额。"
     },
     {
-      "name": "claude-fable-5",
+      "name": "claude-fable-5-1",
       "kind": "text",
       "vendor": "Anthropic",
       "agent": "claude",
+      "pricing": {
+        "in": 67500000,
+        "cache_read": 1687500,
+        "cache_write": 84375000,
+        "out": 337500000
+      },
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "checked_at": "2026-09-08",
+      "note": "官方全球标准价：每百万 token 输入 $10、缓存命中 $0.25、5 分钟缓存写入 $12.50、输出 $50，按 1 USD = 6.75 CNY 折算；1 小时缓存写入 $20、地域附加费与批量折扣不在此标准档建模。Claude Code 订阅按此价记名义金额。"
+    },
+    {
+      "name": "claude-fable-5",
+      "kind": "text",
+      "vendor": "Anthropic",
       "pricing": {
         "in": 67500000,
         "cache_read": 6750000,
         "out": 337500000
       },
       "source": "https://platform.claude.com/docs/en/about-claude/pricing",
-      "checked_at": "2026-08-19",
-      "note": "官方 API 标准档 $10.00/$1.00/$50.00（输入/缓存命中/输出，每百万 token），按 6.75 折算。Claude Code 订阅流量按此价记名义金额。"
+      "checked_at": "2026-09-08",
+      "note": "官方 API 标准档 $10.00/$1.00/$50.00（输入/缓存命中/输出，每百万 token），按 6.75 折算。"
     },
     {
       "name": "claude-opus-5",

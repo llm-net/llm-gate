@@ -1,0 +1,29 @@
+[Unit]
+Description=llmgate updated — 固件升级引擎
+# 引擎不依赖网络（下载在 gatewayd 侧完成），只依赖本地文件系统与 systemd。
+After=local-fs.target
+
+[Service]
+Type=simple
+# root：它的本职就是替换 /usr/local/bin/llmgate 并 stop/start llmgate-gatewayd，
+# 权限边界靠进程凭证（multi-call 架构决策）；调用面只有 UDS
+# /run/llmgate-updated/updated.sock（0660 root:llmgate，gatewayd 是唯一调用方）。
+User=root
+Group=llmgate
+ExecStart=/usr/local/bin/llmgate updated --config /etc/llmgate/gatewayd.yaml
+Restart=on-failure
+RestartSec=2
+# /run/llmgate-updated（socket）与 /var/lib/llmgate-updated（prev 槽、DB 备份、任务状态）
+RuntimeDirectory=llmgate-updated
+RuntimeDirectoryMode=0750
+StateDirectory=llmgate-updated
+StateDirectoryMode=0700
+# 加固：不能上 ProtectSystem=strict——写 /usr/local/bin 是它的本职。
+ProtectHome=yes
+PrivateTmp=yes
+# 升级成功后引擎 self-restart（systemctl restart --no-block llmgate-updated）换上
+# 新二进制里的自己；停机窗口只需覆盖状态落盘，无在途请求可言。
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target

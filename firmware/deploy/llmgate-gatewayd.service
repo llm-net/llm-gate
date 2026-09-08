@@ -1,0 +1,34 @@
+[Unit]
+Description=llmgate gatewayd — AI API 网关
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=llmgate
+Group=llmgate
+ExecStart=/usr/local/bin/llmgate gatewayd --config /etc/llmgate/gatewayd.yaml
+Restart=on-failure
+RestartSec=2
+# 非 root 绑定 80 端口
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=yes
+# 数据目录 /var/lib/llmgate
+StateDirectory=llmgate
+StateDirectoryMode=0750
+# 运行期目录 /run/llmgate：Cloudflare Tunnel 启用时在这里建 origin socket
+# （cloudflare-origin.sock，0660 llmgate:llmgate-tunnel）。gatewayd 要能把 socket
+# 的属组改成 llmgate-tunnel，部署时须把 llmgate 用户加进该组（见 deploy/README.md）。
+RuntimeDirectory=llmgate
+RuntimeDirectoryMode=0755
+# 基础加固
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+LimitNOFILE=65536
+# 须大于 gatewayd 代码内 15s 优雅停机上限
+TimeoutStopSec=20
+
+[Install]
+WantedBy=multi-user.target

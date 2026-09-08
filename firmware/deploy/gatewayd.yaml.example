@@ -1,0 +1,58 @@
+# llmgate gatewayd 板上配置样例。
+#
+# 板上真值路径是 /etc/llmgate/gatewayd.yaml：root:llmgate 0640，配置目录
+# /etc/llmgate 为 root:llmgate 0750。真实上游 Key 只在板上文件里填写；本副本
+# 永远只放假值或占位符。
+#
+# 数据面 /v1/* 与管理面 /admin/* 共用 handler；明文 listen 恒在，客户如需
+# Claude Code 或本地 HTTPS，可再配置自己持有的静态证书监听。
+
+listen: "0.0.0.0:80"
+data_dir: "/var/lib/llmgate"
+log_level: "info"
+
+# 可选：客户自管 HTTPS。三项必须同时配置；缺省整段不开 TLS。证书须覆盖客户
+# 实际使用的设备域名，私钥文件只留在板上（建议 root:llmgate 0640）。
+# 这与管理台「内网域名」（经 LLM Gate官网申领 <label>.llm.net 并自动签发证书，
+# 监听缺省 :443，可在管理台改）是两条独立入口；端口相同时后者启动失败。
+# tls:
+#   listen: "0.0.0.0:443"
+#   cert_file: "/etc/llmgate/tls/cert.pem"
+#   key_file: "/etc/llmgate/tls/key.pem"
+
+# LLM Gate官网只读入口。整段可省略，缺省 https://llm.net。
+# 设备只匿名 GET 数据升级、固件索引/制品与推荐应用；没有登记、激活、心跳、
+# 设备凭据或写接口。官网不可达不影响本地网关、管理台、手动固件上传或回退。
+official_site:
+  base_url: "https://llm.net"
+
+# 上游 HTTP 客户端超时可按现场链路覆盖；省略即用固件缺省。
+# upstream_timeouts:
+#   connect: "10s"
+#   tls_handshake: "10s"
+#   response_header: "5m"
+#   overall: "10m"
+
+# upstreams / logical_models 是空库首次启动时的一次性 seed。导入后 SQLite
+# (/var/lib/llmgate/llmgate.db) 是唯一事实源，正式维护走设备管理台。
+upstreams:
+  - name: deepseek-main
+    type: deepseek
+    api_key: "<DEEPSEEK_API_KEY>"
+
+  - name: ark-plan
+    type: ark_plan
+    api_key: "<ARK_PLAN_API_KEY>"
+
+logical_models:
+  deepseek-chat:
+    upstream: deepseek-main
+    upstream_model_id: deepseek-chat
+  deepseek-v4-flash:
+    upstream: ark-plan
+    upstream_model_id: deepseek-v4-flash
+
+# 客户端 Key 按摘要幂等导入。正式 Key 应在管理台签发；这里仅展示字段形态。
+api_keys:
+  - key: "sk_example_only"
+    user: dev

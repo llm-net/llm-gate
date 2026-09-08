@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="lg07cut-title lg07cut-desc">
+  <title id="lg07cut-title">LLM Gate · 本地节点 · 八分之一切角</title>
+  <desc id="lg07cut-desc">青绿色圆角立方体的前下角挖去一个边长为原边长一半的小立方体，移除八分之一体积；两面凹槽内壁以较深颜色表现空间深度，深蓝色方形底。</desc>
+  <defs>
+    <clipPath id="lg07cut-outline">
+      <path d="M235.22 108Q256 96 276.78 108L395.22 176.38Q416 188.38 416 212.38L416 349.13Q416 373.13 395.22 385.13L356.78 407.32Q336 419.32 315.22 407.32L268.12 380.13Q256 373.13 243.88 380.13L196.78 407.32Q176 419.32 155.22 407.32L116.78 385.13Q96 373.13 96 349.13L96 212.38Q96 188.38 116.78 176.38Z"/>
+    </clipPath>
+  </defs>
+  <rect width="512" height="512" fill="#173447"/>
+  <!-- 等角投影：立方体为 [0,1]^3，切除 x,y∈[1/2,1]、z∈[0,1/2]；圆角仅修饰可见外轮廓。 -->
+  <g id="lg07cut-mark" clip-path="url(#lg07cut-outline)" transform="translate(256 256) scale(1.1) translate(-256 -256)">
+    <path d="M256 280.75L176 326.94L176 419.32L256 373.13Z" fill="#2C827C"/>
+    <path d="M256 280.75L336 326.94L336 419.32L256 373.13Z" fill="#57BDA7"/>
+    <path d="M96 188.38L256 280.75L256 373.13L176 326.94L176 419.32L96 373.13Z" fill="#79D9C5"/>
+    <path d="M256 280.75L416 188.38L416 373.13L336 419.32L336 326.94L256 373.13Z" fill="#3EAB9E"/>
+    <path d="M256 96L416 188.38L256 280.75L96 188.38Z" fill="#C9F6E9"/>
+  </g>
+</svg>

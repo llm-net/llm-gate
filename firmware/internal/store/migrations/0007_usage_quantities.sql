@@ -1,0 +1,21 @@
+-- 0007_usage_quantities: 账本补两列非 token 的计费量（iteration-9 Phase 7）。
+--
+-- 为什么要加列：0006 的账本只有 token 四分量，而**并非每一种消费都按 token 计价**。
+-- MiniMax H3 的权威计费量是秒（output_seconds + input_seconds）与参考图张数
+-- （input_image_count），方舟 Seedream 的是出图张数——这些量此前只活在
+-- aigc_tasks.usage_json 的原文里，账本上的每一行视频/图片消费因此都显示
+-- 「Token 0」：金额可审，金额背后的量不可审。功能边界写的是「金额为主、
+-- token/秒为辅」，缺了这两列，「为辅」的那一半根本不存在。
+--
+-- 两列而不是四列：秒价那一档对输出秒与输入秒是**同一个单价**（文档 §9），
+-- 二者之和乘单价就是完整的秒数项，拆开存只是多一列而不多一分可审性。
+-- 张数同理——一行只可能是其中一种（H3 的输入参考图 / Seedream 的出图），
+-- 由行自己的 kind + 上游账户名区分，合成一列不会互相污染。
+--
+-- 与 0006 同形：普通 ALTER TABLE ADD COLUMN，单事务路径即可，不带
+-- "migrate:foreign_keys=off" 重建标记。**不新建任何索引**——0006 定下的
+-- 「usage_hourly 只有维度唯一索引这一个索引」继续成立，这两列只被读出来显示，
+-- 从不进谓词。存量行取缺省 0（升级后一切读数不变，视频/图片的历史行照旧
+-- 显示不出秒数——那些量当时就没记，不能事后编）。
+ALTER TABLE usage_hourly ADD COLUMN video_seconds INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE usage_hourly ADD COLUMN image_count   INTEGER NOT NULL DEFAULT 0;

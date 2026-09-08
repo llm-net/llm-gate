@@ -23,6 +23,14 @@
 
 官方目录价记的是模型**厂商**的按量目录价：`pricing` 是全时段默认的标准价，`schedule` 段记厂商按星期与时刻切换的分时段价（例如 DeepSeek 的高峰 / 空闲时段与周末全天空闲价）。字段说明见两份任务文档。
 
+火山方舟 Coding Plan（`ark_plan` / `ark-plan`）的选单不收录 `doubao-seedance-2.5`；火山方舟按量平台与官方目录价中的同名条目独立保留。
+
+## Cursor Auto 统计口径
+
+`cursor-auto` 是 LLM Gate 的本地统计名称：Cursor Auto 请求中的 `default` / `auto` 在计量时统一归入此名称，转发请求保持原样。它只出现在 Cursor 订阅的只读价目中，不加入共享 API 模型或 CLI 模型选单。
+
+[Cursor 官方计费说明](https://cursor.com/help/models-and-usage/usage-limits)按实际路由模型计价，没有 Auto 统一单价。本目录因此采用 [Composer 2.5 标准价](https://cursor.com/docs/models/cursor-composer-2-5)作为 `cursor-auto` 的名义统计价格；维护时同步两行 `pricing`，缓存字段遵循相同规则。这不表示 Auto 实际使用了 Composer，也不代表 Cursor 现金账单。只有官方公布独立 Auto 标准价时才按该价格更新，并同步出处与说明。
+
 ## 维护方式
 
 数据由开发工具按任务文档查询厂商官方页面并改写，人只审阅 diff：
