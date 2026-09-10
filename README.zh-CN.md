@@ -71,8 +71,8 @@ make build-amd64    # x86-64 Linux
 # ARM64 Linux：make build-arm64
 ```
 
-公开检出使用已包含的管理台和 `gate` 制品，Go 构建不需要 Node.js 或 `gate` 源码。`make web` 重建管理台时需要 Node.js/npm。详见[源码构建与验证](docs/install.zh-CN.md#从源码构建)。
+`make build-*` 会先从 `gate/` 交叉编译六平台 `gate` 压缩包再内嵌，只需要 Go 工具链；管理台产物已随检出提供。只有 `make web` 重建管理台才需要 Node.js/npm。详见[源码构建与验证](docs/install.zh-CN.md#从源码构建)。
 
 ## 许可证与反馈
 
-固件源码采用 [MIT 许可证](LICENSE)，可按许可证使用、修改和再分发。本仓**不接受外部贡献或 Pull Request**，PR 会自动关闭。反馈方式见 [CONTRIBUTING.md](CONTRIBUTING.md)，私密漏洞报告见 [SECURITY.md](SECURITY.md)。
+固件与 `gate` 引导器源码采用 [MIT 许可证](LICENSE)，可按许可证使用、修改和再分发。本仓**不接受外部贡献或 Pull Request**，PR 会自动关闭。反馈方式见 [CONTRIBUTING.md](CONTRIBUTING.md)，私密漏洞报告见 [SECURITY.md](SECURITY.md)。

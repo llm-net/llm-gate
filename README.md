@@ -50,7 +50,8 @@ Prompts, model responses, and uploaded media are not written to firmware logs. U
 
 | Path or download | Contents |
 | --- | --- |
-| [`firmware/`](firmware/) | MIT firmware source, tests, deployment assets, embedded console, and prebuilt `gate` assets |
+| [`firmware/`](firmware/) | MIT firmware source, tests, deployment assets, and the embedded console |
+| [`gate/`](gate/) | MIT source for the `gate` launcher; `make -C firmware build` rebuilds the six platform archives from it |
 | [`catalog/`](catalog/) | Maintained official pricing and platform/model catalogs |
 | [`install.sh`](install.sh) | The same installer served at `https://llm.net/install.sh` |
 | [`docs/install.md`](docs/install.md) / [`docs/install.zh-CN.md`](docs/install.zh-CN.md) | English / Simplified Chinese installation guides |
@@ -58,7 +59,7 @@ Prompts, model responses, and uploaded media are not written to firmware logs. U
 | `gate-{linux,darwin,windows}-{amd64,arm64}` archives | Prebuilt launcher for six desktop platforms; Unix archives use `.tar.gz`, Windows archives use `.zip` |
 | `SHA256SUMS` | Release download checksums |
 
-Each release tag points to the corresponding firmware source snapshot. Firmware and `gate` downloads share the release version. The website and `gate` launcher source code are not included; `gate` is distributed as a prebuilt download. Third-party dependencies and separately installed components retain their own licenses.
+Each release tag points to the corresponding source snapshot. Firmware and `gate` downloads share the release version. The website source code is not included. Prebuilt `gate` archives are not committed to this repository — they are rebuilt from `gate/` during the firmware build and published as release downloads. Third-party dependencies and separately installed components retain their own licenses.
 
 ## Build the firmware
 
@@ -71,8 +72,8 @@ make build-amd64    # x86-64 Linux
 # Or: make build-arm64
 ```
 
-The public checkout builds with its included console and `gate` assets; Node.js and the `gate` source are not needed for a Go build. `make web` rebuilds the console and requires Node.js/npm. See the [build and verification instructions](docs/install.md#build-from-source) for details.
+`make build-*` first cross-compiles the six `gate` archives from `gate/` and embeds them, so a Go toolchain alone is enough; the console is included prebuilt. Node.js/npm is only needed for `make web`, which rebuilds the console. See the [build and verification instructions](docs/install.md#build-from-source) for details.
 
 ## License and feedback
 
-The firmware source is available under the [MIT license](LICENSE). You may use, modify, and redistribute it under that license. This repository does **not accept external contributions or pull requests**; pull requests are automatically closed. See [CONTRIBUTING.md](CONTRIBUTING.md) for feedback and [SECURITY.md](SECURITY.md) for private vulnerability reporting.
+The firmware and `gate` launcher sources are available under the [MIT license](LICENSE). You may use, modify, and redistribute it under that license. This repository does **not accept external contributions or pull requests**; pull requests are automatically closed. See [CONTRIBUTING.md](CONTRIBUTING.md) for feedback and [SECURITY.md](SECURITY.md) for private vulnerability reporting.

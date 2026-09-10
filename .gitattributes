@@ -1,3 +1,2 @@
 # The console is generated from firmware/web/ui; template literals can contain trailing spaces.
 firmware/internal/ui/uidist/** linguist-generated=true whitespace=-blank-at-eol
-firmware/internal/gatehelper/assets/** linguist-generated=true

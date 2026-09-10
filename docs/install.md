@@ -157,7 +157,7 @@ make build-amd64
 # Or: make build-arm64
 ```
 
-The resulting file is `firmware/bin/llmgate-linux-amd64` or `firmware/bin/llmgate-linux-arm64`. Go builds use `CGO_ENABLED=0`; the console and prebuilt `gate` archives are included in the checkout, so Node.js and `gate` source are unnecessary. To rebuild the console, install the Node.js version required by its dependencies and run `make web`.
+The resulting file is `firmware/bin/llmgate-linux-amd64` or `firmware/bin/llmgate-linux-arm64`. Go builds use `CGO_ENABLED=0`. The build first runs `make gate-assets`, which cross-compiles the six `gate` archives from `gate/` and writes them to `firmware/internal/gatehelper/assets/` for embedding; those archives are build output and are not committed. The console is included prebuilt, so a Go toolchain alone is enough. To rebuild the console, install the Node.js version required by its dependencies and run `make web`.
 
 Basic verification:
 

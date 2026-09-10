@@ -157,7 +157,7 @@ make build-amd64
 # ARM64：make build-arm64
 ```
 
-制品为 `firmware/bin/llmgate-linux-amd64` 或 `firmware/bin/llmgate-linux-arm64`。构建使用 `CGO_ENABLED=0`；检出中已包含管理台与预编译 `gate` 压缩包，Go 构建不需要 Node.js 或 `gate` 源码。重建管理台时，安装其依赖所要求的 Node.js 版本后执行 `make web`。
+制品为 `firmware/bin/llmgate-linux-amd64` 或 `firmware/bin/llmgate-linux-arm64`。构建使用 `CGO_ENABLED=0`。构建先执行 `make gate-assets`，从 `gate/` 交叉编译六个 `gate` 压缩包写入 `firmware/internal/gatehelper/assets/` 供内嵌；这些压缩包是构建产物，不入库。管理台产物已随检出提供，因此只需要 Go 工具链。重建管理台时，安装其依赖所要求的 Node.js 版本后执行 `make web`。
 
 基础验证：
 

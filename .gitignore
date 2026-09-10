@@ -1,5 +1,11 @@
-# Build output and dependencies; keep embedded UI and gate archives tracked.
+# Build output and dependencies; the embedded console (firmware/internal/ui/uidist/)
+# stays tracked so a Go-only build works, but the six gate archives are rebuilt from
+# gate/ by `make -C firmware gate-assets` and are never committed: their bytes change
+# on every build and cannot be diffed, so committing them would grow every clone.
 /firmware/bin/
+/gate/gate
+firmware/internal/gatehelper/assets/*
+!firmware/internal/gatehelper/assets/.gitkeep
 node_modules/
 *.test
 coverage.out
