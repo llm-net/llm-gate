@@ -1,7 +1,7 @@
 {
   "schema": "llmgate.platform-models/v2",
-  "version": 25,
-  "updated_at": "2026-09-08",
+  "version": 28,
+  "updated_at": "2026-09-14",
   "notes": [
     "「哪儿有哪些模型」的清单，与同目录 official-pricing.json（「一个模型多少钱」）是一对；设备通过「数据升级」匿名下载两份文件。",
     "维护源是公开仓库 github.com/llm-net/llm-gate 的 catalog/ 目录（README.md 与 update-platform-models.md 是维护说明）；",
@@ -23,7 +23,7 @@
     "platforms 段只是**选单**：管理台的「添加模型」永远同时提供「自定义」，厂商上新而这里还没收录时照样录得进去。",
     "agents 段不是选单而是计价权威清单：连接工具订阅后，对应 provider 的模型在「模型接入 → 工具订阅」自动显示；Codex/Grok/Claude 建成共享目录行，Cursor 直接读取本文件。",
     "  管理台不提供添加、修改、启停或删除模型价格的入口，要增减型号和改价须更新目录数据。provider 为 codex | grok | claude | cursor。",
-    "  agents 段只收文本模型（kind 恒为 text、不带 family）。Codex/Grok/Claude 的名义价格取 official-pricing.json 里带 agent 标记的同名条目；订阅自带图片/视频不录价格。",
+    "  agents 段只收文本模型（kind 恒为 text、不带 family）。Codex/Grok/Claude 的名义价格取 official-pricing.json 里带 agent 标记的同名条目；订阅自带图像/视频不录价格。",
     "  Cursor 的 models[].pricing 在本文件维护，按 Cursor 官方公示的标准模型价记名义金额，与其他订阅同名的型号也独立计价；除 Auto 统计名外精确匹配请求模型 ID，不推断其他别名、Fast 或套餐附加费。成员侧模型仍由 cursor-agent 经订阅面自行发现。",
     "收录纪律同价目文件：每条记当次核对的官方页面与核对日期（agents 段可逐模型写 source 覆盖 provider 那条），没有出处的型号不要往里加；改动后 version 加一。",
     "Cursor pricing 使用 in / out / cache_read / cache_write，单位为整数微元 / 百万 token；in/out 必填，缓存读写价缺省用输入价，显式 0 免费。美元价沿用 official-pricing.json 的固定汇率 1 USD = 6.75 CNY，目录金额不是订阅现金账单。",
@@ -39,7 +39,7 @@
       "entries": "OpenAI 兼容 与 Anthropic 兼容 双入口",
       "ability": "支持查询平台余额。",
       "source": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing",
-      "checked_at": "2026-09-07",
+      "checked_at": "2026-09-14",
       "models": [
         {
           "name": "deepseek-v4-pro",
@@ -77,9 +77,44 @@
           }
         },
         {
+          "name": "deepseek-flash",
+          "kind": "text",
+          "note": "官方现行 Flash 模型名，模型版本 DeepSeek-V4.1-Flash，支持图像理解",
+          "capabilities": {
+            "responses_chat": {
+              "profile": "reasoning_replay_v1",
+              "replay_reasoning_content": true,
+              "thinking_type": "enabled",
+              "drop_tool_choice": true,
+              "effort_map": {
+                "minimal": "high",
+                "low": "high",
+                "medium": "high",
+                "high": "high",
+                "xhigh": "max",
+                "max": "max",
+                "ultra": "max"
+              }
+            },
+            "codex": {
+              "default_reasoning_level": "high",
+              "supported_reasoning_levels": [
+                {
+                  "effort": "high",
+                  "description": "Deep reasoning"
+                },
+                {
+                  "effort": "xhigh",
+                  "description": "Maximum reasoning"
+                }
+              ]
+            }
+          }
+        },
+        {
           "name": "deepseek-v4-flash",
           "kind": "text",
-          "note": "轻量档，单价低",
+          "note": "旧模型名，对应模型已下线，请求由 DeepSeek-V4.1-Flash 提供服务并按 Flash 价计费",
           "capabilities": {
             "responses_chat": {
               "profile": "reasoning_replay_v1",
@@ -114,7 +149,7 @@
         {
           "name": "deepseek-v4-flash-vision-exp",
           "kind": "text",
-          "note": "实验性视觉输入档，按 flash 单价；设备只把它当文本输出的对话模型使用",
+          "note": "旧模型名，对应模型已下线，请求由 DeepSeek-V4.1-Flash 提供服务；设备只把它当文本输出的对话模型使用",
           "capabilities": {
             "responses_chat": {
               "profile": "reasoning_replay_v1",
@@ -155,11 +190,11 @@
       "vendor": "火山方舟",
       "billing_mode": "usage",
       "suggested_name": "ark",
-      "entries": "OpenAI 兼容单入口；另可挂给视频与图片模型",
+      "entries": "OpenAI 兼容单入口；另可挂给视频与图像模型",
       "ability": "平台余额需要火山引擎 AK/SK 签名，设备不查询。",
-      "source": "https://www.volcengine.com/docs/82379/1544106",
-      "checked_at": "2026-08-12",
-      "note": "方舟同时托管豆包自有模型与 DeepSeek 等第三方模型；下列文本条目按厂商同名 Model ID 收录，实际可开通的型号以方舟控制台为准。",
+      "source": "https://www.volcengine.com/docs/82379/1330310",
+      "checked_at": "2026-09-14",
+      "note": "方舟同时托管豆包自有模型与 DeepSeek 等第三方模型；下列文本条目按厂商同名 Model ID 收录，豆包自有模型用方舟官方的带日期 Model ID，实际可开通的型号以方舟控制台为准。",
       "models": [
         {
           "name": "deepseek-v4-pro",
@@ -230,6 +265,41 @@
               ]
             }
           }
+        },
+        {
+          "name": "doubao-seed-evolving",
+          "kind": "text",
+          "note": "周级更新的统一 ID，官方不带日期"
+        },
+        {
+          "name": "doubao-seed-2-1-pro-260628",
+          "kind": "text",
+          "note": "旗舰文本模型"
+        },
+        {
+          "name": "doubao-seed-2-1-turbo-260628",
+          "kind": "text",
+          "note": "高速档"
+        },
+        {
+          "name": "doubao-seed-2-0-pro-260215",
+          "kind": "text",
+          "note": "上一代旗舰"
+        },
+        {
+          "name": "doubao-seed-2-0-lite-260428",
+          "kind": "text",
+          "note": "轻量档，支持音频输入"
+        },
+        {
+          "name": "doubao-seed-2-0-mini-260428",
+          "kind": "text",
+          "note": "最低档，支持音频输入"
+        },
+        {
+          "name": "doubao-seed-2-0-code-preview-260215",
+          "kind": "text",
+          "note": "代码预览版"
         },
         {
           "name": "doubao-seedance-2.5",
@@ -292,7 +362,7 @@
       "ability": "平台余额在 Kimi 开放平台控制台查看。",
       "source": "https://platform.kimi.com/",
       "checked_at": "2026-09-01",
-      "note": "月之暗面国内 API；目录只提供文本对话型号，不接入图片、视频或声音专用能力。",
+      "note": "月之暗面国内 API；目录只提供文本对话型号，不接入图像、视频或声音专用能力。",
       "models": [
         {
           "name": "kimi-k3",
@@ -461,7 +531,7 @@
       "ability": "国际站与国内站的账号和 Key 相互独立。",
       "source": "https://platform.minimax.io/docs/api-reference/text-chat-openai",
       "checked_at": "2026-09-01",
-      "note": "MiniMax 国际站文本对话入口；不接入语音、视频、图片和音乐接口。",
+      "note": "MiniMax 国际站文本对话入口；不接入语音、视频、图像和音乐接口。",
       "models": [
         {
           "name": "MiniMax-M2.7",
@@ -654,10 +724,15 @@
       "suggested_name": "chenyu",
       "entries": "OpenAI 兼容文本入口",
       "ability": "聚合平台；余额、费用与实际可用型号在晨羽控制台查看。",
-      "source": "https://chenyu.pro/api-docs/docs/models/",
-      "checked_at": "2026-09-01",
-      "note": "多家上游聚合、按官方价格结算；文本模型可用 GET /v1/models 实时发现。目录只收文本对话型号，图片、视频与语音不进入本目录。",
+      "source": "https://chenyu.pro/api-docs/docs/models",
+      "checked_at": "2026-09-14",
+      "note": "按晨羽生产模型目录 v25（2026-09-14）核对；文本模型可用 GET /v1/models 实时发现。本条只收固件可承载的 OpenAI 兼容文本入口；图片、视频与语音仍按晨羽官方厂商协议面，不进入本条。目录中的晨羽自建模型没有公开的厂商标准按量价。同域名同 Key 的 Anthropic Messages 面另见 chenyu_anthropic。",
       "models": [
+        {
+          "name": "deepseek-v4-pro",
+          "kind": "text",
+          "note": "DeepSeek"
+        },
         {
           "name": "deepseek-v4-flash",
           "kind": "text",
@@ -669,24 +744,104 @@
           "note": "DeepSeek"
         },
         {
-          "name": "deepseek-v4-pro",
+          "name": "doubao-seed-2-1-pro-260628",
+          "kind": "text",
+          "note": "火山方舟"
+        },
+        {
+          "name": "doubao-seed-2-1-turbo-260628",
+          "kind": "text",
+          "note": "火山方舟"
+        },
+        {
+          "name": "doubao-seed-2-0-lite-260428",
+          "kind": "text",
+          "note": "火山方舟"
+        },
+        {
+          "name": "doubao-seed-2-0-mini-260428",
+          "kind": "text",
+          "note": "火山方舟"
+        },
+        {
+          "name": "doubao-seed-2-0-pro-260215",
+          "kind": "text",
+          "note": "火山方舟"
+        },
+        {
+          "name": "qwen3.8-max",
+          "kind": "text",
+          "note": "阿里云百炼"
+        },
+        {
+          "name": "qwen3.7-plus",
+          "kind": "text",
+          "note": "阿里云百炼"
+        },
+        {
+          "name": "qwen3.8-flash",
+          "kind": "text",
+          "note": "阿里云百炼"
+        },
+        {
+          "name": "qwen3.7-flash",
+          "kind": "text",
+          "note": "阿里云百炼"
+        },
+        {
+          "name": "qwen3.8-27b",
+          "kind": "text",
+          "note": "阿里云百炼"
+        },
+        {
+          "name": "MiniMax-M3",
+          "kind": "text",
+          "note": "MiniMax"
+        },
+        {
+          "name": "glm-5.3",
+          "kind": "text",
+          "note": "智谱 AI"
+        },
+        {
+          "name": "glm-5.3-flash",
+          "kind": "text",
+          "note": "智谱 AI"
+        },
+        {
+          "name": "kimi-k3",
+          "kind": "text",
+          "note": "Kimi"
+        },
+        {
+          "name": "Qwen/Qwen3.8-27B-FP8",
+          "kind": "text",
+          "note": "晨羽AI自建推理"
+        },
+        {
+          "name": "nvidia/Qwen3.6-35B-A3B-NVFP4",
+          "kind": "text",
+          "note": "晨羽AI自建推理"
+        }
+      ]
+    },
+    {
+      "id": "chenyu_anthropic",
+      "type": "anthropic_compat",
+      "vendor": "晨羽AI",
+      "base_url": "https://api.chenyu.pro/v1",
+      "billing_mode": "usage",
+      "suggested_name": "chenyu-anthropic",
+      "entries": "Anthropic Messages 文本入口",
+      "ability": "聚合平台；与 OpenAI 兼容面同一把 Key、同一份余额，费用在晨羽控制台查看。",
+      "source": "https://chenyu.pro/api-docs/docs/anthropic-messages/",
+      "checked_at": "2026-09-14",
+      "note": "与 chenyu 同域名、同一把平台 API Key，只换协议（官方地址根 https://api.chenyu.pro，设备在 /v1 后拼 /messages）；x-api-key 优先、Authorization: Bearer 兜底。平台没有 Anthropic 形的模型列表接口；以下是当前生产目录中仍有既往协议面核对记录的模型及 MiniMax-M3，实际可用范围以晨羽控制台文本模型页的协议面徽标和上游探测为准。",
+      "models": [
+        {
+          "name": "deepseek-v4-flash",
           "kind": "text",
           "note": "DeepSeek"
-        },
-        {
-          "name": "doubao-seed-2-0-code-preview-260215",
-          "kind": "text",
-          "note": "火山方舟"
-        },
-        {
-          "name": "doubao-seed-2-0-lite-260215",
-          "kind": "text",
-          "note": "火山方舟"
-        },
-        {
-          "name": "doubao-seed-2-0-mini-260215",
-          "kind": "text",
-          "note": "火山方舟"
         },
         {
           "name": "doubao-seed-2-0-mini-260428",
@@ -704,16 +859,6 @@
           "note": "火山方舟"
         },
         {
-          "name": "doubao-seed-2-1-turbo-260628",
-          "kind": "text",
-          "note": "火山方舟"
-        },
-        {
-          "name": "glm-5-2-260617",
-          "kind": "text",
-          "note": "火山方舟"
-        },
-        {
           "name": "glm-5.3",
           "kind": "text",
           "note": "智谱 AI"
@@ -724,39 +869,9 @@
           "note": "智谱 AI"
         },
         {
-          "name": "kimi-k2.6",
-          "kind": "text",
-          "note": "Kimi"
-        },
-        {
-          "name": "kimi-k2.7-code",
-          "kind": "text",
-          "note": "Kimi"
-        },
-        {
-          "name": "kimi-k2.7-code-highspeed",
-          "kind": "text",
-          "note": "Kimi"
-        },
-        {
           "name": "kimi-k3",
           "kind": "text",
           "note": "Kimi"
-        },
-        {
-          "name": "qwen3-coder-plus",
-          "kind": "text",
-          "note": "阿里云百炼"
-        },
-        {
-          "name": "qwen3-vl-flash",
-          "kind": "text",
-          "note": "阿里云百炼"
-        },
-        {
-          "name": "qwen3-vl-plus",
-          "kind": "text",
-          "note": "阿里云百炼"
         },
         {
           "name": "qwen3.7-flash",
@@ -765,11 +880,6 @@
         },
         {
           "name": "qwen3.7-plus",
-          "kind": "text",
-          "note": "阿里云百炼"
-        },
-        {
-          "name": "qwen3.8-2.4t-a95b",
           "kind": "text",
           "note": "阿里云百炼"
         },
@@ -787,6 +897,11 @@
           "name": "qwen3.8-max",
           "kind": "text",
           "note": "阿里云百炼"
+        },
+        {
+          "name": "MiniMax-M3",
+          "kind": "text",
+          "note": "MiniMax"
         }
       ]
     },
@@ -863,7 +978,7 @@
       "ability": "使用 Gemini API Key；配额和账单在 Google AI Studio / Cloud Console 查看。",
       "source": "https://ai.google.dev/gemini-api/docs/models",
       "checked_at": "2026-09-01",
-      "note": "使用 Google 官方 OpenAI 兼容层；目录排除图片生成、实时语音、转写和视频型号。",
+      "note": "使用 Google 官方 OpenAI 兼容层；目录排除图像生成、实时语音、转写和视频型号。",
       "models": [
         {
           "name": "gemini-3.7-flash",
@@ -971,7 +1086,7 @@
       "ability": "API 用量和账单在 Mistral Studio 查看。",
       "source": "https://docs.mistral.ai/api/endpoint/chat",
       "checked_at": "2026-09-01",
-      "note": "使用无状态 Chat Completions 文本入口，不接入图片工具和其他专用接口。",
+      "note": "使用无状态 Chat Completions 文本入口，不接入图像工具和其他专用接口。",
       "models": [
         {
           "name": "mistral-large-latest",
@@ -1053,7 +1168,7 @@
       "vendor": "火山方舟",
       "billing_mode": "subscription",
       "suggested_name": "ark-plan",
-      "entries": "OpenAI 兼容 与 Anthropic 兼容双入口；视频与图片走订阅端点",
+      "entries": "OpenAI 兼容 与 Anthropic 兼容双入口；视频与图像走订阅端点",
       "ability": "套餐余量在火山方舟控制台查看。",
       "source": "https://www.volcengine.com/docs/82379/1544106",
       "checked_at": "2026-09-08",
@@ -1662,7 +1777,7 @@
       "vendor": "xAI",
       "source": "https://docs.x.ai/docs/models",
       "checked_at": "2026-08-13",
-      "note": "Grok Build 订阅：文本经 /agents/grok/v1/responses 接入面调用，按 official-pricing.json 的 agent=grok 条目记名义金额。订阅自带的 Grok Imagine 图片/视频生成经同一接入面的 /images/generations、/images/edits、/videos/generations 与 GET /videos/{request_id} 逐字节透传到 xAI 官方接口（客户端把 SDK 的 base_url 换成 <设备>/agents/grok/v1），按 imagine_image / imagine_video 记次、恒 0 元；这里不收录 Imagine 型号，型号名以 xAI 官方文档为准。",
+      "note": "Grok Build 订阅：文本经 /agents/grok/v1/responses 接入面调用，按 official-pricing.json 的 agent=grok 条目记名义金额。订阅自带的 Grok Imagine 图像/视频生成经同一接入面的 /images/generations、/images/edits、/videos/generations 与 GET /videos/{request_id} 逐字节透传到 xAI 官方接口（客户端把 SDK 的 base_url 换成 <设备>/agents/grok/v1），按 imagine_image / imagine_video 记次、恒 0 元；这里不收录 Imagine 型号，型号名以 xAI 官方文档为准。",
       "models": [
         {
           "name": "grok-4.6",

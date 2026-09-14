@@ -1,6 +1,6 @@
 {
   "schema": "llmgate.official-pricing/v1",
-  "version": 16,
+  "version": 17,
   "updated_at": "2026-09-14",
   "currency": "CNY",
   "unit": "micro_yuan",
@@ -629,9 +629,9 @@
         "cache_read": 420000,
         "out": 8400000
       },
-      "source": "https://platform.minimaxi.com/docs/guides/pricing-paygo",
-      "checked_at": "2026-09-07",
-      "note": "国内站人民币价，价目标注「永久五折」，这就是当前公示单价。pricing 记输入 ≤512K 档；>512K 档为 4.2 / 0.84 / 16.8。"
+      "source": "https://platform.minimax.cn/docs/guides/pricing-paygo",
+      "checked_at": "2026-09-14",
+      "note": "国内站人民币标准价；官方标注永久五折。pricing 记 ≤512K 输入档（输入 2.1、缓存命中 0.42、输出 8.4 元/百万 token）；>512K 档为 4.2 / 0.84 / 16.8。优先服务为标准价 1.5 倍，设备不建模服务等级。"
     },
     {
       "name": "MiniMax-M2.7",
