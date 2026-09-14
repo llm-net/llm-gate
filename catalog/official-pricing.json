@@ -1,7 +1,7 @@
 {
   "schema": "llmgate.official-pricing/v1",
-  "version": 15,
-  "updated_at": "2026-09-08",
+  "version": 16,
+  "updated_at": "2026-09-14",
   "currency": "CNY",
   "unit": "micro_yuan",
   "notes": [
@@ -166,13 +166,78 @@
       "note": "官方分高峰 / 空闲两档：高峰时段为北京时间周一至周五 9:00–12:00、14:00–18:00，其余时间（含周末全天）为空闲时段，空闲价为高峰价的 50%，缓存命中、缓存未命中与输出三价同比例。pricing 记高峰价（标准档），schedule 记空闲时段价。这是官方价格表里 deepseek-v4-pro 当前对应的带日期模型 ID，与不带日期的别名同价。"
     },
     {
+      "name": "deepseek-flash",
+      "kind": "text",
+      "vendor": "DeepSeek",
+      "pricing": {
+        "in": 2000000,
+        "cache_read": 40000,
+        "out": 8000000
+      },
+      "schedule": {
+        "timezone": "Asia/Shanghai",
+        "periods": [
+          {
+            "label": "工作日空闲时段",
+            "days": [
+              "mon",
+              "tue",
+              "wed",
+              "thu",
+              "fri"
+            ],
+            "hours": [
+              [
+                "00:00",
+                "09:00"
+              ],
+              [
+                "12:00",
+                "14:00"
+              ],
+              [
+                "18:00",
+                "24:00"
+              ]
+            ],
+            "pricing": {
+              "in": 1000000,
+              "cache_read": 20000,
+              "out": 4000000
+            }
+          },
+          {
+            "label": "周末全天空闲时段",
+            "days": [
+              "sat",
+              "sun"
+            ],
+            "hours": [
+              [
+                "00:00",
+                "24:00"
+              ]
+            ],
+            "pricing": {
+              "in": 1000000,
+              "cache_read": 20000,
+              "out": 4000000
+            }
+          }
+        ]
+      },
+      "source": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing",
+      "checked_at": "2026-09-14",
+      "note": "官方分高峰 / 空闲两档：高峰时段为北京时间周一至周五 9:00–12:00、14:00–18:00，其余时间（含周末全天）为空闲时段，空闲价为高峰价的 50%，缓存命中、缓存未命中与输出三价同比例。pricing 记高峰价（标准档），schedule 记空闲时段价。官方价目表里的现行 Flash 模型名，模型版本为 DeepSeek-V4.1-Flash，支持图像理解；旧模型名 deepseek-v4-flash、deepseek-v4-flash-vision-exp 仍可调用并按同价计费。"
+    },
+    {
       "name": "deepseek-v4-flash",
       "kind": "text",
       "vendor": "DeepSeek",
       "pricing": {
-        "in": 3000000,
-        "cache_read": 100000,
-        "out": 9000000
+        "in": 2000000,
+        "cache_read": 40000,
+        "out": 8000000
       },
       "schedule": {
         "timezone": "Asia/Shanghai",
@@ -201,9 +266,9 @@
               ]
             ],
             "pricing": {
-              "in": 1500000,
-              "cache_read": 50000,
-              "out": 4500000
+              "in": 1000000,
+              "cache_read": 20000,
+              "out": 4000000
             }
           },
           {
@@ -219,90 +284,25 @@
               ]
             ],
             "pricing": {
-              "in": 1500000,
-              "cache_read": 50000,
-              "out": 4500000
+              "in": 1000000,
+              "cache_read": 20000,
+              "out": 4000000
             }
           }
         ]
       },
       "source": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing",
-      "checked_at": "2026-09-07",
-      "note": "官方分高峰 / 空闲两档：高峰时段为北京时间周一至周五 9:00–12:00、14:00–18:00，其余时间（含周末全天）为空闲时段，空闲价为高峰价的 50%，缓存命中、缓存未命中与输出三价同比例。pricing 记高峰价（标准档），schedule 记空闲时段价。"
-    },
-    {
-      "name": "deepseek-v4-flash-0731",
-      "kind": "text",
-      "vendor": "DeepSeek",
-      "pricing": {
-        "in": 3000000,
-        "cache_read": 100000,
-        "out": 9000000
-      },
-      "schedule": {
-        "timezone": "Asia/Shanghai",
-        "periods": [
-          {
-            "label": "工作日空闲时段",
-            "days": [
-              "mon",
-              "tue",
-              "wed",
-              "thu",
-              "fri"
-            ],
-            "hours": [
-              [
-                "00:00",
-                "09:00"
-              ],
-              [
-                "12:00",
-                "14:00"
-              ],
-              [
-                "18:00",
-                "24:00"
-              ]
-            ],
-            "pricing": {
-              "in": 1500000,
-              "cache_read": 50000,
-              "out": 4500000
-            }
-          },
-          {
-            "label": "周末全天空闲时段",
-            "days": [
-              "sat",
-              "sun"
-            ],
-            "hours": [
-              [
-                "00:00",
-                "24:00"
-              ]
-            ],
-            "pricing": {
-              "in": 1500000,
-              "cache_read": 50000,
-              "out": 4500000
-            }
-          }
-        ]
-      },
-      "source": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing",
-      "checked_at": "2026-09-07",
-      "note": "官方分高峰 / 空闲两档：高峰时段为北京时间周一至周五 9:00–12:00、14:00–18:00，其余时间（含周末全天）为空闲时段，空闲价为高峰价的 50%，缓存命中、缓存未命中与输出三价同比例。pricing 记高峰价（标准档），schedule 记空闲时段价。这是官方价格表里 deepseek-v4-flash 当前对应的带日期模型 ID，与不带日期的别名同价。"
+      "checked_at": "2026-09-14",
+      "note": "官方分高峰 / 空闲两档：高峰时段为北京时间周一至周五 9:00–12:00、14:00–18:00，其余时间（含周末全天）为空闲时段，空闲价为高峰价的 50%，缓存命中、缓存未命中与输出三价同比例。pricing 记高峰价（标准档），schedule 记空闲时段价。官方已把本名下的模型下线，请求由 DeepSeek-V4.1-Flash 提供服务并按 Flash 价计费；现行模型名是 deepseek-flash。"
     },
     {
       "name": "deepseek-v4-flash-vision-exp",
       "kind": "text",
       "vendor": "DeepSeek",
       "pricing": {
-        "in": 3000000,
-        "cache_read": 100000,
-        "out": 9000000
+        "in": 2000000,
+        "cache_read": 40000,
+        "out": 8000000
       },
       "schedule": {
         "timezone": "Asia/Shanghai",
@@ -331,9 +331,9 @@
               ]
             ],
             "pricing": {
-              "in": 1500000,
-              "cache_read": 50000,
-              "out": 4500000
+              "in": 1000000,
+              "cache_read": 20000,
+              "out": 4000000
             }
           },
           {
@@ -349,16 +349,16 @@
               ]
             ],
             "pricing": {
-              "in": 1500000,
-              "cache_read": 50000,
-              "out": 4500000
+              "in": 1000000,
+              "cache_read": 20000,
+              "out": 4000000
             }
           }
         ]
       },
       "source": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing",
-      "checked_at": "2026-09-07",
-      "note": "官方分高峰 / 空闲两档：高峰时段为北京时间周一至周五 9:00–12:00、14:00–18:00，其余时间（含周末全天）为空闲时段，空闲价为高峰价的 50%，缓存命中、缓存未命中与输出三价同比例。pricing 记高峰价（标准档），schedule 记空闲时段价。实验性视觉输入档，价与 deepseek-v4-flash 相同；设备只把它当文本输出的对话模型计价。"
+      "checked_at": "2026-09-14",
+      "note": "官方分高峰 / 空闲两档：高峰时段为北京时间周一至周五 9:00–12:00、14:00–18:00，其余时间（含周末全天）为空闲时段，空闲价为高峰价的 50%，缓存命中、缓存未命中与输出三价同比例。pricing 记高峰价（标准档），schedule 记空闲时段价。官方已把本名下的模型下线，请求由 DeepSeek-V4.1-Flash 提供服务并按 Flash 价计费；现行模型名是 deepseek-flash。设备只把它当文本输出的对话模型计价。"
     },
     {
       "name": "kimi-k3",
@@ -369,8 +369,8 @@
         "cache_read": 2000000,
         "out": 100000000
       },
-      "source": "https://platform.kimi.com/docs/pricing/chat-k3",
-      "checked_at": "2026-08-10",
+      "source": "https://platform.kimi.com/docs/pricing/chat",
+      "checked_at": "2026-09-14",
       "note": ""
     },
     {
@@ -382,8 +382,8 @@
         "cache_read": 1300000,
         "out": 27000000
       },
-      "source": "https://platform.kimi.com/docs/pricing/chat-k27-code",
-      "checked_at": "2026-08-10",
+      "source": "https://platform.kimi.com/docs/pricing/chat",
+      "checked_at": "2026-09-14",
       "note": ""
     },
     {
@@ -395,8 +395,8 @@
         "cache_read": 2600000,
         "out": 54000000
       },
-      "source": "https://platform.kimi.com/docs/pricing/chat-k27-code",
-      "checked_at": "2026-08-10",
+      "source": "https://platform.kimi.com/docs/pricing/chat",
+      "checked_at": "2026-09-14",
       "note": "高速版是 kimi-k2.7-code 的两倍单价档。"
     },
     {
@@ -408,8 +408,8 @@
         "cache_read": 1100000,
         "out": 27000000
       },
-      "source": "https://platform.kimi.com/docs/pricing/chat-k26",
-      "checked_at": "2026-08-10",
+      "source": "https://platform.kimi.com/docs/pricing/chat",
+      "checked_at": "2026-09-14",
       "note": ""
     },
     {
@@ -417,26 +417,26 @@
       "kind": "text",
       "vendor": "智谱 GLM",
       "pricing": {
-        "in": 9450000,
-        "cache_read": 1755000,
-        "out": 29700000
+        "in": 8000000,
+        "cache_read": 2000000,
+        "out": 28000000
       },
-      "source": "https://docs.z.ai/guides/overview/pricing",
-      "checked_at": "2026-09-07",
-      "note": "官方美元价 $1.4 / $0.26 / $4.4（输入 / 缓存命中 / 输出，每百万 token）。国内开放平台（open.bigmodel.cn/pricing）的价格页是前端渲染、无法机读，本条按国际站 Z.ai 官方美元价目按 6.75 折算；两套价目独立，国内站单价可能低于这里，上线计费前请在控制台核对一次。"
+      "source": "https://docs.bigmodel.cn/cn/guide/start/pricing",
+      "checked_at": "2026-09-14",
+      "note": "国内开放平台公示的人民币按量价（元 / 百万 token：输入 8、缓存命中 2、输出 28）。缓存存储（元 / 百万 token / 小时）官方标注「限时免费」，没有独立标准价，因此不填 cache_write。国际站 Z.ai 是独立的美元价目，不用于本条。"
     },
     {
       "name": "glm-5.3-flash",
       "kind": "text",
       "vendor": "智谱 GLM",
       "pricing": {
-        "in": 1012500,
-        "cache_read": 202500,
-        "out": 3375000
+        "in": 800000,
+        "cache_read": 230000,
+        "out": 2800000
       },
-      "source": "https://docs.z.ai/guides/overview/pricing",
-      "checked_at": "2026-09-07",
-      "note": "官方标准价 $0.15 / $0.03 / $0.50，官方文档另注「定价为 GLM-5.3 的 1/10」。当前有限时五折（$0.075 / $0.015 / $0.25），按刊例价口径不录促销价。国内开放平台（open.bigmodel.cn/pricing）的价格页是前端渲染、无法机读，本条按国际站 Z.ai 官方美元价目按 6.75 折算；两套价目独立，国内站单价可能低于这里，上线计费前请在控制台核对一次。"
+      "source": "https://docs.bigmodel.cn/cn/guide/start/pricing",
+      "checked_at": "2026-09-14",
+      "note": "国内开放平台公示的人民币按量价（元 / 百万 token：输入 0.8、缓存命中 0.23、输出 2.8），输入与输出为 GLM-5.3 的 1/10。缓存存储（元 / 百万 token / 小时）官方标注「限时免费」，没有独立标准价，因此不填 cache_write。国际站 Z.ai 是独立的美元价目，不用于本条。"
     },
     {
       "name": "glm-5.2",
@@ -447,22 +447,22 @@
         "cache_read": 2000000,
         "out": 28000000
       },
-      "source": "https://open.bigmodel.cn/pricing",
-      "checked_at": "2026-08-10",
-      "note": "智谱开放平台公示的按量标准价。该价格页是前端渲染、无法机读，这组数字未从页面原文逐字取得，上线计费前请在控制台核对一次；国际站 Z.ai 的官方美元价是 $1.4 / $0.26 / $4.4，两套价目独立。"
+      "source": "https://docs.bigmodel.cn/cn/guide/start/pricing",
+      "checked_at": "2026-09-14",
+      "note": "国内开放平台公示的人民币按量价（元 / 百万 token：输入 8、缓存命中 2、输出 28）。缓存存储（元 / 百万 token / 小时）官方标注「限时免费」，没有独立标准价，因此不填 cache_write。国际站 Z.ai 是独立的美元价目，不用于本条。"
     },
     {
       "name": "glm-5",
       "kind": "text",
       "vendor": "智谱 GLM",
       "pricing": {
-        "in": 6750000,
-        "cache_read": 1350000,
-        "out": 21600000
+        "in": 4000000,
+        "cache_read": 1000000,
+        "out": 18000000
       },
-      "source": "https://docs.z.ai/guides/overview/pricing",
-      "checked_at": "2026-09-07",
-      "note": "上一代旗舰，官方美元价 $1 / $0.2 / $3.2。国内开放平台（open.bigmodel.cn/pricing）的价格页是前端渲染、无法机读，本条按国际站 Z.ai 官方美元价目按 6.75 折算；两套价目独立，国内站单价可能低于这里，上线计费前请在控制台核对一次。"
+      "source": "https://docs.bigmodel.cn/cn/guide/start/pricing",
+      "checked_at": "2026-09-14",
+      "note": "上一代旗舰。国内开放平台按输入长度分两档，pricing 记 [0, 32K) 档（元 / 百万 token：输入 4、缓存命中 1、输出 18）；输入 ≥32K 档为 6 / 1.5 / 22。缓存存储（元 / 百万 token / 小时）官方标注「限时免费」，没有独立标准价，因此不填 cache_write。国际站 Z.ai 是独立的美元价目，不用于本条。"
     },
     {
       "name": "qwen3.8-max",
@@ -754,13 +754,13 @@
       "kind": "text",
       "vendor": "智谱 GLM",
       "pricing": {
-        "in": 9450000,
-        "cache_read": 1755000,
-        "out": 29700000
+        "in": 6000000,
+        "cache_read": 1300000,
+        "out": 24000000
       },
-      "source": "https://docs.z.ai/guides/overview/pricing",
-      "checked_at": "2026-09-07",
-      "note": "官方美元价与 glm-5.3、glm-5.2 同档：$1.4 / $0.26 / $4.4。国内开放平台（open.bigmodel.cn/pricing）的价格页是前端渲染、无法机读，本条按国际站 Z.ai 官方美元价目按 6.75 折算；两套价目独立，国内站单价可能低于这里，上线计费前请在控制台核对一次。"
+      "source": "https://docs.bigmodel.cn/cn/guide/start/pricing",
+      "checked_at": "2026-09-14",
+      "note": "国内开放平台按输入长度分两档，pricing 记 [0, 32K) 档（元 / 百万 token：输入 6、缓存命中 1.3、输出 24）；输入 ≥32K 档为 8 / 2 / 28。缓存存储（元 / 百万 token / 小时）官方标注「限时免费」，没有独立标准价，因此不填 cache_write。国际站 Z.ai 是独立的美元价目，不用于本条。"
     },
     {
       "name": "gpt-6-astra",
@@ -1033,6 +1033,123 @@
       "source": "https://mimo.mi.com/docs/zh-CN/price/pay-as-you-go",
       "checked_at": "2026-09-07",
       "note": "国内普通 API 按量人民币标准价，输入长度不分档；Token Plan 套餐独立计费，不折算套餐补贴。缓存写入仅公示限时免费，不设独立标准价字段；联网搜索按次另计，不包含在 token 价格中。"
+    },
+    {
+      "name": "doubao-seed-evolving",
+      "kind": "text",
+      "vendor": "火山方舟",
+      "pricing": {
+        "in": 6000000,
+        "cache_read": 1200000,
+        "out": 30000000
+      },
+      "source": "https://www.volcengine.com/docs/82379/1544106",
+      "checked_at": "2026-09-14",
+      "note": "价目表按输入长度 [0, 1024]k 一档计价（元 / 百万 token：输入 6、缓存命中 1.2、输出 30）。周级更新的统一模型 ID，官方不带日期。显式上下文缓存另收缓存存储费 0.017 元 / 百万 token / 小时（设备不建模）。官方另设在线推理（低延迟）、（低优）与批量推理等档位，单价不同；pricing 只记在线推理（常规）。"
+    },
+    {
+      "name": "doubao-seed-2-1-pro-260628",
+      "kind": "text",
+      "vendor": "火山方舟",
+      "pricing": {
+        "in": 6000000,
+        "cache_read": 1200000,
+        "out": 30000000
+      },
+      "source": "https://www.volcengine.com/docs/82379/1544106",
+      "checked_at": "2026-09-14",
+      "note": "价目表按短名 doubao-seed-2.1-pro 列价，本条是它当前的带日期模型 ID；输入长度 [0, 256]k 一档（元 / 百万 token：输入 6、缓存命中 1.2、输出 30）。显式上下文缓存另收缓存存储费 0.017 元 / 百万 token / 小时（设备不建模）。官方另设在线推理（低延迟）、（低优）与批量推理等档位，单价不同；pricing 只记在线推理（常规）。"
+    },
+    {
+      "name": "doubao-seed-2-1-turbo-260628",
+      "kind": "text",
+      "vendor": "火山方舟",
+      "pricing": {
+        "in": 3000000,
+        "cache_read": 600000,
+        "out": 15000000
+      },
+      "source": "https://www.volcengine.com/docs/82379/1544106",
+      "checked_at": "2026-09-14",
+      "note": "价目表按短名 doubao-seed-2.1-turbo 列价，本条是它当前的带日期模型 ID；输入长度 [0, 256]k 一档（元 / 百万 token：输入 3、缓存命中 0.6、输出 15）。显式上下文缓存另收缓存存储费 0.017 元 / 百万 token / 小时（设备不建模）。官方另设在线推理（低延迟）、（低优）与批量推理等档位，单价不同；pricing 只记在线推理（常规）。"
+    },
+    {
+      "name": "doubao-seed-2-0-pro-260215",
+      "kind": "text",
+      "vendor": "火山方舟",
+      "pricing": {
+        "in": 3200000,
+        "cache_read": 640000,
+        "out": 16000000
+      },
+      "source": "https://www.volcengine.com/docs/82379/1544106",
+      "checked_at": "2026-09-14",
+      "note": "价目表按短名 doubao-seed-2.0-pro 列价，本条是它的带日期模型 ID；官方按输入长度分三档，pricing 记 [0, 32]k 档（元 / 百万 token：输入 3.2、缓存命中 0.64、输出 16），(32, 128]k 档为 4.8 / 0.96 / 24，(128, 256]k 档为 9.6 / 1.92 / 48。显式上下文缓存另收缓存存储费 0.017 元 / 百万 token / 小时（设备不建模）。官方另设在线推理（低延迟）、（低优）与批量推理等档位，单价不同；pricing 只记在线推理（常规）。"
+    },
+    {
+      "name": "doubao-seed-2-0-lite-260428",
+      "kind": "text",
+      "vendor": "火山方舟",
+      "pricing": {
+        "in": 600000,
+        "cache_read": 120000,
+        "out": 3600000
+      },
+      "source": "https://www.volcengine.com/docs/82379/1544106",
+      "checked_at": "2026-09-14",
+      "note": "价目表按短名 doubao-seed-2.0-lite 列价，本条是它当前的带日期模型 ID；官方按输入长度分三档，pricing 记 [0, 32]k 档的非音频价（元 / 百万 token：输入 0.6、缓存命中 0.12、输出 3.6），(32, 128]k 档为 0.9 / 0.18 / 5.4，(128, 256]k 档为 1.8 / 0.36 / 10.8；音频输入另有 9 / 13.5 / 27 元三档单价，设备不建模。显式上下文缓存另收缓存存储费 0.017 元 / 百万 token / 小时（设备不建模）。官方另设在线推理（低延迟）、（低优）与批量推理等档位，单价不同；pricing 只记在线推理（常规）。"
+    },
+    {
+      "name": "doubao-seed-2-0-lite-260215",
+      "kind": "text",
+      "vendor": "火山方舟",
+      "pricing": {
+        "in": 600000,
+        "cache_read": 120000,
+        "out": 3600000
+      },
+      "source": "https://www.volcengine.com/docs/82379/1544106",
+      "checked_at": "2026-09-14",
+      "note": "价目表按短名 doubao-seed-2.0-lite 列价，本条是它的往期带日期模型 ID，与 doubao-seed-2-0-lite-260428 同价；pricing 记 [0, 32]k 档的非音频价。显式上下文缓存另收缓存存储费 0.017 元 / 百万 token / 小时（设备不建模）。官方另设在线推理（低延迟）、（低优）与批量推理等档位，单价不同；pricing 只记在线推理（常规）。"
+    },
+    {
+      "name": "doubao-seed-2-0-mini-260428",
+      "kind": "text",
+      "vendor": "火山方舟",
+      "pricing": {
+        "in": 200000,
+        "cache_read": 40000,
+        "out": 2000000
+      },
+      "source": "https://www.volcengine.com/docs/82379/1544106",
+      "checked_at": "2026-09-14",
+      "note": "价目表按短名 doubao-seed-2.0-mini 列价，本条是它当前的带日期模型 ID；官方按输入长度分三档，pricing 记 [0, 32]k 档的非音频价（元 / 百万 token：输入 0.2、缓存命中 0.04、输出 2），(32, 128]k 档为 0.4 / 0.08 / 4，(128, 256]k 档为 0.8 / 0.16 / 8；音频输入另有 3 / 6 / 12 元三档单价，设备不建模。显式上下文缓存另收缓存存储费 0.017 元 / 百万 token / 小时（设备不建模）。官方另设在线推理（低延迟）、（低优）与批量推理等档位，单价不同；pricing 只记在线推理（常规）。"
+    },
+    {
+      "name": "doubao-seed-2-0-mini-260215",
+      "kind": "text",
+      "vendor": "火山方舟",
+      "pricing": {
+        "in": 200000,
+        "cache_read": 40000,
+        "out": 2000000
+      },
+      "source": "https://www.volcengine.com/docs/82379/1544106",
+      "checked_at": "2026-09-14",
+      "note": "价目表按短名 doubao-seed-2.0-mini 列价，本条是它的往期带日期模型 ID，与 doubao-seed-2-0-mini-260428 同价；pricing 记 [0, 32]k 档的非音频价。显式上下文缓存另收缓存存储费 0.017 元 / 百万 token / 小时（设备不建模）。官方另设在线推理（低延迟）、（低优）与批量推理等档位，单价不同；pricing 只记在线推理（常规）。"
+    },
+    {
+      "name": "doubao-seed-2-0-code-preview-260215",
+      "kind": "text",
+      "vendor": "火山方舟",
+      "pricing": {
+        "in": 3200000,
+        "cache_read": 640000,
+        "out": 16000000
+      },
+      "source": "https://www.volcengine.com/docs/82379/1544106",
+      "checked_at": "2026-09-14",
+      "note": "价目表按短名 doubao-seed-2.0-code 列价，本条是它的带日期模型 ID；官方按输入长度分三档，pricing 记 [0, 32]k 档（元 / 百万 token：输入 3.2、缓存命中 0.64、输出 16），(32, 128]k 档为 4.8 / 0.96 / 24，(128, 256]k 档为 9.6 / 1.92 / 48。显式上下文缓存另收缓存存储费 0.017 元 / 百万 token / 小时（设备不建模）。官方另设在线推理（低延迟）、（低优）与批量推理等档位，单价不同；pricing 只记在线推理（常规）。"
     },
     {
       "name": "MiniMax-H3",
