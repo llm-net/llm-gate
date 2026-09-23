@@ -263,7 +263,9 @@ type Advisory struct {
 	// Source 是清单来源：website | upload。
 	Source string `json:"source"`
 	// CheckedAt 是清单被接受的时刻（内存态；重启后取落盘清单时为零值缺省）。
-	CheckedAt time.Time `json:"checked_at,omitempty"`
+	// 零值必须整项省略，界面才不会把它画成 0001-01-01——time.Time 是结构体，
+	// omitempty 对它无效，只有 omitzero 认 IsZero。
+	CheckedAt time.Time `json:"checked_at,omitzero"`
 	// Latest 是此刻可以安装/更新到的条目；nil = 没有。
 	Latest *Release `json:"latest,omitempty"`
 	// Newest 是清单里本平台最新的条目（可能因阻断或许可不可装），供界面展示。

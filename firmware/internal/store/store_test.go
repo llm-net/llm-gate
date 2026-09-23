@@ -1210,7 +1210,7 @@ func TestListServableModels(t *testing.T) {
 	}
 }
 
-// TestServableModelsTextOnly 钉死迭代 8 的文本口径：加了视频/图片模型之后
+// TestServableModelsTextOnly 钉死迭代 8 的文本口径：加了视频/图像模型之后
 // /v1/models 与使用API页的两条 servable 读数**集合不变**。关键陷阱是挂在 ark
 // 上游的视频模型——ark 服务 openai_chat，若谓词只按协议过滤而不按 kind 过滤，
 // 它就会漏进文本读数；所以谓词必须显式钉 kind=text，本测试是那道绊线。
@@ -1254,7 +1254,7 @@ func TestServableModelsTextOnly(t *testing.T) {
 		t.Fatalf("基线 = %v，期望 [deepseek-chat]", before)
 	}
 
-	// 视频模型挂 ark（陷阱）与 minimax 来源，图片模型挂 ark——三条来源全部
+	// 视频模型挂 ark（陷阱）与 minimax 来源，图像模型挂 ark——三条来源全部
 	// 启用、上游全部启用，仍不得进入文本读数。
 	video, err := s.CreateModel(ctx, "doubao-seedance-2-0-mini", ModelKindVideo, "")
 	if err != nil {
@@ -1270,7 +1270,7 @@ func TestServableModelsTextOnly(t *testing.T) {
 
 	after := snapshot()
 	if strings.Join(after, ",") != strings.Join(before, ",") {
-		t.Fatalf("加了视频/图片模型后 /v1/models 集合变了：%v → %v", before, after)
+		t.Fatalf("加了视频/图像模型后 /v1/models 集合变了：%v → %v", before, after)
 	}
 	// ResolveModelRoute 不设 kind 过滤（路由视图带 kind 事实，闸门在 gateway
 	// 按入口裁决）：视频模型仍可按名解析，供视频入口选路。
@@ -1280,7 +1280,7 @@ func TestServableModelsTextOnly(t *testing.T) {
 	}
 }
 
-// TestListServableAIGCSources：视频/图片读数与文本读数互为反选——同一启用
+// TestListServableAIGCSources：视频/图像读数与文本读数互为反选——同一启用
 // 谓词、kind 显式 IN (video,image)；文本模型不进、三层任一停用即出、字段只有
 // 模型名/kind/上游 type/base_url（上游名与凭据不出成员可读链路）。
 func TestListServableAIGCSources(t *testing.T) {
@@ -1666,5 +1666,88 @@ func TestModelEntrySwitches(t *testing.T) {
 	}
 	if err := s.SetModelEntries(ctx, 99999, true, true, true); err == nil || !errors.Is(err, ErrNotFound) {
 		t.Fatalf("不存在的模型应回 ErrNotFound，得到 %v", err)
+	}
+}
+
+// 归档（0048）：凭据作废、行与标签留给历史账。摘要点查落空、明文解不出、
+// ListAPIKeys 不列而 ListAllAPIKeys 列、标签仍可改；重复归档 ErrKeyArchived，
+// 不存在的 id ErrNotFound。
+func TestAPIKeyArchive(t *testing.T) {
+	s, _ := mustOpen(t)
+	ctx := context.Background()
+
+	k := mustKey(t, s, "digest-archive")
+	if err := s.ArchiveAPIKey(ctx, k.ID); err != nil {
+		t.Fatalf("ArchiveAPIKey: %v", err)
+	}
+	got, err := s.GetAPIKeyByID(ctx, k.ID)
+	if err != nil {
+		t.Fatalf("归档后按 id 应仍可读: %v", err)
+	}
+	if !got.Archived() || !got.Disabled || got.PlaintextAvailable || got.Label != "test-label" ||
+		got.DisplayPrefix != "sk_prefix12" || got.DisplayLast4 != "wxyz" {
+		t.Fatalf("归档后的行不符: %+v", got)
+	}
+	if strings.Contains(got.KeyDigest, "digest-archive") {
+		t.Errorf("归档后摘要应换成哨兵，got %q", got.KeyDigest)
+	}
+	if _, err := s.LookupKeyByDigest(ctx, "digest-archive"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("归档后摘要点查应落空, got %v", err)
+	}
+	if _, err := s.GetAPIKeyPlaintext(ctx, k.ID); !errors.Is(err, ErrKeyPlaintextMissing) {
+		t.Errorf("归档后明文应已清空, got %v", err)
+	}
+	if active, _ := s.ListAPIKeys(ctx); len(active) != 0 {
+		t.Errorf("ListAPIKeys 不该列已归档的 Key: %+v", active)
+	}
+	if all, _ := s.ListAllAPIKeys(ctx); len(all) != 1 || !all[0].Archived() {
+		t.Errorf("ListAllAPIKeys 应列已归档的 Key: %+v", all)
+	}
+	if err := s.SetAPIKeyLabel(ctx, k.ID, "退休的笔记本"); err != nil {
+		t.Errorf("归档后标签仍应可改: %v", err)
+	}
+	if err := s.ArchiveAPIKey(ctx, k.ID); !errors.Is(err, ErrKeyArchived) {
+		t.Errorf("重复归档应返回 ErrKeyArchived, got %v", err)
+	}
+	if err := s.ArchiveAPIKey(ctx, 9999); !errors.Is(err, ErrNotFound) {
+		t.Errorf("归档不存在的 Key 应返回 ErrNotFound, got %v", err)
+	}
+	// 归档后的 Key 没有历史账时仍可物理删除（规则只看历史，不看归档态）。
+	if err := s.DeleteAPIKey(ctx, k.ID); err != nil {
+		t.Errorf("无历史账的归档 Key 应可删除: %v", err)
+	}
+}
+
+// 0048 把主键序列从「库里见过的最大 key_id」起步：存量库里账本记着早年物理删除
+// 的密钥 id，迁移后新签的密钥不能再拿到它。
+func TestMigration0048SeedsKeySequenceFromLedger(t *testing.T) {
+	dir := t.TempDir()
+	db := openLegacyDB(t, dir, 47)
+	if _, err := db.Exec(`
+		INSERT INTO api_keys (id, label, key_digest, display_prefix, display_last4, created_at)
+		VALUES (3, 'kept', 'digest-kept', 'sk_kept', 'kept', ?)`, legacyTS); err != nil {
+		t.Fatalf("写入存量密钥: %v", err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO usage_hourly (bucket_hour, key_id, key_display, model_name, upstream_name, entry, kind, requests, cost_micro)
+		VALUES (1, 41, 'sk_gone…gone', 'deepseek-chat', 'ds-main', 'chat', 'text', 1, 100)`); err != nil {
+		t.Fatalf("写入存量账本: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("关闭存量库: %v", err)
+	}
+
+	s, err := Open(dir)
+	if err != nil {
+		t.Fatalf("迁移存量库: %v", err)
+	}
+	defer s.Close()
+	kept, err := s.GetAPIKeyByID(context.Background(), 3)
+	if err != nil || kept.Label != "kept" || kept.Archived() {
+		t.Fatalf("存量密钥迁移失真 (err=%v): %+v", err, kept)
+	}
+	fresh := mustKey(t, s, "digest-after-0048")
+	if fresh.ID <= 41 {
+		t.Fatalf("新签密钥 id=%d 不应 ≤ 账本里出现过的 41", fresh.ID)
 	}
 }

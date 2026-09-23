@@ -560,7 +560,7 @@ func (m *Manager) Rollback(ctx context.Context) (*updated.ComponentStatus, error
 }
 
 // Remove 卸载组件（A/B slot 整目录），订阅与节点选择保留。内核启用中拒绝：卸载前先在
-// 「出站代理」停用——「第三方组件」页只管组件本身，从不替管理员停功能。
+// 「出站代理」停用——「组件管理」页只管组件本身，从不替管理员停功能。
 func (m *Manager) Remove(ctx context.Context) error {
 	m.opMu.Lock()
 	defer m.opMu.Unlock()

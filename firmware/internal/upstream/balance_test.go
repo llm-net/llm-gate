@@ -3,7 +3,7 @@ package upstream_test
 // balance_test.go 覆盖 2026-08-09 的两笔扩展：
 //
 //   - openai_compat 的端点语义：无内置端点、经 base_url 只服务 openai_chat
-//     单协议（anthropic 与视频/图片一律不进候选）；没给 base_url 什么都不服务。
+//     单协议（anthropic 与视频/图像一律不进候选）；没给 base_url 什么都不服务。
 //   - 平台余额查询：支持矩阵（仅 deepseek）、请求形状（GET /user/balance +
 //     Bearer 注入）、成功解析、错误摘要、2xx 不可解析如实报失败。
 

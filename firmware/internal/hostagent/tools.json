@@ -1,0 +1,52 @@
+{
+  "instructions": "这些工具作用于当前被管理的主机；每次调用都会被记录到该主机的操作日志。",
+  "tools": [
+    {
+      "name": "exec",
+      "description": "在目标主机上以登录用户身份执行一条 shell 命令（非交互）。返回退出码、stdout 与 stderr（各自最多 64 KiB，超出截断）。需要管理员权限用 `sudo -n`；不要执行会等待交互输入的命令。",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["command"],
+        "properties": {
+          "command": { "type": "string", "description": "交给主机登录 shell 执行的命令行" },
+          "stdin": { "type": "string", "description": "喂给命令的标准输入（可选）" },
+          "timeout_sec": { "type": "integer", "minimum": 1, "maximum": 900, "description": "超时秒数，缺省 120，最多 900" }
+        }
+      }
+    },
+    {
+      "name": "write_file",
+      "description": "把内容写成目标主机上的一个文件（父目录不存在则创建）。适合写配置文件、脚本、服务单元；内容不经命令行，可含任意字符。",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "content"],
+        "properties": {
+          "path": { "type": "string", "description": "主机上的文件路径（绝对路径，或相对登录用户家目录）" },
+          "content": { "type": "string", "description": "完整文件内容（append 为真时为追加的内容）" },
+          "mode": { "type": "string", "description": "八进制权限，如 0644、0755（可选）" },
+          "sudo": { "type": "boolean", "description": "以 root 身份写（经 sudo -n）" },
+          "append": { "type": "boolean", "description": "追加而不是覆盖" }
+        }
+      }
+    },
+    {
+      "name": "read_profile",
+      "description": "读取这台主机的主机档案（Markdown）：硬件、系统、已装软件、服务、网络与历史改动的长期记录。",
+      "inputSchema": { "type": "object", "additionalProperties": false, "properties": {} }
+    },
+    {
+      "name": "update_profile",
+      "description": "整份替换这台主机的主机档案（Markdown）。发现主机事实变化或做过改动后更新它；保持精炼、结构稳定，不要写入口令或密钥。",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["content"],
+        "properties": {
+          "content": { "type": "string", "description": "新的完整档案内容（Markdown）" }
+        }
+      }
+    }
+  ]
+}

@@ -5,9 +5,14 @@ package admin_test
 
 import (
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/llm-net/llm-gate/firmware/internal/landomain"
 	"github.com/llm-net/llm-gate/firmware/internal/tunnelctx"
@@ -194,5 +199,91 @@ func TestLanDomainWriteRoutesAreLANOnly(t *testing.T) {
 		if tier != tunnelctx.LANOnly {
 			t.Errorf("%s 应只限 LAN，实际 %v", pattern, tier)
 		}
+	}
+}
+
+// TestLanDomainSiteErrorsPassThrough 钉住官网业务拒绝的透传：申领/登记/改地址/释放被官网
+// 拒绝时，管理面按官网的状态码与 code 应答；令牌被撤销（401）映射为 409 link_revoked。
+func TestLanDomainSiteErrorsPassThrough(t *testing.T) {
+	e := newEnv(t)
+	root := e.rootSession()
+
+	var mu sync.Mutex
+	reject := struct {
+		status int
+		code   string
+	}{}
+	setReject := func(status int, code string) {
+		mu.Lock()
+		defer mu.Unlock()
+		reject.status, reject.code = status, code
+	}
+	site := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/device/link/start":
+			w.WriteHeader(http.StatusCreated)
+			io.WriteString(w, `{"deviceCode":"dvc_`+strings.Repeat("b", 43)+`","userCode":"K7QM-3WPX","verificationUrl":"https://llm.net/link/","verificationUrlComplete":"https://llm.net/link/?code=K7QM-3WPX","expiresIn":900,"interval":1}`)
+		case "/api/device/link/poll":
+			io.WriteString(w, `{"status":"approved","token":"dvt_`+strings.Repeat("a", 43)+`","linkId":"dvl_1","interval":5,"account":{"displayName":"Owner"}}`)
+		case "/api/device/link":
+			io.WriteString(w, `{"link":{"id":"dvl_1"},"domain":null,"lanDomain":{"enabled":true,"suffix":"llm.net"}}`)
+		case "/api/device/domain/claim", "/api/device/domain/custom", "/api/device/domain/target", "/api/device/domain/release":
+			mu.Lock()
+			status, code := reject.status, reject.code
+			mu.Unlock()
+			w.WriteHeader(status)
+			fmt.Fprintf(w, `{"error":{"code":%q,"message":"官网拒绝：%s"}}`, code, code)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			io.WriteString(w, `{"error":{"code":"not_found","message":"no"}}`)
+		}
+	}))
+	defer site.Close()
+
+	mgr := landomain.New(landomain.Options{
+		DataDir: e.dir, Settings: e.st, Model: "test",
+		Site:         landomain.NewSiteClient(site.URL),
+		PollInterval: 10 * time.Millisecond,
+	})
+	e.srv.SetLanDomain(mgr)
+
+	resp := e.do("PUT", "/admin/v1/system/lan-domain", root, `{"provider":"official_site"}`)
+	wantStatus(t, resp, http.StatusOK)
+	resp = e.do("POST", "/admin/v1/system/lan-domain/link/start", root, `{}`)
+	wantStatus(t, resp, http.StatusOK)
+	resp = e.do("POST", "/admin/v1/system/lan-domain/link/wait", root, `{}`)
+	wantStatus(t, resp, http.StatusOK)
+	if ld := e.lanDomain(root); !ld.Link.Linked {
+		t.Fatalf("关联后读数应为已关联: %+v", ld)
+	}
+
+	cases := []struct {
+		siteStatus int
+		siteCode   string
+		wantStatus int
+		wantCode   string
+	}{
+		{http.StatusServiceUnavailable, "lan_domain_not_configured", http.StatusServiceUnavailable, "lan_domain_not_configured"},
+		{http.StatusConflict, "label_taken", http.StatusConflict, "label_taken"},
+		{http.StatusTooManyRequests, "rate_limited", http.StatusTooManyRequests, "rate_limited"},
+		{http.StatusUnauthorized, "device_token_invalid", http.StatusConflict, "link_revoked"},
+	}
+	for _, tc := range cases {
+		setReject(tc.siteStatus, tc.siteCode)
+		resp = e.do("POST", "/admin/v1/system/lan-domain/claim", root, `{"label":"studio","target_ip":"192.168.1.20"}`)
+		wantStatus(t, resp, tc.wantStatus)
+		if code := errorCode(t, resp); code != tc.wantCode {
+			t.Fatalf("官网 %d %s → 管理面 code = %s，期望 %s", tc.siteStatus, tc.siteCode, code, tc.wantCode)
+		}
+	}
+	// 官网方式换成自有域名后登记同样透传（先解除已关联但未申领的状态不必：登记只要求已关联）。
+	resp = e.do("PUT", "/admin/v1/system/lan-domain", root, `{"provider":"own_domain"}`)
+	wantStatus(t, resp, http.StatusOK)
+	setReject(http.StatusConflict, "hostname_taken")
+	resp = e.do("POST", "/admin/v1/system/lan-domain/register", root, `{"hostname":"box.example.com","target_ip":"192.168.1.20"}`)
+	wantStatus(t, resp, http.StatusConflict)
+	if code := errorCode(t, resp); code != "hostname_taken" {
+		t.Fatalf("登记被官网拒绝应透出 hostname_taken: %s", code)
 	}
 }

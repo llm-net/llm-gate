@@ -1,5 +1,5 @@
 // remove_test.go 钉住组件卸载的守卫：内核启用中 Remove 答 ErrComponentInUse 且不动引擎；
-// 停用后卸载成功、读数回到 not_installed，订阅与节点选择保留（「第三方组件」页只管组件本身）。
+// 停用后卸载成功、读数回到 not_installed，订阅与节点选择保留（「组件管理」页只管组件本身）。
 package mihomo
 
 import (

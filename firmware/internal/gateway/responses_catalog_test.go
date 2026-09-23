@@ -163,7 +163,7 @@ func TestResponsesCatalogDeepSeekV4ReplaysThinkingAcrossToolCall(t *testing.T) {
 func TestResponsesCatalogUsesCapabilitiesFromDataUpgrade(t *testing.T) {
 	e := newRouteEnv(t)
 	doc, err := platformcatalog.Parse([]byte(`{
-		"schema":"llmgate.platform-models/v2","version":9999,"updated_at":"2026-08-24",
+		"schema":"llmgate.model-catalog/v1","version":99999999999,"updated_at":"2026-08-24","currency":"CNY","unit":"micro_yuan",
 		"platforms":[{"id":"example_ai","type":"openai_compat","vendor":"Example AI",
 			"base_url":"https://api.example.invalid/v1","billing_mode":"usage","models":[{
 				"name":"example-reasoner","kind":"text","capabilities":{"responses_chat":{

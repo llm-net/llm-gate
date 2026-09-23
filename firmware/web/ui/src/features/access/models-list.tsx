@@ -1,6 +1,6 @@
 // 「可用模型」卡片：这把 Key 此刻真能调用的模型清单（对话模型 + 视频/图像模型）。
 //
-// 挂在「接入方法」页（/connect）的API调用标签下：Key 持有者够不着模型目录端点，
+// 挂在「接入方法」页（/connect）的API调用页下：Key 持有者够不着模型目录端点，
 // 这份清单是他们唯一能自助看到可用模型的地方。读数口径与数据面 GET /v1/models
 // 同一份（模型、来源、上游三者都启用、且在这把 Key 的可用模型范围内），随接入
 // 读数一次取回，改动下一个请求即生效。
@@ -130,14 +130,16 @@ function AigcSection({ models }: { models: api.AIGCModel[] }) {
 export function ModelsCard({
   models,
   aigc,
+  systemone = [],
   audience = "admin",
 }: {
   models: api.ServableModel[];
   aigc: api.AIGCModel[];
+  systemone?: NonNullable<api.AccessSnapshot["systemone_models"]>;
   audience?: "admin" | "holder";
 }): React.ReactElement {
   const holder = audience === "holder";
-  if (models.length === 0 && aigc.length === 0) {
+  if (models.length === 0 && aigc.length === 0 && systemone.length === 0) {
     return (
       <Card className="gap-3 p-6">
         <h2 className="font-semibold">{t("可用模型")}</h2>
@@ -153,10 +155,21 @@ export function ModelsCard({
     <Card className="gap-3 p-6">
       <div className="flex items-center gap-3">
         <h2 className="font-semibold">{t("可用模型")}</h2>
-        <Badge variant="secondary" title={t("共 {n} 个", { n: models.length + aigc.length })}>
-          {models.length + aigc.length}
+        <Badge variant="secondary" title={t("共 {n} 个", { n: models.length + aigc.length + systemone.length })}>
+          {models.length + aigc.length + systemone.length}
         </Badge>
       </div>
+      {systemone.length > 0 ? (
+        <div className="flex flex-col gap-2">
+          <h3 className="text-sm font-medium">System One</h3>
+          <p className="text-muted-foreground text-xs">
+            {t("SDK 的 base_url 填接入地址加 /typesafe，不附加 /v1；使用本设备的 API密钥。POST /typesafe/v1/systemone 支持 Choice、Noul、Score 混合问题；GET /typesafe/v1/models 查询已授权模型。结果一次性返回，token 统计以实际后端为准。")}
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {systemone.map((m) => <Badge key={m.name} variant="secondary">{m.name}</Badge>)}
+          </div>
+        </div>
+      ) : null}
       {models.length > 0 ? (
         <>
           <p className="text-muted-foreground text-xs">

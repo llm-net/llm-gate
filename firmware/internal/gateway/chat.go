@@ -43,7 +43,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 每请求点查三表选路（决策 3）：启停、优先级、换 Key 即时生效。
-	// 文本入口只收 kind=text（迭代 8 闸门）：视频/图片模型在这里与不存在同响应。
+	// 文本入口只收 kind=text（迭代 8 闸门）：视频/图像模型在这里与不存在同响应。
 	cands, status := s.resolveRoute(r.Context(), model, store.ModelKindText, config.ProtocolOpenAIChat)
 	switch status {
 	case routeModelNotFound:

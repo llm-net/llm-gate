@@ -168,6 +168,84 @@ func TestCodexImagesEditsCarryReferenceImages(t *testing.T) {
 	}
 }
 
+// output_format 与 output_compression 逐字进工具对象；回给客户端的 output_format 取
+// 后端回报值。
+func TestCodexImagesForwardOutputFormat(t *testing.T) {
+	e := newAgentEnv(t, sseReply(strings.Replace(codexImageStreamBody, `"output_format":"png"`, `"output_format":"jpeg"`, 1)))
+	w := do(e.h, http.MethodPost, codexImagesPath, codexAuth,
+		`{"prompt":"x","model":"gpt-image-2.5-flare","output_format":"jpeg","output_compression":20}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("状态 = %d，body = %s", w.Code, w.Body.String())
+	}
+	tool := sentJSON(t, e.backend, 0)["tools"].([]any)[0].(map[string]any)
+	if tool["model"] != "gpt-image-2.5-flare" || tool["output_format"] != "jpeg" || tool["output_compression"] != float64(20) {
+		t.Fatalf("工具对象没有逐字带上输出格式：%v", tool)
+	}
+	var out struct {
+		OutputFormat string `json:"output_format"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil || out.OutputFormat != "jpeg" {
+		t.Fatalf("响应 output_format = %q / %v", out.OutputFormat, err)
+	}
+}
+
+// size 是 WxH 时化简成比例追加到提示词尾部（后端只认提示词里的比例）；auto 不追加。
+func TestCodexImagesSizeBecomesAspectInstruction(t *testing.T) {
+	for _, tc := range []struct{ size, want string }{
+		{`"1536x1024"`, "x. Aspect ratio: 3:2."},
+		{`"1024x1536"`, "x. Aspect ratio: 2:3."},
+		{`"1024x1024"`, "x"},
+		{`"auto"`, "x"},
+		{`"bogus"`, "x"},
+	} {
+		e := newAgentEnv(t, sseReply(codexImageStreamBody))
+		w := do(e.h, http.MethodPost, codexImagesPath, codexAuth, `{"prompt":"x","size":`+tc.size+`}`)
+		if w.Code != http.StatusOK {
+			t.Fatalf("size=%s 状态 = %d，body = %s", tc.size, w.Code, w.Body.String())
+		}
+		sent := sentJSON(t, e.backend, 0)
+		text := sentText(sent["input"].([]any)[0])
+		if !strings.HasSuffix(text, tc.want) {
+			t.Fatalf("size=%s 提示词 = %q，期望以 %q 结尾", tc.size, text, tc.want)
+		}
+		if tc.size != `"bogus"` && tc.size != `"auto"` {
+			if tool := sent["tools"].([]any)[0].(map[string]any); tool["size"] == nil {
+				t.Fatalf("size 仍应逐字进工具对象：%v", tool)
+			}
+		}
+	}
+}
+
+// background=transparent 不进工具对象（后端答 400），改成提示词尾部的透明背景指令；
+// opaque 照旧逐字转发。
+func TestCodexImagesTransparentBackgroundBecomesPromptHint(t *testing.T) {
+	e := newAgentEnv(t, sseReply(codexImageStreamBody))
+	w := do(e.h, http.MethodPost, codexImagesPath, codexAuth, `{"prompt":"a logo","background":"transparent","size":"1536x1024"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("状态 = %d，body = %s", w.Code, w.Body.String())
+	}
+	sent := sentJSON(t, e.backend, 0)
+	tool := sent["tools"].([]any)[0].(map[string]any)
+	if _, has := tool["background"]; has {
+		t.Fatalf("transparent 不该进工具对象：%v", tool)
+	}
+	if text := sentText(sent["input"].([]any)[0]); !strings.HasSuffix(text, "a logo. Aspect ratio: 3:2. Transparent background: the background must be fully transparent (alpha channel), not white.") {
+		t.Fatalf("提示词 = %q，期望带比例与透明背景指令", text)
+	}
+	e = newAgentEnv(t, sseReply(codexImageStreamBody))
+	w = do(e.h, http.MethodPost, codexImagesPath, codexAuth, `{"prompt":"a logo","background":"opaque"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("状态 = %d，body = %s", w.Code, w.Body.String())
+	}
+	sent = sentJSON(t, e.backend, 0)
+	if tool := sent["tools"].([]any)[0].(map[string]any); tool["background"] != "opaque" {
+		t.Fatalf("opaque 应逐字转发：%v", tool)
+	}
+	if text := sentText(sent["input"].([]any)[0]); !strings.HasSuffix(text, "a logo") {
+		t.Fatalf("opaque 不该改提示词：%q", text)
+	}
+}
+
 func TestCodexImagesIgnoresNonImageModelName(t *testing.T) {
 	e := newAgentEnv(t, sseReply(codexImageStreamBody))
 	w := do(e.h, http.MethodPost, codexImagesPath, codexAuth, `{"prompt":"x","model":"dall-e-3"}`)
@@ -194,7 +272,7 @@ func TestCodexImagesFailedEventIs502(t *testing.T) {
 }
 
 func TestCodexImagesNoImageItemIs502(t *testing.T) {
-	e := newAgentEnv(t, sseReply(codexStreamBody)) // 普通文本流，没有图片条目
+	e := newAgentEnv(t, sseReply(codexStreamBody)) // 普通文本流，没有图像条目
 	w := do(e.h, http.MethodPost, codexImagesPath, codexAuth, `{"prompt":"x"}`)
 	if w.Code != http.StatusBadGateway {
 		t.Fatalf("状态 = %d，body = %s", w.Code, w.Body.String())
@@ -264,8 +342,11 @@ func TestCodexImagesRequireCodexSubscription(t *testing.T) {
 }
 
 func TestCodexImagesWithoutConnectedSubscriptionIs409(t *testing.T) {
-	// 订阅勾了，但设备上没有连接 Codex 账号：没有任何可见的承载模型。
-	e := newRouteEnv(t)
+	// 钉了 Codex 账号，但它被停用：没有任何可见的承载模型。
+	e := newAgentEnv(t, jsonReply(http.StatusOK, codexNonStreamBody))
+	if err := e.st.SetAgentStatus(t.Context(), e.acctID, store.AgentStatusDisabled); err != nil {
+		t.Fatalf("SetAgentStatus: %v", err)
+	}
 	w := do(e.h, http.MethodPost, codexImagesPath, chatAuth, `{"prompt":"x"}`)
 	if w.Code != http.StatusConflict {
 		t.Fatalf("状态 = %d，body = %s", w.Code, w.Body.String())
@@ -299,7 +380,7 @@ func TestCodexImagesRoutesAndAuth(t *testing.T) {
 }
 
 func TestCodexLocalCatalogCarriesSubscriptionOverlay(t *testing.T) {
-	e := newRouteEnv(t)
+	e := newAgentEnv(t, jsonReply(http.StatusOK, codexNonStreamBody))
 	w := do(e.h, http.MethodGet, "/agents/codex/v1/model-catalog", chatAuth, "")
 	if w.Code != http.StatusOK {
 		t.Fatalf("状态 = %d，body = %s", w.Code, w.Body.String())

@@ -15,7 +15,7 @@ package admin
 //	POST   /admin/v1/system/components/mihomo/upload（octet-stream，LAN），DELETE …/staged
 //	DELETE /admin/v1/system/components/mihomo                 卸载组件（内核启用中 409；LAN）
 //
-// 组件的安装/升级/回退/卸载统一在界面「第三方组件」页操作；「出站代理」标签页只展示组件
+// 组件的安装/升级/回退/卸载统一在界面「组件管理」页操作；「出站代理」标签页只展示组件
 // 状态并链接过去。卸载从不替管理员停用功能：内核启用中答 409 component_in_use。
 //
 // 订阅地址与节点凭据不出任何响应：读数只有订阅主机名、节点名与协议类型。审计只记动作、

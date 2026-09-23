@@ -66,20 +66,24 @@ const (
 	ProtocolArkVideo          = "ark_video"
 	ProtocolArkImage          = "ark_image"
 	ProtocolMinimaxVideo      = "minimax_video"
+	ProtocolSystemOne         = "systemone"
 )
 
 // 厂商协议面的路径首段（段名即厂商 slug）。数据面把 `/<段>/` 整棵子树交给该
 // 厂商的路由块，网关自产错误按首段选该厂商的错误形（gateway.entryErrorStyle）。
 const (
-	ProtocolFaceArk     = "ark"
-	ProtocolFaceMinimax = "minimax"
+	ProtocolFaceArk      = "ark"
+	ProtocolFaceMinimax  = "minimax"
+	ProtocolFaceTypeSafe = "typesafe"
 )
 
-// ProtocolFace 返回 AIGC 协议标识所属的厂商路径首段；文本协议与未知值返回空串。
+// ProtocolFace 返回厂商协议标识所属的路径首段；文本协议与未知值返回空串。
 func ProtocolFace(protocol string) string {
 	switch protocol {
 	case ProtocolArkVideo, ProtocolArkImage:
 		return ProtocolFaceArk
+	case ProtocolSystemOne:
+		return ProtocolFaceTypeSafe
 	case ProtocolMinimaxVideo:
 		return ProtocolFaceMinimax
 	}
@@ -109,6 +113,8 @@ const (
 	UpstreamMinimax         = "minimax"
 	UpstreamOpenAICompat    = "openai_compat"
 	UpstreamAnthropicCompat = "anthropic_compat"
+	UpstreamGeneric         = "generic"
+	UpstreamSystemOne       = "systemone"
 	UpstreamMock            = "mock"
 )
 
@@ -483,21 +489,21 @@ func (c *Config) validateUpstreams() (map[string]struct{}, error) {
 			if u.APIKey == "" {
 				return nil, fmt.Errorf("upstream %q: type %s 必须配置 api_key（真实 Key 写入 gitignored 的 *.local.yaml）", u.Name, u.Type)
 			}
-		case UpstreamOpenAICompat, UpstreamAnthropicCompat:
+		case UpstreamOpenAICompat, UpstreamAnthropicCompat, UpstreamSystemOne:
 			// 通用适配两样都要：地址不内置，凭证也照常要发（无 Key 的兼容
 			// 服务在 Key 里填任意占位串即可，形态校验只在管理 API 侧）。
 			if u.APIKey == "" {
 				return nil, fmt.Errorf("upstream %q: type %s 必须配置 api_key（真实 Key 写入 gitignored 的 *.local.yaml）", u.Name, u.Type)
 			}
 			if u.BaseURL == "" {
-				return nil, fmt.Errorf("upstream %q: type %s 必须配置 base_url（兼容服务的端点根，通常以 /v1 结尾）", u.Name, u.Type)
+				return nil, fmt.Errorf("upstream %q: type %s 必须配置 base_url（服务端点根；System One 填服务根地址，不附加 /v1）", u.Name, u.Type)
 			}
 		case UpstreamMock:
 			if u.BaseURL == "" {
 				return nil, fmt.Errorf("upstream %q: type mock 必须配置 base_url（指向本地 mock 上游）", u.Name)
 			}
 		default:
-			return nil, fmt.Errorf("upstream %q: 未知 type %q（可选 %s|%s|%s|%s|%s|%s|%s|%s|%s）", u.Name, u.Type, UpstreamDeepseek, UpstreamArk, UpstreamArkPlan, UpstreamQwenPlan, UpstreamOpenCodeGo, UpstreamMinimax, UpstreamOpenAICompat, UpstreamAnthropicCompat, UpstreamMock)
+			return nil, fmt.Errorf("upstream %q: 未知 type %q（可选 %s|%s|%s|%s|%s|%s|%s|%s|%s|%s）", u.Name, u.Type, UpstreamDeepseek, UpstreamArk, UpstreamArkPlan, UpstreamQwenPlan, UpstreamOpenCodeGo, UpstreamMinimax, UpstreamOpenAICompat, UpstreamAnthropicCompat, UpstreamSystemOne, UpstreamMock)
 		}
 
 		if u.BaseURL != "" {

@@ -15,21 +15,27 @@ import (
 	"time"
 
 	"github.com/llm-net/llm-gate/firmware/internal/admin"
+	"github.com/llm-net/llm-gate/firmware/internal/agenthost"
 	"github.com/llm-net/llm-gate/firmware/internal/agentquota"
 	"github.com/llm-net/llm-gate/firmware/internal/auth"
 	"github.com/llm-net/llm-gate/firmware/internal/boardinfo"
 	"github.com/llm-net/llm-gate/firmware/internal/buildinfo"
 	"github.com/llm-net/llm-gate/firmware/internal/cloudflared"
+	"github.com/llm-net/llm-gate/firmware/internal/codexappserver"
 	"github.com/llm-net/llm-gate/firmware/internal/config"
+	"github.com/llm-net/llm-gate/firmware/internal/devhost"
 	"github.com/llm-net/llm-gate/firmware/internal/devtoolpolicy"
 	"github.com/llm-net/llm-gate/firmware/internal/egress"
 	"github.com/llm-net/llm-gate/firmware/internal/gateway"
+	"github.com/llm-net/llm-gate/firmware/internal/hostagent"
 	"github.com/llm-net/llm-gate/firmware/internal/landomain"
 	"github.com/llm-net/llm-gate/firmware/internal/logging"
 	"github.com/llm-net/llm-gate/firmware/internal/mihomo"
 	"github.com/llm-net/llm-gate/firmware/internal/netconfig"
+	"github.com/llm-net/llm-gate/firmware/internal/nodeengine"
 	"github.com/llm-net/llm-gate/firmware/internal/officialsite"
 	"github.com/llm-net/llm-gate/firmware/internal/store"
+	"github.com/llm-net/llm-gate/firmware/internal/studio"
 	"github.com/llm-net/llm-gate/firmware/internal/sysinfo"
 	"github.com/llm-net/llm-gate/firmware/internal/update"
 	"github.com/llm-net/llm-gate/firmware/internal/updated"
@@ -227,6 +233,11 @@ func runGatewayd(args []string) int {
 	adminSrv.SetAppsSource(siteClient)
 	adminSrv.SetFirmwareUpdater(updateMgr)
 	srv := gateway.New(cfg, logger, st, gateway.NewStoreKeyAuthorizer(st, logger), adminSrv.Handler(), egressMgr)
+	// 媒体生成（internal/mediagen）：生成后端与准入闸在数据面，任务内核全进程一份——管理台、
+	// 凭 Key 自证的 /gate-helper/v1/media 与创作工作空间共用，陪等唤醒、归属与后台生成只此一份。
+	adminSrv.SetMediaGateway(srv)
+	adminSrv.SetAPIDebugGateway(srv)
+	srv.SetMediaJobs(adminSrv.MediaJobs())
 	// Agents 自检（迭代 11）：管理台那颗「自检」按钮要刷新的，是数据面进程内
 	// 那**同一份**订阅令牌状态。盒子是这份轮换型 refresh token 的唯一刷新者
 	// （决策 1），管理面自己造第二个 Provider 就会与数据面互废世代——所以刷新
@@ -287,6 +298,59 @@ func runGatewayd(args []string) int {
 		Keys:     cloudflared.TrustedKeys(),
 	})
 	adminSrv.SetProxyCore(coreMgr)
+	// Codex App Server 组件（internal/codexappserver）：清单来自官网、制品来自 OpenAI 官方
+	// release 整包（tar.gz，经 component_artifacts 分类），A/B 槽位安装/升级/回退/卸载，没有
+	// 常驻 unit；运行期按需从 <components>/codex-app-server/current 拉起实例（Launch / SelfCheck），
+	// 实例的 CODEX_HOME 落在 data_dir 下（docs-dev/firmware-codex-app-server.md）。
+	casMgr := codexappserver.NewManager(codexappserver.Options{
+		DataDir:       cfg.DataDir,
+		Settings:      st,
+		Website:       siteClient,
+		Engine:        engineClient,
+		Logger:        logger,
+		Keys:          cloudflared.TrustedKeys(),
+		ComponentsDir: updated.DefaultComponentsDir,
+	})
+	adminSrv.SetCodexAppServer(casMgr)
+	// 智能体纳管的主机/SoC（internal/agenthost）：设备自己的访问证书（一把 ed25519
+	// SSH 密钥对，私钥封存在 settings）与纳管主机清单。只在管理员按下按钮时连一次
+	// 目标主机，无常驻连接、无轮询；连不上只影响那一台主机。
+	hostMgr := agenthost.New(agenthost.Options{Store: st, Logger: logger})
+	adminSrv.SetAgentHosts(hostMgr)
+	// Agent远控（internal/hostagent）：每台纳管主机可开多个对话、各一条指令队列，引擎缺省是
+	// Codex App Server——实例的 provider 指回设备自己的 /agents/codex/v1（凭对话新建时选定的
+	// API 密钥，订阅授权与计量同一道闸），对主机的操作经 /agent-mcp 回到设备凭证书执行并落时间线。
+	loopback := hostagent.LoopbackBaseURL(cfg.Listen)
+	codexEngine := hostagent.NewCodexEngine(hostagent.CodexOptions{
+		Manager: casMgr, Config: adminSrv.CodexChatConfig, BaseURL: loopback, Logger: logger,
+	})
+	hostAgent := hostagent.New(hostagent.Options{
+		Store: st, Hosts: hostMgr, Logger: logger, ToolURL: loopback + "/agent-mcp", Engine: codexEngine,
+	})
+	hostAgent.Recover(ctx)
+	adminSrv.SetHostAgent(hostAgent)
+	srv.SetHostAgentMCP(hostAgent.MCPHandler())
+	defer hostAgent.Shutdown(context.Background())
+	// 主机上的守护进程 devd（internal/devhost）：经上面那把访问证书的免密 SSH 把
+	// llmgate-devd 装到已纳管的主机上，设备研发证书（自签 X.509，私钥封存在 settings）
+	// 用来 mTLS 连它；透传请求逐条转给守护进程，终端会话开着才有长连接。
+	devMgr := devhost.New(devhost.Options{Store: st, Logger: logger, Hosts: hostMgr})
+	adminSrv.SetDevHosts(devMgr)
+	// 创作工作空间（internal/studio）：工作节点上的目录 + 节点端引擎驱动的对话——引擎是那台节点
+	// 上 gate 关联的 Codex CLI（app-server）或 Claude Code（stream-json），经 SSH 拉起，经远程转发
+	// 回到设备的 /agents/codex|claude 与 /studio-mcp（internal/nodeengine）；目录经 devd 透传读写，
+	// 生成走媒体生成内核（以对话钉死的密钥计量），重启后未搬运的结果由 FinishJob 收尾。
+	studioMgr := studio.New(studio.Options{
+		Store: st, Media: adminSrv.MediaJobs(), Hosts: hostMgr, DevHosts: devMgr, Logger: logger, DataDir: cfg.DataDir,
+		Engines: nodeengine.Engines(nodeengine.Options{
+			Hosts: hostMgr, Resolve: adminSrv.AgentChatConfig, Upstream: loopback, Version: buildinfo.Version, Logger: logger,
+		}),
+	})
+	studioMgr.Recover(ctx)
+	adminSrv.MediaJobs().SetFinisher(store.MediaOriginStudio, studioMgr.FinishJob)
+	adminSrv.SetStudio(studioMgr)
+	srv.SetStudioMCP(studioMgr.MCPHandler())
+	defer studioMgr.Shutdown(context.Background())
 	// 内网域名（internal/landomain）：经 LLM Gate官网账号关联申领 <label>.llm.net、
 	// 由官网按配额选择 CA 用 DNS-01 签发证书；私钥与 HTTPS 监听只在设备上。官网不可达
 	// 只让 HTTPS 入口不可用，纯 IP 网关与本地管理台不受影响。
@@ -434,6 +498,7 @@ func runUpdated(args []string) int {
 	proxyUnit := fs.String("proxy-unit", updated.DefaultProxyUnit, "板上代理内核（Mihomo）的 systemd 单元名")
 	proxyUser := fs.String("proxy-user", updated.DefaultProxyUser, "代理内核运行用户（运行期配置属主）")
 	proxyRuntimeDir := fs.String("proxy-runtime-dir", updated.DefaultProxyRuntimeDir, "代理内核运行期目录（配置文件所在，tmpfs）")
+	appServerUser := fs.String("app-server-user", updated.DefaultAppServerUser, "Codex App Server 安装时跑 --version 自述版本探针的受限用户")
 	logLevel := fs.String("log-level", "info", "日志级别（debug|info|warn|error）")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -480,6 +545,9 @@ func runUpdated(args []string) int {
 		ProxyRuntimeDir:  *proxyRuntimeDir,
 		ProxyReady:       updated.TCPReadyProber(updated.DefaultProxyReadyAddr),
 		ProxyConfigCheck: updated.RunMihomoConfigTest(*proxyUser),
+		// Codex App Server（components.go）：只有 A/B 槽位，没有常驻 unit；安装时的自述
+		// 版本探针以该受限用户运行。
+		AppServerUser: *appServerUser,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "llmgate updated: %v\n", err)

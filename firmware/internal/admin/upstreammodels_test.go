@@ -86,7 +86,7 @@ func TestUpstreamModelsListsBuiltinCatalog(t *testing.T) {
 	if got.Catalog.Source == "" || got.Catalog.CheckedAt == "" {
 		t.Errorf("清单缺出处/核对日期：%+v", got.Catalog)
 	}
-	// deepseek 只服务文本双入口：种类清单里不该出现视频/图片，自定义表单也
+	// deepseek 只服务文本双入口：种类清单里不该出现视频/图像，自定义表单也
 	// 因此不必让人选族。
 	if len(got.Kinds) != 1 || got.Kinds[0].Kind != "text" || got.Kinds[0].Family != "" {
 		t.Fatalf("可承载种类 = %+v，期望仅 text", got.Kinds)
@@ -187,7 +187,7 @@ func TestUpstreamModelsNameConflict(t *testing.T) {
 	ark := e.createUpstream(root, fmt.Sprintf(`{"name":"ark","type":"ark","api_key":"%s"}`, upstreamKeyPlaintext))
 
 	got := e.upstreamModels(root, ark.ID)
-	// ark 三种入口都服务：种类清单三条，视频/图片各带自己的族。
+	// ark 三种入口都服务：种类清单三条，视频/图像各带自己的族。
 	if len(got.Kinds) != 3 {
 		t.Fatalf("可承载种类 = %+v，期望三种", got.Kinds)
 	}
@@ -211,9 +211,10 @@ func TestUpstreamModelsQwenPlanCatalog(t *testing.T) {
 
 	got := e.upstreamModels(root, up.ID)
 	want := map[string]bool{
-		"qwen3.8-max": true, "qwen3.8-flash": true, "qwen3.7-max": true,
-		"qwen3.7-plus": true, "qwen3.6-flash": true, "deepseek-v4-pro": true,
-		"deepseek-v4-pro-0813": true, "deepseek-v4-flash-0731": true, "glm-5.2": true,
+		"qwen3.8-max": true, "qwen3.8-flash": true, "qwen3.7-plus": true,
+		"deepseek-v4-pro": true, "deepseek-v4-flash": true,
+		"kimi-k2.7-code": true, "kimi-k2.6": true,
+		"glm-5.2": true, "glm-5.1": true, "glm-5": true,
 	}
 	if len(got.Models) != len(want) {
 		t.Fatalf("qwen_plan 选单条目数 = %d，期望 %d：%+v", len(got.Models), len(want), got.Models)

@@ -16,8 +16,9 @@
 //   - 迁移前向单向：embed 的 migrations/*.sql 按版本号升序逐个在独立事务中
 //     应用，schema_migrations 记录版本与应用时间；不支持回滚迁移。带
 //     rebuildDirective 标记的重建型迁移在外键关闭的独占连接上执行
-//     （见 applyRebuildMigration；首例 0005，之后 0009/0010 各扩一次
-//     upstreams.type 的 CHECK 集合）。0019 删掉「用户」概念时是清空重建：
+//     （见 applyRebuildMigration；首例 0005，之后 0009/0010/0016 各扩一次
+//     upstreams.type 的 CHECK 集合，0034 去掉 agent_accounts 的 UNIQUE(provider)
+//     并把 Key 策略的订阅开关换成钉死账号列）。0019 删掉「用户」概念时是清空重建：
 //     子表先 DROP，父表 users 随后即无引用可挡，普通单事务路径就够。
 //   - 审计表追加式（架构 §12）：本包只提供 AppendAudit，凡含 "Audit" 的
 //     更新/删除方法一律不得添加（store_test.go 以反射断言此约束）。
@@ -99,6 +100,7 @@ type Store struct {
 
 	stmtCreateAPIKey       *sql.Stmt
 	stmtListAPIKeys        *sql.Stmt
+	stmtListAllAPIKeys     *sql.Stmt
 	stmtGetAPIKeyByID      *sql.Stmt
 	stmtGetAPIKeyPlaintext *sql.Stmt
 	stmtSetAPIKeyLabel     *sql.Stmt
@@ -106,6 +108,7 @@ type Store struct {
 	stmtSetAPIKeyLimits    *sql.Stmt
 	stmtDrainKeyAllowance  *sql.Stmt
 	stmtDeleteAPIKey       *sql.Stmt
+	stmtArchiveAPIKey      *sql.Stmt
 	stmtLookupKeyByDigest  *sql.Stmt
 	stmtTouchKeyLastUsed   *sql.Stmt
 
@@ -163,15 +166,74 @@ type Store struct {
 	stmtListUnsettledAIGCTasks    *sql.Stmt
 	stmtSettleAIGCTask            *sql.Stmt
 
-	stmtUpsertAgentAccount        *sql.Stmt
-	stmtListAgentAccounts         *sql.Stmt
-	stmtGetAgentAccountByID       *sql.Stmt
-	stmtGetAgentAccountByProvider *sql.Stmt
-	stmtGetAgentCredential        *sql.Stmt
-	stmtSetAgentAuthJSON          *sql.Stmt
-	stmtUpdateAgentAccount        *sql.Stmt
-	stmtSetAgentStatus            *sql.Stmt
-	stmtDeleteAgentAccount        *sql.Stmt
+	stmtInsertAgentAccount    *sql.Stmt
+	stmtReconnectAgentAccount *sql.Stmt
+	stmtListAgentAccounts     *sql.Stmt
+	stmtGetAgentAccountByID   *sql.Stmt
+	stmtGetAgentCredential    *sql.Stmt
+	stmtSetAgentAuthJSON      *sql.Stmt
+	stmtUpdateAgentAccount    *sql.Stmt
+	stmtSetAgentStatus        *sql.Stmt
+
+	stmtCreateAgentHost   *sql.Stmt
+	stmtListAgentHosts    *sql.Stmt
+	stmtGetAgentHost      *sql.Stmt
+	stmtRenameAgentHost   *sql.Stmt
+	stmtSetAgentHostState *sql.Stmt
+	stmtDeleteAgentHost   *sql.Stmt
+
+	stmtSetAgentHostDevd   *sql.Stmt
+	stmtClearAgentHostDevd *sql.Stmt
+
+	stmtCreateCredential           *sql.Stmt
+	stmtListCredentials            *sql.Stmt
+	stmtGetCredential              *sql.Stmt
+	stmtGetCredentialSecret        *sql.Stmt
+	stmtUpdateCredential           *sql.Stmt
+	stmtUpdateCredentialWithSecret *sql.Stmt
+	stmtDeleteCredential           *sql.Stmt
+
+	stmtCreateWorkspace          *sql.Stmt
+	stmtListWorkspaces           *sql.Stmt
+	stmtGetWorkspace             *sql.Stmt
+	stmtGetWorkspaceByName       *sql.Stmt
+	stmtGetStudioWorkspaceByName *sql.Stmt
+	stmtDeleteWorkspace          *sql.Stmt
+
+	stmtCreateStudioChat      *sql.Stmt
+	stmtGetStudioChat         *sql.Stmt
+	stmtListStudioChats       *sql.Stmt
+	stmtSetStudioChatTitle    *sql.Stmt
+	stmtTouchStudioChat       *sql.Stmt
+	stmtDeleteStudioChat      *sql.Stmt
+	stmtArchiveStudioChat     *sql.Stmt
+	stmtListStudioMediaModels *sql.Stmt
+	stmtCreateStudioRun       *sql.Stmt
+	stmtGetStudioRun          *sql.Stmt
+	stmtListActiveStudioRuns  *sql.Stmt
+	stmtSetStudioRunStatus    *sql.Stmt
+	stmtSetStudioRunUsage     *sql.Stmt
+	stmtAppendStudioEvent     *sql.Stmt
+	stmtUpsertStudioFile      *sql.Stmt
+	stmtGetStudioFile         *sql.Stmt
+	stmtListStudioFiles       *sql.Stmt
+	stmtDeleteStudioFile      *sql.Stmt
+	stmtRenameStudioFile      *sql.Stmt
+
+	stmtGetAgentHostProfile     *sql.Stmt
+	stmtSetAgentHostProfile     *sql.Stmt
+	stmtCreateAgentHostChat     *sql.Stmt
+	stmtGetAgentHostChat        *sql.Stmt
+	stmtListAgentHostChats      *sql.Stmt
+	stmtSetAgentHostChatTitle   *sql.Stmt
+	stmtTouchAgentHostChat      *sql.Stmt
+	stmtCreateAgentHostRun      *sql.Stmt
+	stmtGetAgentHostRun         *sql.Stmt
+	stmtListAgentHostRuns       *sql.Stmt
+	stmtListActiveAgentHostRuns *sql.Stmt
+	stmtSetAgentHostRunStatus   *sql.Stmt
+	stmtSetAgentHostRunUsage    *sql.Stmt
+	stmtAppendAgentHostEvent    *sql.Stmt
 
 	stmtAddUsageDelta    *sql.Stmt
 	stmtQueryUsageRange  *sql.Stmt
@@ -499,7 +561,8 @@ func (s *Store) prepare(ctx context.Context) error {
 		query string
 	}{
 		{&s.stmtCreateAPIKey, `INSERT INTO api_keys (label, key_digest, display_prefix, display_last4, plaintext_sealed, created_at) VALUES (?, ?, ?, ?, ?, ?)`},
-		{&s.stmtListAPIKeys, `SELECT ` + apiKeyColumns + ` FROM api_keys ORDER BY id`},
+		{&s.stmtListAPIKeys, `SELECT ` + apiKeyColumns + ` FROM api_keys WHERE archived_at IS NULL ORDER BY id`},
+		{&s.stmtListAllAPIKeys, `SELECT ` + apiKeyColumns + ` FROM api_keys ORDER BY id`},
 		{&s.stmtGetAPIKeyByID, `SELECT ` + apiKeyColumns + ` FROM api_keys WHERE id = ?`},
 		// 自助复制端点的点查：只取解封所需两列（摘要作 AAD）。刻意独立于
 		// apiKeyColumns——密文不进 APIKey 结构体，不随列表在库外流转。
@@ -510,6 +573,10 @@ func (s *Store) prepare(ctx context.Context) error {
 		{&s.stmtDrainKeyAllowance, `UPDATE api_keys SET metered_allowance_micro =
 				CASE WHEN metered_allowance_micro > ? THEN metered_allowance_micro - ? ELSE 0 END WHERE id = ?`},
 		{&s.stmtDeleteAPIKey, `DELETE FROM api_keys WHERE id = ?`},
+		// 归档：摘要换哨兵（点查从此落空）、明文清空、禁用、记时刻；只命中未归档行。
+		{&s.stmtArchiveAPIKey, `UPDATE api_keys
+				   SET key_digest = 'archived:' || id, plaintext_sealed = '', disabled = 1, archived_at = ?
+				 WHERE id = ? AND archived_at IS NULL`},
 		// 数据面鉴权热路径：一次点查同时带回归属、启停位、四个限额列与
 		// 按量额度剩余。准入因此零额外查询——加列不加查询次数是
 		// 这条语句的设计约束，别把限额拆去第二条 SQL。0019 删掉用户概念后
@@ -517,7 +584,7 @@ func (s *Store) prepare(ctx context.Context) error {
 		{&s.stmtLookupKeyByDigest, `SELECT id, display_prefix, display_last4, disabled,
 				       budget_day_micro, budget_week_micro, budget_month_micro, rpm_limit,
 				       metered_allowance_micro
-				  FROM api_keys WHERE key_digest = ?`},
+				  FROM api_keys WHERE key_digest = ? AND archived_at IS NULL`},
 		{&s.stmtTouchKeyLastUsed, `UPDATE api_keys SET last_used_at = ? WHERE id = ?`},
 
 		{&s.stmtCreateSession, `INSERT INTO sessions (token_digest, created_at, expires_at, remote_ip) VALUES (?, ?, ?, ?)`},
@@ -528,10 +595,10 @@ func (s *Store) prepare(ctx context.Context) error {
 
 		{&s.stmtAppendAudit, `INSERT INTO audit_events (at, event, entity, detail, remote_ip) VALUES (?, ?, ?, ?, ?)`},
 
-		{&s.stmtCreateUpstream, `INSERT INTO upstreams (name, type, catalog_id, billing_mode, api_key_sealed, base_url, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`},
-		{&s.stmtListUpstreams, `SELECT id, name, type, catalog_id, billing_mode, api_key_sealed, base_url, disabled, egress_mode, created_at, updated_at FROM upstreams ORDER BY id`},
-		{&s.stmtGetUpstreamByID, `SELECT id, name, type, catalog_id, billing_mode, api_key_sealed, base_url, disabled, egress_mode, created_at, updated_at FROM upstreams WHERE id = ?`},
-		{&s.stmtGetRouteUpstreamByID, `SELECT id, name, type, catalog_id, billing_mode, api_key_sealed, base_url, disabled, egress_mode FROM upstreams WHERE id = ?`},
+		{&s.stmtCreateUpstream, `INSERT INTO upstreams (name, type, catalog_id, billing_mode, api_key_sealed, base_url, protocol_urls, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`},
+		{&s.stmtListUpstreams, `SELECT id, name, type, catalog_id, billing_mode, api_key_sealed, base_url, protocol_urls, disabled, egress_mode, created_at, updated_at FROM upstreams ORDER BY id`},
+		{&s.stmtGetUpstreamByID, `SELECT id, name, type, catalog_id, billing_mode, api_key_sealed, base_url, protocol_urls, disabled, egress_mode, created_at, updated_at FROM upstreams WHERE id = ?`},
+		{&s.stmtGetRouteUpstreamByID, `SELECT id, name, type, catalog_id, billing_mode, api_key_sealed, base_url, protocol_urls, disabled, egress_mode FROM upstreams WHERE id = ?`},
 		{&s.stmtUpdateUpstream, `UPDATE upstreams SET name = ?, base_url = ?, updated_at = ? WHERE id = ?`},
 		// 改址与换 Key 同一条 UPDATE（openai_compat 改址路径）：不许出现
 		// 「旧 Key 配新地址」的中间态，见 UpdateUpstreamAddressAndKey。
@@ -564,7 +631,7 @@ func (s *Store) prepare(ctx context.Context) error {
 		{&s.stmtListModelsWithSources, `
 			SELECT ` + modelColumnsPrefixed + `,
 			       s.id, s.upstream_id, s.upstream_model_id, s.priority, s.disabled, s.created_at, s.updated_at,
-			       u.name, u.type, u.catalog_id, u.billing_mode, u.base_url, u.disabled, u.egress_mode
+			       u.name, u.type, u.catalog_id, u.billing_mode, u.base_url, u.protocol_urls, u.disabled, u.egress_mode
 			  FROM models m
 			  LEFT JOIN model_sources s ON s.model_id = m.id
 			  LEFT JOIN upstreams     u ON u.id = s.upstream_id
@@ -574,7 +641,7 @@ func (s *Store) prepare(ctx context.Context) error {
 		{&s.stmtGetModelWithSources, `
 			SELECT ` + modelColumnsPrefixed + `,
 			       s.id, s.upstream_id, s.upstream_model_id, s.priority, s.disabled, s.created_at, s.updated_at,
-			       u.name, u.type, u.catalog_id, u.billing_mode, u.base_url, u.disabled, u.egress_mode
+			       u.name, u.type, u.catalog_id, u.billing_mode, u.base_url, u.protocol_urls, u.disabled, u.egress_mode
 			  FROM models m
 			  LEFT JOIN model_sources s ON s.model_id = m.id
 			  LEFT JOIN upstreams     u ON u.id = s.upstream_id
@@ -585,7 +652,7 @@ func (s *Store) prepare(ctx context.Context) error {
 		{&s.stmtResolveModelRoute, `
 			SELECT ` + modelColumnsPrefixed + `,
 			       s.id, s.upstream_model_id, s.priority, s.disabled,
-			       u.id, u.name, u.type, u.catalog_id, u.billing_mode, u.api_key_sealed, u.base_url, u.disabled, u.egress_mode
+			       u.id, u.name, u.type, u.catalog_id, u.billing_mode, u.api_key_sealed, u.base_url, u.protocol_urls, u.disabled, u.egress_mode
 			  FROM models m
 			  LEFT JOIN model_sources s ON s.model_id = m.id
 			  LEFT JOIN upstreams     u ON u.id = s.upstream_id
@@ -596,13 +663,13 @@ func (s *Store) prepare(ctx context.Context) error {
 		{&s.stmtGetSourceRoute, `
 			SELECT ` + modelColumnsPrefixed + `,
 			       s.id, s.upstream_model_id, s.priority, s.disabled,
-			       u.id, u.name, u.type, u.catalog_id, u.billing_mode, u.api_key_sealed, u.base_url, u.disabled, u.egress_mode
+			       u.id, u.name, u.type, u.catalog_id, u.billing_mode, u.api_key_sealed, u.base_url, u.protocol_urls, u.disabled, u.egress_mode
 			  FROM model_sources s
 			  JOIN models    m ON m.id = s.model_id
 			  JOIN upstreams u ON u.id = s.upstream_id
 			 WHERE s.id = ?`},
 		// /v1/models 口径：**文本**模型（迭代 8 起谓词钉死 kind=text——这两条
-		// 读数是文本对话面的契约，加了视频/图片模型集合不得变化，store_test
+		// 读数是文本对话面的契约，加了视频/图像模型集合不得变化，store_test
 		// 有绊线），启用，且至少一条启用来源挂在启用的上游上。
 		{&s.stmtListServableModels, `
 			SELECT ` + modelColumnsPrefixed + `
@@ -618,7 +685,7 @@ func (s *Store) prepare(ctx context.Context) error {
 		// 相同（含 kind=text），故两个查询的模型集合恒等。只取上游的
 		// type/base_url——调用方拿它算入口协议，凭据与账户名不出这条查询。
 		{&s.stmtListServableModelSource, `
-			SELECT m.id, m.name, s.upstream_model_id, m.entry_openai, m.entry_responses, m.entry_anthropic, u.type, u.catalog_id, u.base_url, u.billing_mode
+			SELECT m.id, m.name, s.upstream_model_id, m.entry_openai, m.entry_responses, m.entry_anthropic, u.type, u.catalog_id, u.base_url, u.protocol_urls, u.billing_mode
 			  FROM models m
 			  JOIN model_sources s ON s.model_id = m.id
 			  JOIN upstreams     u ON u.id = s.upstream_id
@@ -626,12 +693,12 @@ func (s *Store) prepare(ctx context.Context) error {
 			   AND (m.entry_openai = 1 OR m.entry_responses = 1 OR m.entry_anthropic = 1)
 			   AND s.disabled = 0 AND u.disabled = 0
 			 ORDER BY m.name, s.priority, s.id`},
-		// 视频/图片模型的对应读数（迭代 8 Phase 6，使用API页的最小可见性）：
+		// 视频/图像模型的对应读数（迭代 8 Phase 6，使用API页的最小可见性）：
 		// 与上一条同一启用谓词，kind 反选为显式 IN（不用 != 'text'——将来若加
 		// 第四种 kind，它不该未经决定就漂进这份成员可读的清单）。文本读数的
 		// 集合恒不受它影响（TestServableModelsTextOnly 是那道绊线）。
 		{&s.stmtListServableAIGCSources, `
-			SELECT m.id, m.name, m.kind, u.type, u.base_url, u.billing_mode
+			SELECT m.id, m.name, m.kind, u.type, u.base_url, u.protocol_urls, u.billing_mode
 			  FROM models m
 			  JOIN model_sources s ON s.model_id = m.id
 			  JOIN upstreams     u ON u.id = s.upstream_id
@@ -676,9 +743,9 @@ func (s *Store) prepare(ctx context.Context) error {
 		{&s.stmtSettleAIGCTask, `UPDATE aigc_tasks SET cost_micro = ?, estimated = ?
 			 WHERE id = ? AND cost_micro IS NULL`},
 
-		// Agents（Codex 订阅代理）的账号与凭据。单账户语义：唯一键只有
-		// provider，重复连接走 ON CONFLICT 覆盖那一支。覆盖分两组，分界线是
-		// **这个值是不是从凭据里来的**：
+		// 订阅账号：同一 provider 可有多行，新建走 INSERT；重新登录按行 id 覆盖
+		// （stmtReconnectAgentAccount）。覆盖分两组，分界线是**这个值是不是从凭据
+		// 里来的**：
 		//   - 凭据、account_id、状态**无条件覆盖**。account_id 是 id_token 的
 		//     claim，跟着凭据走：换一个 ChatGPT 账号重连、而 claim 又恰好解不出来
 		//     （粘贴的 auth.json 没有可用 id_token）时，若"空即保持"就会留下
@@ -687,25 +754,27 @@ func (s *Store) prepare(ctx context.Context) error {
 		//   - label/default_model 是管理员设的展示/配置项，**空即保持**：重登
 		//     通常不带这两项，照空值盖过去会把管理员设过的默认模型悄悄抹掉。
 		//     Cursor 没有模型配置语义，仓储入口恒把它的 default_model 归零。
-		// last_refresh_at 不动：重新登录不是一次刷新。
-		{&s.stmtUpsertAgentAccount, `
+		// last_refresh_at 不动：重新登录不是一次刷新。provider 进 WHERE，把 A 的
+		// 凭据写进 B provider 的行在 SQL 层就落不下去（AAD 防的正是这件事）。
+		{&s.stmtInsertAgentAccount, `
 			INSERT INTO agent_accounts (provider, label, account_id, default_model,
 			    auth_json_sealed, status, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-			ON CONFLICT(provider) DO UPDATE SET
-			    label            = CASE WHEN excluded.label         = '' THEN agent_accounts.label         ELSE excluded.label END,
-			    default_model    = CASE WHEN excluded.default_model = '' THEN agent_accounts.default_model ELSE excluded.default_model END,
-			    account_id       = excluded.account_id,
-			    auth_json_sealed = excluded.auth_json_sealed,
-			    status           = excluded.status,
-			    updated_at       = excluded.updated_at`},
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`},
+		{&s.stmtReconnectAgentAccount, `
+			UPDATE agent_accounts
+			   SET label            = CASE WHEN ? = '' THEN label         ELSE ? END,
+			       default_model    = CASE WHEN ? = '' THEN default_model ELSE ? END,
+			       account_id       = ?,
+			       auth_json_sealed = ?,
+			       status           = ?,
+			       updated_at       = ?
+			 WHERE id = ? AND provider = ?`},
 		{&s.stmtListAgentAccounts, `SELECT ` + agentAccountColumns + ` FROM agent_accounts
 			 ORDER BY provider, id`},
 		{&s.stmtGetAgentAccountByID, `SELECT ` + agentAccountColumns + ` FROM agent_accounts WHERE id = ?`},
-		{&s.stmtGetAgentAccountByProvider, `SELECT ` + agentAccountColumns + ` FROM agent_accounts WHERE provider = ?`},
 		// 取令牌视图：唯一一处把密文列读上来的查询（解封紧随其后，只在进程内）。
 		{&s.stmtGetAgentCredential, `SELECT ` + agentAccountColumns + `, auth_json_sealed
-			 FROM agent_accounts WHERE provider = ?`},
+			 FROM agent_accounts WHERE id = ?`},
 		// 刷新回写：provider 进 WHERE 而不只是拿来算 AAD——「用 A 的 AAD 封的
 		// 密文写进 B 的行」在 SQL 层就落不下去。状态不动（见 SetAgentAuthJSON）。
 		{&s.stmtSetAgentAuthJSON, `UPDATE agent_accounts
@@ -719,7 +788,136 @@ func (s *Store) prepare(ctx context.Context) error {
 			        updated_at = ?
 			  WHERE id = ?`},
 		{&s.stmtSetAgentStatus, `UPDATE agent_accounts SET status = ?, updated_at = ? WHERE id = ?`},
-		{&s.stmtDeleteAgentAccount, `DELETE FROM agent_accounts WHERE id = ?`},
+
+		// 纳管主机（「智能体 → 主机/SoC」）：表里没有凭据，全是连接事实与最近
+		// 一次会话的观测值。新行恒以 error 起步——证书没装上之前它不是「可用」。
+		{&s.stmtCreateAgentHost, `
+			INSERT INTO agent_hosts (name, kind, address, port, username, status, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`},
+		{&s.stmtListAgentHosts, `SELECT ` + agentHostColumns + ` FROM agent_hosts ORDER BY id`},
+		{&s.stmtGetAgentHost, `SELECT ` + agentHostColumns + ` FROM agent_hosts WHERE id = ?`},
+		{&s.stmtRenameAgentHost, `UPDATE agent_hosts SET name = ?, updated_at = ? WHERE id = ?`},
+		// 一次会话的观测值整组写回：主机公钥、已装证书指纹、免密 sudo、系统自述、
+		// 状态与失败原因出自同一次连接，分开写会留下「证书装上了、状态还是失败」
+		// 这类中间态。
+		{&s.stmtSetAgentHostState, `
+			UPDATE agent_hosts
+			   SET host_key = ?, key_fingerprint = ?, sudo_nopasswd = ?, system = ?,
+			       status = ?, last_error = ?, last_checked_at = ?, updated_at = ?
+			 WHERE id = ?`},
+		{&s.stmtDeleteAgentHost, `DELETE FROM agent_hosts WHERE id = ?`},
+
+		// 守护进程 devd（同一行的 devd_* 列）：一次安装 / 检查的观测值整组写回；卸载
+		// 把这些列全部归零（devd_status 为空 = 没装）。
+		{&s.stmtSetAgentHostDevd, `
+			UPDATE agent_hosts
+			   SET devd_version = ?, devd_home = ?, devd_tmux = ?, devd_status = ?, devd_last_error = ?,
+			       devd_checked_at = ?, updated_at = ?
+			 WHERE id = ?`},
+		{&s.stmtClearAgentHostDevd, `
+			UPDATE agent_hosts
+			   SET devd_version = '', devd_home = '', devd_tmux = 0, devd_status = '', devd_last_error = '',
+			       devd_checked_at = NULL, updated_at = ?
+			 WHERE id = ?`},
+
+		// 凭证（credentials.go，「智能体 → 凭证管理」）：令牌密文只由 GetCredentialSecret
+		// 单独点查，不随列表流转；改令牌与不改令牌是两条 UPDATE，密文列不经「读出再写回」。
+		{&s.stmtCreateCredential, `
+			INSERT INTO credentials (id, kind, name, host, username, secret_sealed, secret_hint, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`},
+		{&s.stmtListCredentials, `SELECT ` + credentialColumns + ` FROM credentials ORDER BY id`},
+		{&s.stmtGetCredential, `SELECT ` + credentialColumns + ` FROM credentials WHERE id = ?`},
+		{&s.stmtGetCredentialSecret, `SELECT secret_sealed FROM credentials WHERE id = ?`},
+		{&s.stmtUpdateCredential, `UPDATE credentials SET name = ?, host = ?, username = ?, updated_at = ? WHERE id = ?`},
+		{&s.stmtUpdateCredentialWithSecret, `
+			UPDATE credentials SET name = ?, host = ?, username = ?, secret_sealed = ?, secret_hint = ?, updated_at = ?
+			 WHERE id = ?`},
+		{&s.stmtDeleteCredential, `DELETE FROM credentials WHERE id = ?`},
+
+		// 工作空间（workspaces.go，「智能体 → 工作空间」）：开发工作空间是一台工作节点上的
+		// 一个目录，随主机级联删除；创作工作空间没有主机（host_id 为 NULL）；凭证删掉只置空
+		// credential_id。
+		{&s.stmtCreateWorkspace, `
+			INSERT INTO workspaces (id, kind, host_id, name, path, repo_url, branch, credential_id, template, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`},
+		{&s.stmtListWorkspaces, `SELECT ` + workspaceColumns + ` FROM workspaces ORDER BY id`},
+		{&s.stmtGetWorkspace, `SELECT ` + workspaceColumns + ` FROM workspaces WHERE id = ?`},
+		{&s.stmtGetWorkspaceByName, `SELECT ` + workspaceColumns + ` FROM workspaces WHERE host_id = ? AND name = ?`},
+		{&s.stmtGetStudioWorkspaceByName, `SELECT ` + workspaceColumns + ` FROM workspaces WHERE host_id IS NULL AND name = ?`},
+		{&s.stmtDeleteWorkspace, `DELETE FROM workspaces WHERE id = ?`},
+
+		// 创作工作空间的智能体数据（studio.go）：对话 / 指令 / 事件形态同 Agent远控，全部随
+		// 工作空间级联删除、指令与事件随对话级联删除；文件行按 (workspace_id, name) 主键 upsert。
+		{&s.stmtCreateStudioChat, `
+			INSERT INTO studio_chats (id, workspace_id, title, engine, key_id, key_display, model, effort, instructions, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`},
+		{&s.stmtGetStudioChat, `SELECT ` + studioChatColumns + ` FROM studio_chats WHERE id = ?`},
+		{&s.stmtListStudioChats, `SELECT ` + studioChatColumns + ` FROM studio_chats
+			WHERE workspace_id = ? ORDER BY updated_at DESC, id DESC`},
+		{&s.stmtSetStudioChatTitle, `UPDATE studio_chats SET title = ?, updated_at = ? WHERE id = ?`},
+		{&s.stmtTouchStudioChat, `UPDATE studio_chats SET updated_at = ? WHERE id = ?`},
+		{&s.stmtDeleteStudioChat, `DELETE FROM studio_chats WHERE id = ?`},
+		{&s.stmtArchiveStudioChat, `UPDATE studio_chats SET archived_at = COALESCE(archived_at, ?) WHERE id = ?`},
+		{&s.stmtListStudioMediaModels, `SELECT model, usage FROM studio_media_models WHERE workspace_id = ? ORDER BY model`},
+		{&s.stmtCreateStudioRun, `
+			INSERT INTO studio_runs (id, workspace_id, chat_id, status, text, image_count, engine, model, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`},
+		{&s.stmtGetStudioRun, `SELECT ` + studioRunColumns + ` FROM studio_runs WHERE id = ?`},
+		{&s.stmtListActiveStudioRuns, `SELECT ` + studioRunColumns + ` FROM studio_runs
+			WHERE status IN ('queued', 'running') ORDER BY created_at, id`},
+		{&s.stmtSetStudioRunStatus, `
+			UPDATE studio_runs
+			   SET status = ?, error = ?, started_at = COALESCE(?, started_at), finished_at = COALESCE(?, finished_at)
+			 WHERE id = ?`},
+		{&s.stmtSetStudioRunUsage, `UPDATE studio_runs SET input_tokens = ?, output_tokens = ? WHERE id = ?`},
+		{&s.stmtAppendStudioEvent, `
+			INSERT INTO studio_events (workspace_id, chat_id, run_id, at, kind, title, body, meta, duration_ms)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`},
+		{&s.stmtUpsertStudioFile, `
+			INSERT INTO studio_files (workspace_id, name, kind, mime, bytes, width, height, origin, provider, model, prompt, params, chat_id, run_id, created_at, updated_at, mod_time)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT(workspace_id, name) DO UPDATE SET kind = excluded.kind, mime = excluded.mime, bytes = excluded.bytes,
+			    width = excluded.width, height = excluded.height, origin = excluded.origin, provider = excluded.provider,
+			    model = excluded.model, prompt = excluded.prompt, params = excluded.params, chat_id = excluded.chat_id,
+			    run_id = excluded.run_id, updated_at = excluded.updated_at, mod_time = excluded.mod_time`},
+		{&s.stmtGetStudioFile, `SELECT ` + studioFileColumns + ` FROM studio_files WHERE workspace_id = ? AND name = ?`},
+		{&s.stmtListStudioFiles, `SELECT ` + studioFileColumns + ` FROM studio_files WHERE workspace_id = ? ORDER BY created_at, name`},
+		{&s.stmtDeleteStudioFile, `DELETE FROM studio_files WHERE workspace_id = ? AND name = ?`},
+		{&s.stmtRenameStudioFile, `UPDATE studio_files SET name = ?, updated_at = ? WHERE workspace_id = ? AND name = ?`},
+
+		// 主机智能体（hostagent.go）：档案整份替换；指令按提交顺序逐条跑，状态写入
+		// 只改状态列与对应时刻；事件只追加不改（时间线兼操作日志）。
+		{&s.stmtGetAgentHostProfile, `SELECT content, updated_by, updated_at FROM agent_host_profiles WHERE host_id = ?`},
+		{&s.stmtSetAgentHostProfile, `
+			INSERT INTO agent_host_profiles (host_id, content, updated_by, updated_at) VALUES (?, ?, ?, ?)
+			ON CONFLICT(host_id) DO UPDATE SET content = excluded.content, updated_by = excluded.updated_by,
+			    updated_at = excluded.updated_at`},
+		// 对话（agent_host_chats）：新建时钉死密钥 / 模型 / 档位与开发者指令，之后只改标题
+		// 与最近活动时刻；删除在 DeleteAgentHostChat 的事务里连同指令与对话内容事件一起做。
+		{&s.stmtCreateAgentHostChat, `
+			INSERT INTO agent_host_chats (id, host_id, title, engine, key_id, key_display, model, effort, instructions, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`},
+		{&s.stmtGetAgentHostChat, `SELECT ` + agentHostChatColumns + ` FROM agent_host_chats WHERE id = ?`},
+		{&s.stmtListAgentHostChats, `SELECT ` + agentHostChatColumns + ` FROM agent_host_chats
+			WHERE host_id = ? ORDER BY updated_at DESC, id DESC`},
+		{&s.stmtSetAgentHostChatTitle, `UPDATE agent_host_chats SET title = ?, updated_at = ? WHERE id = ?`},
+		{&s.stmtTouchAgentHostChat, `UPDATE agent_host_chats SET updated_at = ? WHERE id = ?`},
+		{&s.stmtCreateAgentHostRun, `
+			INSERT INTO agent_host_runs (id, host_id, chat_id, status, text, image_count, engine, model, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`},
+		{&s.stmtGetAgentHostRun, `SELECT ` + agentHostRunColumns + ` FROM agent_host_runs WHERE id = ?`},
+		{&s.stmtListAgentHostRuns, `SELECT ` + agentHostRunColumns + ` FROM agent_host_runs
+			WHERE host_id = ? ORDER BY created_at DESC, id DESC LIMIT ?`},
+		{&s.stmtListActiveAgentHostRuns, `SELECT ` + agentHostRunColumns + ` FROM agent_host_runs
+			WHERE status IN ('queued', 'running') ORDER BY created_at, id`},
+		{&s.stmtSetAgentHostRunStatus, `
+			UPDATE agent_host_runs
+			   SET status = ?, error = ?, started_at = COALESCE(?, started_at), finished_at = COALESCE(?, finished_at)
+			 WHERE id = ?`},
+		{&s.stmtSetAgentHostRunUsage, `UPDATE agent_host_runs SET input_tokens = ?, output_tokens = ? WHERE id = ?`},
+		{&s.stmtAppendAgentHostEvent, `
+			INSERT INTO agent_host_events (host_id, chat_id, run_id, at, kind, title, body, meta, exit_code, duration_ms)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`},
 
 		// 用量小时聚合的写入：计数列恒为「列 = 列 + excluded.列」相加语义
 		// （见 usage.go 文件头注释）。**非键的维度快照列（key_display/kind）
@@ -728,7 +926,7 @@ func (s *Store) prepare(ctx context.Context) error {
 		// 的那条若带了空/过期的名字，整小时都改不回来）。
 		{&s.stmtAddUsageDelta, `
 			INSERT INTO usage_hourly (` + usageColumns + `)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT (bucket_hour, key_id, model_name, upstream_name, entry) DO UPDATE SET
 			    key_display        = excluded.key_display,
 			    kind               = excluded.kind,
@@ -744,6 +942,7 @@ func (s *Store) prepare(ctx context.Context) error {
 			    total_tokens       = usage_hourly.total_tokens       + excluded.total_tokens,
 			    video_seconds      = usage_hourly.video_seconds      + excluded.video_seconds,
 			    image_count        = usage_hourly.image_count        + excluded.image_count,
+			    video_count        = usage_hourly.video_count        + excluded.video_count,
 			    cost_micro         = usage_hourly.cost_micro         + excluded.cost_micro,
 			    duration_ms_sum    = usage_hourly.duration_ms_sum    + excluded.duration_ms_sum`},
 		// 区间读数左闭右开，按桶号升序。

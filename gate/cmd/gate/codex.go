@@ -117,27 +117,9 @@ func (a *app) codexHTTPClient() *http.Client {
 	return &client
 }
 
-func (a *app) getCodexPublic(rel string, maxBytes int64) ([]byte, error) {
-	req, _ := http.NewRequest(http.MethodGet, a.cfg.BaseURL+codexCLIBasePath+"/"+rel, nil)
-	resp, err := a.codexHTTPClient().Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
-		return nil, fmt.Errorf("下载 %s 返回 HTTP %d", codexCLIBasePath+"/"+rel, resp.StatusCode)
-	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes+1))
-	if int64(len(body)) > maxBytes {
-		return nil, errors.New("下载内容超过大小限制")
-	}
-	return body, err
-}
-
 // resolveCodexRelease 按官方安装器同一顺序解析版本：latest 走 channels/latest，
 // 钉死版本走 releases/<v>/release.json；tag_name 必须是 rust-v<semver>。
-func (a *app) resolveCodexRelease(requested string) (string, codexRelease, error) {
+func (a *app) resolveCodexRelease(src *originChain, requested string) (string, codexRelease, error) {
 	metaPath := "channels/latest"
 	if requested != "latest" {
 		if !codexVersionRE.MatchString(requested) {
@@ -145,7 +127,7 @@ func (a *app) resolveCodexRelease(requested string) (string, codexRelease, error
 		}
 		metaPath = "releases/" + requested + "/release.json"
 	}
-	body, err := a.getCodexPublic(metaPath, 4<<20)
+	body, err := src.get(metaPath, 4<<20)
 	if err != nil {
 		return "", codexRelease{}, fmt.Errorf("读取 Codex 官方 release: %w", err)
 	}
@@ -155,18 +137,18 @@ func (a *app) resolveCodexRelease(requested string) (string, codexRelease, error
 	}
 	version := strings.TrimPrefix(release.TagName, "rust-v")
 	if release.TagName != "rust-v"+version || !codexVersionRE.MatchString(version) {
-		return "", codexRelease{}, errors.New("设备返回的 Codex 版本形态未知")
+		return "", codexRelease{}, errors.New("取回的 Codex 版本形态未知")
 	}
 	if requested != "latest" && version != requested {
-		return "", codexRelease{}, fmt.Errorf("设备返回的 Codex 版本 %s 与请求的 %s 不一致", version, requested)
+		return "", codexRelease{}, fmt.Errorf("取回的 Codex 版本 %s 与请求的 %s 不一致", version, requested)
 	}
 	return version, release, nil
 }
 
 // codexPackageDigest 取归档的期望 SHA-256：先按官方安装器读 codex-package_SHA256SUMS
 // 清单，清单缺项时退回 release 元数据里该 asset 的 digest；两处都没有就拒绝安装。
-func (a *app) codexPackageDigest(version, asset string, release codexRelease) (string, error) {
-	if sums, err := a.getCodexPublic("releases/"+version+"/"+codexChecksumAsset, 256<<10); err == nil {
+func (a *app) codexPackageDigest(src *originChain, version, asset string, release codexRelease) (string, error) {
+	if sums, err := src.get("releases/"+version+"/"+codexChecksumAsset, 256<<10); err == nil {
 		for _, line := range strings.Split(string(sums), "\n") {
 			fields := strings.Fields(line)
 			if len(fields) < 2 {
@@ -277,16 +259,18 @@ func extractCodexPackage(archivePath, staging string) error {
 	return extractTarGzTree(archivePath, w)
 }
 
-// installCodex 经盒子安装或升级受管 Codex，返回程序路径。版本目录整树暂存、
-// 自检通过后才改名进位；同版本重装先把旧目录挪开，切换失败再挪回来。
+// installCodex 安装或升级受管 Codex，返回程序路径：先直连官方源，失败改经盒子
+// （见 source.go）。版本目录整树暂存、自检通过后才改名进位；同版本重装先把旧
+// 目录挪开，切换失败再挪回来。
 func (a *app) installCodex() (string, error) {
 	target, err := codexVendorTarget(runtime.GOOS, runtime.GOARCH)
 	if err != nil {
 		return "", err
 	}
 	asset := codexPackageAsset(target)
-	a.printf("正在经设备读取 Codex 官方 release…\n")
-	version, release, err := a.resolveCodexRelease(normalizeCodexRelease(os.Getenv("CODEX_RELEASE")))
+	src := a.codexOrigins()
+	a.printf("正在从%s读取 Codex 官方 release…\n", src.label())
+	version, release, err := a.resolveCodexRelease(src, normalizeCodexRelease(os.Getenv("CODEX_RELEASE")))
 	if err != nil {
 		return "", err
 	}
@@ -310,7 +294,7 @@ func (a *app) installCodex() (string, error) {
 	if size < 0 || size > codexCLIMaxBytes {
 		return "", errors.New("Codex release 的平台条目无效")
 	}
-	digest, err := a.codexPackageDigest(version, asset, release)
+	digest, err := a.codexPackageDigest(src, version, asset, release)
 	if err != nil {
 		return "", err
 	}
@@ -321,13 +305,11 @@ func (a *app) installCodex() (string, error) {
 		return "", err
 	}
 	if size > 0 {
-		a.printf("正在经设备下载 Codex %s（约 %d MiB）…\n", version, (size+(1<<20)-1)/(1<<20))
+		a.printf("正在从%s下载 Codex %s（约 %d MiB）…\n", src.label(), version, (size+(1<<20)-1)/(1<<20))
 	} else {
-		a.printf("正在经设备下载 Codex %s…\n", version)
+		a.printf("正在从%s下载 Codex %s…\n", src.label(), version)
 	}
-	archivePath, err := a.fetchArtifact(artifactFetch{
-		client: a.codexHTTPClient(),
-		url:    a.cfg.BaseURL + codexCLIBasePath + "/releases/" + version + "/" + asset,
+	archivePath, err := src.fetch("releases/"+version+"/"+asset, artifactFetch{
 		label:  "Codex",
 		dir:    standalone,
 		prefix: ".codex-package",
@@ -606,9 +588,11 @@ func (a *app) connectShared(explicit string) error {
 		ModelWritten: prev.ModelWritten, AuthWritten: prev.AuthWritten,
 	}
 	var failures []error
+	requested := tool
 	for i, candidate := range candidates {
-		err := a.refreshSharedCatalog(candidate, tool, st.Catalog)
+		effective, err := a.refreshSharedCatalog(candidate, requested, st.Catalog)
 		if err == nil {
+			tool = effective
 			st.KernelPath, st.KernelVersion = candidate, detectVersion(candidate)
 			break
 		}
@@ -663,13 +647,13 @@ func dedupePaths(paths []string) []string {
 
 // refreshSharedCatalog 用绑定内核的 bundled 目录 + 设备覆盖片生成共享目录，
 // 并由同一个内核自检。目录只对自检过的内核负责：gate codex 启动用的派生目录
-// 另有一份，两者互不覆盖。
-func (a *app) refreshSharedCatalog(kernel string, tool runtimeTool, dest string) error {
-	catalog, err := a.codexCatalog(kernel, tool)
+// 另有一份，两者互不覆盖。返回该内核实际可用的模型集合（见 codexCatalog）。
+func (a *app) refreshSharedCatalog(kernel string, tool runtimeTool, dest string) (runtimeTool, error) {
+	catalog, effective, err := a.codexCatalog(kernel, tool)
 	if err != nil {
-		return err
+		return tool, err
 	}
-	return a.writeCheckedCodexCatalog(kernel, catalog, dest)
+	return effective, a.writeCheckedCodexCatalog(kernel, catalog, dest)
 }
 
 // ensureSharedCodex 在每次 gate codex 启动时把共享接入补回去；内核失效只告警，
@@ -682,7 +666,8 @@ func (a *app) ensureSharedCodex(tool runtimeTool) error {
 	if fi, err := os.Stat(st.KernelPath); err != nil || fi.IsDir() {
 		return fmt.Errorf("共享接入绑定的内核不可用：%s；重跑 gate codex connect --shared 重新绑定", st.KernelPath)
 	}
-	if err := a.refreshSharedCatalog(st.KernelPath, tool, st.Catalog); err != nil {
+	tool, err := a.refreshSharedCatalog(st.KernelPath, tool, st.Catalog)
+	if err != nil {
 		return err
 	}
 	st.KernelVersion = detectVersion(st.KernelPath)

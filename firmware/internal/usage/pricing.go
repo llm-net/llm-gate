@@ -35,7 +35,7 @@ const MicroPerYuan int64 = 1_000_000
 // 微元 / 百万 token，所以 金额 = token 数 × 单价 ÷ 10⁶。
 const tokensPerPriceUnit int64 = 1_000_000
 
-// minimaxFreeImages 是 MiniMax H3 免费的输入图片张数，超出部分按张附加计费
+// minimaxFreeImages 是 MiniMax H3 免费的输入图像张数，超出部分按张附加计费
 // （文档 §9：「5 张以内免费」）。这是厂商的计费形态，不是可配参数。
 const minimaxFreeImages int64 = 5
 
@@ -68,7 +68,7 @@ const (
 
 	// MiniMax H3 视频，秒价单位 微元 / 秒，按**输出**分辨率档二选一；
 	// 输入秒（参考视频）同样按输出档单价计（文档 §9 明写，别按输入分辨率算）。
-	// 图片附加价单位 微元 / 张，只对超出 minimaxFreeImages 的部分计。
+	// 图像附加价单位 微元 / 张，只对超出 minimaxFreeImages 的部分计。
 	FieldMinimaxSec768p    = "minimax_video_sec_768p"
 	FieldMinimaxSec2K      = "minimax_video_sec_2k"
 	FieldMinimaxImageExtra = "minimax_video_image_extra"
@@ -84,7 +84,7 @@ const (
 	FieldMinimaxContextIRIn  = "minimax_context_ir_in"
 	FieldMinimaxContextIROut = "minimax_context_ir_out"
 
-	// 方舟 Seedream 图片。两项是**相加**关系而非二选一：按价签只配其一，
+	// 方舟 Seedream 图像。两项是**相加**关系而非二选一：按价签只配其一，
 	// 另一项留空即 0。之所以两项都留着——迭代 8 Phase 5 实测该接口的 usage
 	// 同时回 generated_images 与 output_tokens，而厂商的价签口径（按张还是
 	// 按 token）在本机无真值 Key 时无法确证；两项并存让管理员照价签直接录，
@@ -97,7 +97,8 @@ const (
 // 各 kind 允许出现的字段集（管理层按 kind 校验形态字段集时消费——词汇只此
 // 一份，别在 admin 里另抄一遍）。切片顺序即管理台表单的建议排列顺序。
 var fieldsByKind = map[string][]string{
-	store.ModelKindText: {FieldIn, FieldOut, FieldCacheRead, FieldCacheWrite},
+	store.ModelKindText:      {FieldIn, FieldOut, FieldCacheRead, FieldCacheWrite},
+	store.ModelKindSystemOne: {FieldIn, FieldOut},
 	store.ModelKindVideo: {
 		FieldArkVideoToken, FieldArkVideoTokenRef,
 		FieldMinimaxSec768p, FieldMinimaxSec2K, FieldMinimaxImageExtra,
@@ -160,6 +161,9 @@ func aigcFamily(upstreamType string) string {
 // applicablePriceFields 返回某（kind, 上游族）计价时**真正会读到**的字段。
 // 文本面与上游族无关（两家 cache 口径的差异在公式里，不在字段名上）。
 func applicablePriceFields(kind, upstreamType string) []string {
+	if kind == store.ModelKindSystemOne {
+		return []string{FieldIn, FieldOut}
+	}
 	if kind == store.ModelKindText {
 		return []string{FieldIn, FieldOut, FieldCacheRead, FieldCacheWrite}
 	}
@@ -241,12 +245,12 @@ func ParsePricing(raw string) (Pricing, error) {
 }
 
 // Measure 是「这次消费用掉了多少东西」的形态化描述。哪些字段有效由
-// Kind + UpstreamType 决定：文本看 Tokens，视频/图片看 TaskUsage 与两个
+// Kind + UpstreamType 决定：文本看 Tokens，视频/图像看 TaskUsage 与两个
 // 计费特征。构造它的是 Sample.measure()，读它的只有 Cost。
 type Measure struct {
 	Kind         string // store.ModelKind*
 	Entry        string // Entry*（文本两口径的分流依据）
-	UpstreamType string // config.Upstream*（视频/图片选形态的依据）
+	UpstreamType string // config.Upstream*（视频/图像选形态的依据）
 
 	Tokens    Tokens
 	TaskUsage TaskUsage
@@ -271,9 +275,13 @@ type TaskUsage struct {
 	// CompletionTokens 走输出价——后者与方舟 Seedance 复用同一个 usage 键，
 	// 落位相同、计价形态由上游族区分）。
 	PromptTokens int64
-	// 方舟 Seedream（图片，同步入口）。
+	// 方舟 Seedream（图像，同步入口）；Grok Imagine 画图门也用它记出图张数。
 	GeneratedImages int64
 	OutputTokens    int64
+	// GeneratedVideos 是 Grok Imagine 视频提交门的受理个数（一次 2xx 受理记 1）：
+	// 异步任务只看到 request_id，秒数不可得也不轮询清算。不来自厂商 usage
+	// 原文（ParseTaskUsage 不认它），不参与计价。
+	GeneratedVideos int64
 }
 
 // 厂商 usage 原文里认得的键，位掩码——形态校验要知道**哪一个**键真解析出了
@@ -376,7 +384,7 @@ func Cost(p Pricing, m Measure) int64 {
 		return 0
 	}
 	switch m.Kind {
-	case store.ModelKindText:
+	case store.ModelKindText, store.ModelKindSystemOne:
 		return clampCost(costText(p, m))
 	case store.ModelKindVideo:
 		return clampCost(costVideo(p, m))
@@ -443,7 +451,7 @@ func costVideo(p Pricing, m Measure) int64 {
 		// token 键。
 		tu := m.TaskUsage
 		if tu.OutputSeconds > 0 || tu.InputSeconds > 0 || tu.InputImages > 0 {
-			// (输出秒 + 输入秒) × 输出档秒价 + 超出免费额度的图片 × 附加价。
+			// (输出秒 + 输入秒) × 输出档秒价 + 超出免费额度的图像 × 附加价。
 			sec := minimaxSecondPrice(p, m.Resolution)
 			total := addSat(mulSat(tu.OutputSeconds, sec), mulSat(tu.InputSeconds, sec))
 			if extra := tu.InputImages - minimaxFreeImages; extra > 0 {

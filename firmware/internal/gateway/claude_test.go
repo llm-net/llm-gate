@@ -78,14 +78,11 @@ func connectClaudeCredential(t *testing.T, e *routeEnv, token string) int64 {
 	if err != nil {
 		t.Fatal(err)
 	}
-	acct, err := e.st.UpsertAgentAccount(t.Context(), store.NewAgentAccount{
+	acct := connectAgent(t, e.st, store.NewAgentAccount{
 		Provider: store.AgentProviderClaude,
 		Label:    "Claude 测试订阅",
 		AuthJSON: blob,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	exposeClaudeModels(e, claudeTestModel)
 	return acct.ID
 }
@@ -193,7 +190,7 @@ func TestClaudeAcceptsProxyHTTPOriginAndUsesOnlyDeviceKeyFromClient(t *testing.T
 func TestClaudeAccountStateAndUpstream401(t *testing.T) {
 	body := `{"model":"` + claudeTestModel + `","max_tokens":1,"messages":[]}`
 
-	t.Run("未连接、停用与已失效都不触上游", func(t *testing.T) {
+	t.Run("未钉账号、停用与已失效都不触上游", func(t *testing.T) {
 		var hits atomic.Int64
 		backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			hits.Add(1)
@@ -203,9 +200,10 @@ func TestClaudeAccountStateAndUpstream401(t *testing.T) {
 		e := newRouteEnv(t)
 		e.srv.SetClaudeEndpoint(backend.URL)
 
+		// 没给这把 Key 钉 Claude 账号：整棵子树在闸门就 403。
 		w := serveClaude(e, http.MethodPost, "/agents/claude/v1/messages", claudeHeaders(), body, true)
-		if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "No active Claude Code subscription") {
-			t.Fatalf("未连接响应=%d %s", w.Code, w.Body.String())
+		if w.Code != http.StatusForbidden || decodeAnthropicType(t, w) != "permission_error" {
+			t.Fatalf("未钉账号响应=%d %s", w.Code, w.Body.String())
 		}
 		id := connectClaudeCredential(t, e, claudeOAuthFake)
 		if err := e.st.SetAgentStatus(t.Context(), id, store.AgentStatusDisabled); err != nil {
@@ -260,13 +258,10 @@ func TestClaudeAccountStateAndUpstream401(t *testing.T) {
 
 	t.Run("形态损坏的密文不会出站并标失效", func(t *testing.T) {
 		e := newRouteEnv(t)
-		acct, err := e.st.UpsertAgentAccount(t.Context(), store.NewAgentAccount{
+		acct := connectAgent(t, e.st, store.NewAgentAccount{
 			Provider: store.AgentProviderClaude,
 			AuthJSON: `{"unexpected":"fake-secret-never-real"}`,
 		})
-		if err != nil {
-			t.Fatal(err)
-		}
 		exposeClaudeModels(e, claudeTestModel)
 		w := serveClaude(e, http.MethodPost, "/agents/claude/v1/messages", claudeHeaders(), body, true)
 		if w.Code != http.StatusConflict {

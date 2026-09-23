@@ -73,10 +73,10 @@ official_site:
 # 上游账户 seed 表（仅空库首启导入一次）。
 # type 可选 deepseek|ark|ark_plan|qwen_plan|opencode_go|minimax|openai_compat|mock；除
 # openai_compat 与 mock 外都走内置 (type, 协议) 二维端点表——ark 为方舟按量
-# （openai 协议 + 视频/图片任务），ark_plan 为方舟 Agent Plan 套餐（双文本协议），
+# （openai 协议 + 视频/图像任务），ark_plan 为方舟 Agent Plan 套餐（双文本协议），
 # qwen_plan 为阿里云百炼通义千问 Token Plan 套餐（双文本协议），opencode_go 为
 # OpenCode Go 包月套餐（双文本协议，同一端点根），minimax 只服务
-# 视频任务入口（但本 seed 的 logical_models 只描述文本面，视频/图片模型请在
+# 视频任务入口（但本 seed 的 logical_models 只描述文本面，视频/图像模型请在
 # 管理台建）。openai_compat 是通用 OpenAI 兼容适配：base_url 必填、仅 chat 单入口。
 # base_url 仅 dev 覆盖用（如指向 mock，覆盖时该类型的全部协议共用同一地址——
 # 故不要拿它覆盖 qwen_plan 这类两协议不同段的类型）。

@@ -314,12 +314,12 @@ func TestAdmitSkippedWithoutMeter(t *testing.T) {
 	}
 }
 
-// ---- 图片入口的准入环境 ----
+// ---- 图像入口的准入环境 ----
 
 const admitImageModel = "admit-image-model"
 
 // newImageAdmitEnv 装配一个 kind=image 的模型（ark 型上游 + base_url 覆盖：
-// mock 类型不服务图片协议）。
+// mock 类型不服务图像协议）。
 func newImageAdmitEnv(t *testing.T) (*routeEnv, *stubUpstream, *fakeMeter) {
 	t.Helper()
 	e := newRouteEnv(t)

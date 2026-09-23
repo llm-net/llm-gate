@@ -17,11 +17,11 @@ func (s *Server) SetAgentQuota(m *agentquota.Manager) { s.agentQuota = m }
 // FetchAgentQuota shares the existing single OAuth refresh owner and Cursor
 // exchange cache. A permission error on the quota API never expires the account.
 func (s *Server) FetchAgentQuota(ctx context.Context, a *store.AgentAccount) (agentquota.Data, error) {
-	acct, blob, err := s.store.GetAgentCredential(ctx, a.Provider)
+	acct, blob, err := s.store.GetAgentCredential(ctx, a.ID)
 	if err != nil {
 		return agentquota.Data{}, &agentquota.Error{Code: "credential_unavailable"}
 	}
-	if acct.ID != a.ID || !agentquota.SyncEnabled(acct) || !acct.UpdatedAt.Equal(a.UpdatedAt) {
+	if acct.Provider != a.Provider || !agentquota.SyncEnabled(acct) || !acct.UpdatedAt.Equal(a.UpdatedAt) {
 		return agentquota.Data{}, &agentquota.Error{Code: "account_changed"}
 	}
 	var token, accountID string

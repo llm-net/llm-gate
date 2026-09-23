@@ -3,13 +3,14 @@ package gateway_test
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/llm-net/llm-gate/firmware/internal/config"
 )
 
 func TestGateConfigIsAuthenticatedPerKeyAndNoStore(t *testing.T) {
-	e := newRouteEnv(t)
+	e := newAgentEnv(t, jsonReply(http.StatusOK, codexNonStreamBody))
 	w := do(e.h, http.MethodGet, "/gate-helper/v1/config", chatAuth, "")
 	if w.Code != http.StatusOK || w.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("config=%d cache=%q body=%s", w.Code, w.Header().Get("Cache-Control"), w.Body.String())
@@ -32,6 +33,10 @@ func TestGateConfigIsAuthenticatedPerKeyAndNoStore(t *testing.T) {
 	}
 	if _, ok := got.Tools["opencode"]; !ok {
 		t.Fatalf("config missing OpenCode tool: %+v", got.Tools)
+	}
+	// Key 持有人读到的配置只说授权与可用，不带钉死账号的行 id 或名称。
+	if body := w.Body.String(); strings.Contains(body, "account_id") || strings.Contains(body, "account_label") {
+		t.Fatalf("config leaks pinned account identity: %s", body)
 	}
 	if w := do(e.h, http.MethodGet, "/gate-helper/v1/config", nil, ""); w.Code != http.StatusUnauthorized {
 		t.Fatalf("missing key=%d", w.Code)
@@ -85,10 +90,10 @@ func TestGateEndpointsIsAuthenticatedPerKeyAndNoStore(t *testing.T) {
 
 func TestClaudeMixedCatalogDispatchAndHello(t *testing.T) {
 	e := newRouteEnv(t)
-	backend := newStub(t, jsonReply(http.StatusOK, `{"model":"deepseek-v4-flash","usage":{"input_tokens":1,"output_tokens":1}}`))
+	backend := newStub(t, jsonReply(http.StatusOK, `{"model":"deepseek-v4-pro","usage":{"input_tokens":1,"output_tokens":1}}`))
 	upstreamID := dbUpstream(t, e.st, "deepseek", config.UpstreamDeepseek, "sk-not-real", backend.url)
-	modelID := dbModel(t, e.st, "deepseek-v4-flash")
-	dbSource(t, e.st, modelID, upstreamID, "deepseek-v4-flash", 10)
+	modelID := dbModel(t, e.st, "deepseek-v4-pro")
+	dbSource(t, e.st, modelID, upstreamID, "deepseek-v4-pro", 10)
 	selectDevToolModels(t, e.st, modelID)
 	models := serveClaude(e, http.MethodGet, "/agents/claude/v1/models", claudeHeaders(), "", true)
 	if models.Code != http.StatusOK {
@@ -101,7 +106,7 @@ func TestClaudeMixedCatalogDispatchAndHello(t *testing.T) {
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(models.Body.Bytes(), &discovered); err != nil || len(discovered.Data) != 1 ||
-		discovered.Data[0].DisplayName != "LLM Gate · deepseek-v4-flash" ||
+		discovered.Data[0].DisplayName != "LLM Gate · deepseek-v4-pro" ||
 		len(discovered.Data[0].ID) < len("anthropic/llmgate/") || discovered.Data[0].ID[:len("anthropic/llmgate/")] != "anthropic/llmgate/" {
 		t.Fatalf("catalog discovery=%+v err=%v", discovered, err)
 	}
@@ -114,7 +119,7 @@ func TestClaudeMixedCatalogDispatchAndHello(t *testing.T) {
 	}
 	body := string(bodyBytes)
 	w := serveClaude(e, http.MethodPost, "/agents/claude/v1/messages", claudeHeaders(), body, true)
-	if w.Code != http.StatusOK || backend.count() != 1 || backend.sentModel(0) != "deepseek-v4-flash" {
+	if w.Code != http.StatusOK || backend.count() != 1 || backend.sentModel(0) != "deepseek-v4-pro" {
 		t.Fatalf("catalog dispatch=%d hits=%d body=%s", w.Code, backend.count(), w.Body.String())
 	}
 	w = serveClaude(e, http.MethodHead, "/agents/claude/api/hello", claudeHeaders(), "", true)

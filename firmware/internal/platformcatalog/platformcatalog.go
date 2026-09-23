@@ -1,41 +1,39 @@
-// Package platformcatalog 持「平台模型信息」——哪儿有哪些模型。文件里是两段，
-// **分量不同**：
+// Package platformcatalog 持「模型目录数据」——哪儿有哪些模型、各自多少钱。
+// 一份文件（model-catalog.json）两段，**分量不同**：
 //
-//	platforms  哪个上游平台有哪些可选模型 → 「添加模型」对话框的一份选单
-//	agents     哪份 Agent 订阅带哪些模型 → 设备照着建行的权威清单（v2，2026-08-15）
+//	platforms  哪个上游平台有哪些可选模型、各自的估算目录价 → 「添加模型」对话框的
+//	           一份选单，以及从那条平台添加模型时给它填的初始价
+//	agents     哪份 Agent 订阅带哪些模型、各自的名义单价 → 设备照着建行的权威清单
 //
-// 它是管理台「模型接入 → API密钥接入 → 添加模型」那份选单的数据源：录完账号之后，
-// 操作者要挑的是"这家平台上的哪个模型"，而设备本身无从枚举——厂商没有统一的
-// 模型枚举端点，各家的型号也随时上新。于是把这份清单做成一份**可发布的数据
-// 文件**，而不是编译进代码的常量表。
+// 它是管理台「模型接入」三个页面的数据源：录完账号之后，操作者要挑的是"这家
+// 平台上的哪个模型"，而设备本身无从枚举——厂商没有统一的模型枚举端点，各家的
+// 型号也随时上新。于是把这份清单做成一份**可发布的数据文件**，而不是编译进代码
+// 的常量表。
 //
 // 一个维护源、两份副本，副本都必须在场：
 //
-//	维护源  公开发布仓库 github.com/llm-net/llm-gate 的 catalog/platform-models.json
-//	    （同目录的 README.md 与任务文档说明维护流程）。改动只在那里做，用
-//	    `make -C firmware catalog` 校验并复制到下面两处。
-//	内嵌（本包 platform-models.json，go:embed）  设备的**基线**。一台从未联网
-//	    的设备照样要选得出模型，所以基线随固件发布、开箱即在。
-//	官网（website/public/updates/data/platform-models.json）  同一份文件的逐字节
-//	    拷贝，供设备在「数据升级」时取更新的版本——厂商上新不必等固件升级。
-//	    三份逐字节一致由 platformcatalog_test.go 与 internal/catalogcheck 的
-//	    绊线测试把守（同 codexhelper 的口径）。
+//	维护源  公开数据仓库 github.com/llm-net/llm-model-data 的正式发布 tag。改动只在
+//	    那里做；`make -C firmware catalog` 用 tools/modeldata 按最新 tag 合成本文件
+//	    （映射与换算在 internal/modeldata），校验后复制到下面两处。
+//	内嵌（本包 model-catalog.json，go:embed）  设备的**基线**。一台从未联网的设备
+//	    照样要选得出模型、算得出价，所以基线随固件发布、开箱即在。
+//	官网（website/public/updates/data/model-catalog.json）  同一份文件的逐字节拷贝，
+//	    供设备在「数据升级」时取更新的版本——厂商上新不必等固件升级。两份逐字节
+//	    一致由 platformcatalog_test.go 的绊线测试把守。
 //
-// 同步下来的版本**号大者胜**（比较 version，见 admin 侧的挑选逻辑）：官网文件
-// 只会比内嵌的新，回退到旧版本没有产品意义，比日期更不会踩到时钟问题。
+// 同步下来的版本**号大者胜**（比较 version，见 admin 侧的挑选逻辑）：version 由
+// 数据仓库 tag 的日期与序号编码而来，只会往前走；回退到旧版本没有产品意义，比
+// 日期更不会踩到时钟问题。
 //
-// 与同目录那份 official-pricing.json 的分工：那份记「一个模型多少钱」（写进
-// models.pricing，影响记账），这份记「哪儿有哪些模型」。两份一次同步一起下载。
+// agents 段打破了本包"只是选单、不影响任何运行期判定"的口径，这一点必须说在
+// 明处：**订阅带哪些模型不该由管理员一个个点进来**——那些型号是厂商定的，设备只是
+// 照着显示。于是订阅一连上，internal/admin 的收敛器就按这一段把模型行建出来（管理台
+// 对它们不提供任何编辑入口），厂商上新改数据仓库即可，不必等固件升级。四份订阅都在
+// 本段带各自的名义单价；Cursor 直接读本段计价，其余三家由收敛器写进模型行。
 //
-// agents 段（2026-08-15）打破了本包"只是选单、不影响任何运行期判定"的旧口径，
-// 这一点必须说在明处：**订阅带哪些模型不该由管理员一个个点进来**——那些型号是
-// 厂商定的，设备只是照着显示。于是订阅一连上，internal/admin 的收敛器就按这一段
-// 把模型行建出来（管理台对它们不提供任何编辑入口），厂商上新改这份文件即可，
-// 不必等固件升级。Cursor 在本文件按独立 ID 记价，其余订阅取官方价目文件。
-//
-// 本包只做**结构**校验（形态标识、条目数、字节上限），与 officialsite 对价目文件
-// 的处置同一条纪律：模型名合不合目录规范、kind/协议面对不对，由 internal/admin
-// 用与手工建模**同一条**校验路径判定——目录词汇的合法性只该有一份定义。
+// 本包只做**结构**校验（形态标识、条目数、字节上限、价目表是不是整数微元表）：
+// 模型名合不合目录规范、价目字段集对不对本 kind，由 internal/admin 用与手工建模
+// **同一条**校验路径判定——目录词汇的合法性只该有一份定义。
 package platformcatalog
 
 import (
@@ -45,6 +43,7 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"strings"
 	"sync"
 
 	"github.com/llm-net/llm-gate/firmware/internal/config"
@@ -56,11 +55,11 @@ const (
 	// Schema 是文件的形态标识。校验它不是形式主义：静态托管对未知路径可能
 	// 做页面 fallback，文件缺失时拿回的是 HTTP 200 的 index.html——没有这道
 	// 闸，"文件没发布"会表现成一次语焉不详的解析失败。
-	Schema = "llmgate.platform-models/v2"
+	Schema = "llmgate.model-catalog/v1"
 
-	// MaxBytes 是下载（也是落库）的字节上限。当前文件不到 5 KiB，256 KiB 是
-	// 五十倍余量；上限防的是配置错到别的地址时无界读。
-	MaxBytes = 256 << 10
+	// MaxBytes 是下载（也是落库）的字节上限。当前文件约 200 KiB，1 MiB 是五倍
+	// 余量；上限防的是配置错到别的地址时无界读。
+	MaxBytes = 1 << 20
 
 	// MaxPlatforms / maxModelsPerPlatform 挡的是形态正确但异常巨大的输入——
 	// 清单要整份渲染进一个对话框，条目数没有上限就等于把界面交给远端文件。
@@ -70,8 +69,8 @@ const (
 	maxModelsPerPlatform = 300
 
 	// maxAgents / maxModelsPerAgent 同理，但收得更紧：agents 段不是选单而是
-	// 设备照着建行的**权威清单**（2026-08-15），一份错得离谱的文件在这里的
-	// 代价是几百行凭空出现的模型目录行，不是一个长对话框。
+	// 设备照着建行的**权威清单**，一份错得离谱的文件在这里的代价是几百行凭空
+	// 出现的模型目录行，不是一个长对话框。
 	maxAgents         = 16
 	maxModelsPerAgent = 100
 )
@@ -95,15 +94,27 @@ const (
 
 var capabilityNameRE = regexp.MustCompile(`^[A-Za-z0-9._:/-]{1,128}$`)
 
-// Doc 是平台模型信息文件的解析结果。
+// Doc 是模型目录数据文件的解析结果。
 type Doc struct {
-	Schema    string     `json:"schema"`
-	Version   int64      `json:"version"`
-	UpdatedAt string     `json:"updated_at"`
+	Schema    string `json:"schema"`
+	Version   int64  `json:"version"`
+	UpdatedAt string `json:"updated_at"`
+	// Currency / Unit 是全文件金额的口径：恒为 CNY / micro_yuan（整数微元）。
+	Currency string `json:"currency"`
+	Unit     string `json:"unit"`
+	// Source 记这份文件合成自数据仓库的哪个发布（只供追溯与展示）。
+	Source    SourceInfo `json:"source"`
 	Platforms []Platform `json:"platforms"`
-	// Agents 是「哪份 Agent 订阅带哪些模型」（v2，2026-08-15）。旧文件没有
-	// 这一段，解析出空切片即可——设备那时什么都不建，与升级前同形。
+	// Agents 是「哪份 Agent 订阅带哪些模型、各自多少钱」。
 	Agents []Agent `json:"agents"`
+}
+
+// SourceInfo 是文件的来源：数据仓库地址、正式发布 tag、提交与美元汇率。
+type SourceInfo struct {
+	Repository string `json:"repository"`
+	Tag        string `json:"tag"`
+	Commit     string `json:"commit"`
+	USDCNY     string `json:"usd_cny"`
 }
 
 // Platform 是一个上游平台的条目。Type 是固件稳定适配器标识；未知取值整份
@@ -112,7 +123,7 @@ type Doc struct {
 type Platform struct {
 	// ID 是数据目录里的平台身份；Type 是固件内置的稳定协议适配器。两者分开后，
 	// 多家 OpenAI-compatible 平台可以共享一个适配器，同时各有自己的模型清单
-	// 与端点快照。v1 文件没有 id，解析时按 type 补齐。
+	// 与端点快照。缺 id 时按 type 补齐。
 	ID            string  `json:"id"`
 	Type          string  `json:"type"`
 	Vendor        string  `json:"vendor"`
@@ -143,6 +154,16 @@ type Model struct {
 	// UpstreamProtocols 声明这个来源侧模型实际接受的上游协议。省略时沿用
 	// 适配器能力；空数组表示没有可用协议。声明只能收窄适配器，不能增添转换算法。
 	UpstreamProtocols []string `json:"upstream_protocols"`
+	// Pricing 是这条平台上这个模型的估算目录价（字段名 → 整数微元，形态同
+	// models.pricing）。缺席 = 数据仓库没有它的价，设备按未定价建行。设备只在
+	// 建行与「补填未定价」时读它，落库后模型行自己是唯一权威；形态按本地模型的
+	// kind 用手工录入那条校验路径判（parseModelPricing），不合形态只跳过这一条。
+	Pricing json.RawMessage `json:"pricing,omitempty"`
+	// Schedule 是可选的分时段价（形态见 usage.ParseSchedule）。设备当前只把
+	// Pricing（标准价）同步进模型目录，这一段原样留在文件里、不参与记账。
+	Schedule  json.RawMessage `json:"schedule,omitempty"`
+	Source    string          `json:"source"`
+	CheckedAt string          `json:"checked_at"`
 }
 
 // ModelCapabilities 是可通过数据升级发布的模型行为。它只组合固件已经实现、
@@ -150,8 +171,9 @@ type Model struct {
 // 必须先由固件实现新的 profile；旧固件会拒绝整个未知 profile 的目录并继续用
 // 上一份可用数据。
 type ModelCapabilities struct {
-	ResponsesChat ResponsesChatCapabilities `json:"responses_chat"`
-	Codex         CodexCapabilities         `json:"codex"`
+	InputModalities []string                  `json:"input_modalities,omitempty"`
+	ResponsesChat   ResponsesChatCapabilities `json:"responses_chat"`
+	Codex           CodexCapabilities         `json:"codex"`
 }
 
 type ResponsesChatCapabilities struct {
@@ -172,14 +194,14 @@ type CodexReasoningLevel struct {
 	Description string `json:"description"`
 }
 
-// Agent 是一份 Agent 订阅带的模型清单（2026-08-15）。Provider 是设备侧的订阅
-// 标识（store.AgentProvider* 同域：codex | grok | claude | cursor）；不认识的
+// Agent 是一份 Agent 订阅带的模型清单。Provider 是设备侧的订阅标识
+// （store.AgentProvider* 同域：codex | grok | claude | cursor）；不认识的
 // 取值由消费方忽略——新 provider 不该炸旧固件。
 //
 // 与 Platform 的**分量不同**，这是这一段唯一要记住的事：Platform 是「添加模型」
 // 对话框里的一份选单，进目录还要管理员点一下并过一遍建模校验；Agent 是设备照着
 // 它自动建行的权威清单——订阅一连上，这里的模型就出现在管理台的订阅接入标签页
-// 上，管理员改不动（细则见 docs/firmware-usage-metering.md「Agent 订阅模型」）。
+// 上，管理员改不动。
 type Agent struct {
 	Provider  string       `json:"provider"`
 	Vendor    string       `json:"vendor"`
@@ -194,8 +216,9 @@ type Agent struct {
 // model 名分流/转发，不存在"来源侧另一个 ID"这回事。Source/CheckedAt 可逐条
 // 覆盖 provider 那条。
 //
-// Codex/Grok/Claude 按 official-pricing.json 同名条目记名义金额；Cursor
-// 使用本条 Pricing，避免与 API 或其他订阅的同名型号串价，也不创建共享模型行。
+// Pricing 是名义单价（官方 API 按量价，整数微元）：Codex/Grok/Claude 由收敛器
+// 写进模型行；Cursor 直接按本条计价、不建共享行，所以 Cursor 的每条必须带
+// 完整的输入 / 输出价（解析时校验），其余三家缺价即建一行未定价的模型。
 type AgentModel struct {
 	Name      string          `json:"name"`
 	Kind      string          `json:"kind"`
@@ -205,7 +228,7 @@ type AgentModel struct {
 	Pricing   json.RawMessage `json:"pricing,omitempty"`
 }
 
-//go:embed platform-models.json
+//go:embed model-catalog.json
 var builtinRaw []byte
 
 // builtin 解析内嵌副本。内嵌文件是编译期资产，解析不了是构建错误而不是运行期
@@ -214,7 +237,7 @@ var builtinRaw []byte
 var builtin = sync.OnceValue(func() Doc {
 	doc, err := Parse(builtinRaw)
 	if err != nil {
-		panic("platformcatalog: 内嵌平台模型文件损坏：" + err.Error())
+		panic("platformcatalog: 内嵌模型目录文件损坏：" + err.Error())
 	}
 	return doc
 })
@@ -229,7 +252,7 @@ func BuiltinRaw() []byte {
 	return out
 }
 
-// Parse 解析并**结构**校验一份平台模型信息文件。
+// Parse 解析并**结构**校验一份模型目录数据文件。
 func Parse(raw []byte) (Doc, error) {
 	var doc Doc
 	if err := json.Unmarshal(raw, &doc); err != nil {
@@ -240,6 +263,9 @@ func Parse(raw []byte) (Doc, error) {
 	}
 	if doc.Version <= 0 {
 		return Doc{}, errors.New("version 必须是正整数")
+	}
+	if doc.Currency != "CNY" || doc.Unit != "micro_yuan" {
+		return Doc{}, errors.New("currency / unit 必须是 CNY / micro_yuan")
 	}
 	if len(doc.Platforms) == 0 {
 		return Doc{}, errors.New("一个平台条目都没有")
@@ -256,7 +282,7 @@ func Parse(raw []byte) (Doc, error) {
 		if p.BillingMode == "" {
 			p.BillingMode = defaultBillingMode(p.Type)
 		}
-		if err := validatePlatform(*p, doc.Schema == Schema); err != nil {
+		if err := validatePlatform(*p); err != nil {
 			return Doc{}, err
 		}
 		if _, exists := platformIDs[p.ID]; exists {
@@ -282,48 +308,73 @@ func Parse(raw []byte) (Doc, error) {
 			if err := validateCapabilities(p.ID, m); err != nil {
 				return Doc{}, err
 			}
+			if err := validatePricingShape(m.Pricing, m.Schedule); err != nil {
+				return Doc{}, fmt.Errorf("平台 %q 的模型 %q 的价目%v", clipRunes(p.ID, 32), clipRunes(m.Name, 64), err)
+			}
 		}
 	}
-	// agents 段整段可缺（v1 的文件就没有）：缺席不是错误，只是这台设备的
-	// 订阅接入标签页暂时列不出模型。
+	// agents 段整段可缺：缺席不是错误，只是这台设备的订阅接入标签页暂时列不出模型。
 	if len(doc.Agents) > maxAgents {
 		return Doc{}, fmt.Errorf("订阅条目数超过上限 %d", maxAgents)
 	}
-	cursorSeen := false
+	seenAgents := make(map[string]bool, len(doc.Agents))
 	for _, a := range doc.Agents {
 		if len(a.Models) > maxModelsPerAgent {
 			return Doc{}, fmt.Errorf("订阅 %q 的模型条目数超过上限 %d", clipRunes(a.Provider, 32), maxModelsPerAgent)
 		}
-		if a.Provider != "cursor" {
-			if a.Provider != "codex" && a.Provider != "grok" && a.Provider != "claude" {
-				continue // 不认识的订阅仍由旧固件忽略。
-			}
-			for _, model := range a.Models {
-				if len(model.Pricing) > 0 {
-					return Doc{}, errors.New("只有 Cursor 订阅在平台目录中定义价格")
-				}
-			}
-			continue
+		if a.Provider != "cursor" && a.Provider != "codex" && a.Provider != "grok" && a.Provider != "claude" {
+			continue // 不认识的订阅仍由旧固件忽略。
 		}
-		if cursorSeen {
-			return Doc{}, errors.New("Cursor 订阅目录重复")
+		if seenAgents[a.Provider] {
+			return Doc{}, fmt.Errorf("订阅 %q 重复", clipRunes(a.Provider, 32))
 		}
-		cursorSeen = true
+		seenAgents[a.Provider] = true
 		names := make(map[string]bool)
 		for _, model := range a.Models {
-			if !cursorwire.ValidModel(model.Name) || model.Kind != "text" || names[model.Name] {
-				return Doc{}, errors.New("Cursor 目录模型标识、类型无效或重复")
+			if names[model.Name] {
+				return Doc{}, fmt.Errorf("订阅 %q 的模型 %q 重复", clipRunes(a.Provider, 32), clipRunes(model.Name, 64))
 			}
 			names[model.Name] = true
-			if _, err := usage.ParseCursorPrice(string(model.Pricing)); err != nil {
-				return Doc{}, err
+			if a.Provider == "cursor" {
+				// Cursor 直接按本条计价、没有落库这一步，所以整份接收时校验，
+				// 坏价格进不了计费。
+				if !cursorwire.ValidModel(model.Name) || model.Kind != "text" {
+					return Doc{}, errors.New("Cursor 目录模型标识或类型无效")
+				}
+				if _, err := usage.ParseCursorPrice(string(model.Pricing)); err != nil {
+					return Doc{}, err
+				}
+				continue
+			}
+			if err := validatePricingShape(model.Pricing, nil); err != nil {
+				return Doc{}, fmt.Errorf("订阅 %q 的模型 %q 的价目%v", clipRunes(a.Provider, 32), clipRunes(model.Name, 64), err)
 			}
 		}
 	}
 	return doc, nil
 }
 
-func validatePlatform(p Platform, strictV2 bool) error {
+// validatePricingShape 只查价目表是不是「字段名 → 非负整数微元」的对象（缺席合法）
+// 与分时段价是不是 JSON 对象；字段集按 kind 的圈定留给消费方。
+func validatePricingShape(pricing, schedule json.RawMessage) error {
+	if len(pricing) > 0 {
+		if _, err := usage.ParsePricing(string(pricing)); err != nil {
+			return errors.New("不是整数微元表")
+		}
+	}
+	if len(schedule) > 0 {
+		var obj map[string]json.RawMessage
+		if err := json.Unmarshal(schedule, &obj); err != nil {
+			return errors.New("的 schedule 不是 JSON 对象")
+		}
+		if len(pricing) == 0 {
+			return errors.New("有 schedule 却没有标准价")
+		}
+	}
+	return nil
+}
+
+func validatePlatform(p Platform) error {
 	if !capabilityNameRE.MatchString(p.ID) {
 		return fmt.Errorf("平台 id %q 不合法", clipRunes(p.ID, 32))
 	}
@@ -344,7 +395,7 @@ func validatePlatform(p Platform, strictV2 bool) error {
 			return fmt.Errorf("平台 %q 的 base_url 必须是无凭据、查询串与 fragment 的 HTTPS 端点根", clipRunes(p.ID, 32))
 		}
 	}
-	if strictV2 && p.ID != p.Type {
+	if p.ID != p.Type {
 		if p.Type != AdapterOpenAICompat && p.Type != AdapterAnthropicCompat {
 			return fmt.Errorf("数据新增平台 %q 只能复用通用兼容适配器", clipRunes(p.ID, 32))
 		}
@@ -359,6 +410,19 @@ func validatePlatform(p Platform, strictV2 bool) error {
 }
 
 func validateCapabilities(platformID string, m Model) error {
+	seenInputs := map[string]bool{}
+	for _, input := range m.Capabilities.InputModalities {
+		switch input {
+		case "text", "image", "audio", "video", "file":
+		default:
+			return fmt.Errorf("平台 %q 的模型 %q 含未知输入模态", clipRunes(platformID, 32), clipRunes(m.Name, 64))
+		}
+		if seenInputs[input] {
+			return fmt.Errorf("平台 %q 的模型 %q 含重复输入模态", clipRunes(platformID, 32), clipRunes(m.Name, 64))
+		}
+		seenInputs[input] = true
+	}
+
 	r := m.Capabilities.ResponsesChat
 	if r.Profile == "" {
 		if r.ReplayReasoningContent || r.ThinkingType != "" || r.DropToolChoice || len(r.EffortMap) != 0 {
@@ -438,6 +502,36 @@ func (d Doc) PlatformByID(catalogID, adapter string) (Platform, bool) {
 	return Platform{}, false
 }
 
+// PlatformModel 在具体平台里按客户端可见名（不分大小写）找一条模型；kind 非空时
+// 还要求种类相同。这是「从这条平台添加模型时该填什么价」的查找。
+func (d Doc) PlatformModel(catalogID, adapter, name, kind string) (Model, bool) {
+	p, ok := d.PlatformByID(catalogID, adapter)
+	if !ok {
+		return Model{}, false
+	}
+	for _, m := range p.Models {
+		if strings.EqualFold(m.Name, name) && (kind == "" || m.Kind == kind) {
+			return m, true
+		}
+	}
+	return Model{}, false
+}
+
+// ModelsNamed 按名（不分大小写）与种类找出全部平台里的同名条目，按文件序返回
+// （按量平台在前）。挂了来源的模型该先用来源平台的那条（PlatformModel），这里
+// 是没有来源可依时的兜底查找。
+func (d Doc) ModelsNamed(name, kind string) []Model {
+	var out []Model
+	for _, p := range d.Platforms {
+		for _, m := range p.Models {
+			if strings.EqualFold(m.Name, name) && (kind == "" || m.Kind == kind) {
+				out = append(out, m)
+			}
+		}
+	}
+	return out
+}
+
 // ModelProtocolsFor 只按实际发往上游的模型 ID 查协议声明。显式映射优先于
 // 逻辑名，不能把同名逻辑模型的能力借给另一个上游型号。
 func (d Doc) ModelProtocolsFor(catalogID, adapter, logicalModel, upstreamModelID string) []string {
@@ -490,6 +584,20 @@ func (d Doc) Agent(provider string) (Agent, bool) {
 		}
 	}
 	return Agent{}, false
+}
+
+// AgentModel 在某份订阅的清单里按名（不分大小写）找一条。
+func (d Doc) AgentModel(provider, name string) (AgentModel, bool) {
+	a, ok := d.Agent(provider)
+	if !ok {
+		return AgentModel{}, false
+	}
+	for _, m := range a.Models {
+		if strings.EqualFold(m.Name, name) {
+			return m, true
+		}
+	}
+	return AgentModel{}, false
 }
 
 // clipRunes 裁截回显给错误文案的远端字段：这些值来自外部文件，原样搬进错误

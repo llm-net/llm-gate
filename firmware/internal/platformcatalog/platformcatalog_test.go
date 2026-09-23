@@ -16,6 +16,12 @@ import (
 	"github.com/llm-net/llm-gate/firmware/internal/usage"
 )
 
+// docWith 拼一份最小合法文件（platforms / agents 段由调用方给）。
+func docWith(version int, platforms, agents string) string {
+	return fmt.Sprintf(`{"schema":%q,"version":%d,"currency":"CNY","unit":"micro_yuan","platforms":[%s],"agents":[%s]}`,
+		Schema, version, platforms, agents)
+}
+
 func TestUpstreamProtocolDeclarations(t *testing.T) {
 	for _, tc := range []struct {
 		field string
@@ -28,7 +34,7 @@ func TestUpstreamProtocolDeclarations(t *testing.T) {
 		{`,"upstream_protocols":["openai_chat","openai_chat"]`, false},
 		{`,"upstream_protocols":"openai_chat"`, false},
 	} {
-		raw := fmt.Sprintf(`{"schema":%q,"version":1,"platforms":[{"id":"opencode_go","type":"opencode_go","models":[{"name":"test","kind":"text"%s}]}]}`, Schema, tc.field)
+		raw := docWith(1, `{"id":"opencode_go","type":"opencode_go","models":[{"name":"test","kind":"text"`+tc.field+`}]}`, "")
 		doc, err := Parse([]byte(raw))
 		if (err == nil) != tc.valid {
 			t.Fatalf("%s: err=%v", tc.field, err)
@@ -64,6 +70,9 @@ func TestBuiltinParses(t *testing.T) {
 	}
 	if doc.Version <= 0 {
 		t.Fatalf("version = %d, 期望正整数", doc.Version)
+	}
+	if doc.Source.Tag == "" || doc.Source.Commit == "" {
+		t.Fatalf("内嵌副本缺数据仓库来源：%+v", doc.Source)
 	}
 	if len(BuiltinRaw()) > MaxBytes {
 		t.Fatalf("内嵌副本 %d 字节，超过 MaxBytes %d", len(BuiltinRaw()), MaxBytes)
@@ -112,35 +121,31 @@ func TestBuiltinArkPlanIncludesCurrentCodexModels(t *testing.T) {
 	}
 }
 
-// TestBuiltinPriorityAPIKeyProfiles 把 API 密钥接入的两级平台清单钉成产品契约：
+// TestBuiltinPriorityAPIKeyProfiles 把 API 密钥接入的平台清单钉成产品契约：
 // 固定平台必须继续指向核对过的 HTTPS 端点、复用现有通用适配器，而且本批选单
-// 只收文本模型。厂商上新仍可走管理台「自定义」，这里防的是目录维护时把平台
-// 档案漏掉、改错地域，或顺手带进图片/视频/声音模型。
+// 只收文本模型。厂商上新仍可走管理台「自定义」，这里防的是映射维护时把平台
+// 档案漏掉、改错地域，或顺手带进图像/视频/声音模型。
 func TestBuiltinPriorityAPIKeyProfiles(t *testing.T) {
 	type expectation struct {
 		adapter string
 		baseURL string
 	}
 	want := map[string]expectation{
-		"kimi_cn":           {adapter: "openai_compat", baseURL: "https://api.moonshot.cn/v1"},
-		"zhipu_cn":          {adapter: "openai_compat", baseURL: "https://open.bigmodel.cn/api/paas/v4"},
-		"bailian_cn":        {adapter: "openai_compat", baseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1"},
-		"bailian_sg":        {adapter: "openai_compat", baseURL: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"},
-		"minimax_text_cn":   {adapter: "openai_compat", baseURL: "https://api.minimaxi.com/v1"},
-		"minimax_text_intl": {adapter: "openai_compat", baseURL: "https://api.minimax.io/v1"},
-		"siliconflow_cn":    {adapter: "openai_compat", baseURL: "https://api.siliconflow.cn/v1"},
-		"qianfan_cn":        {adapter: "openai_compat", baseURL: "https://qianfan.baidubce.com/v2"},
-		"openai":            {adapter: "openai_compat", baseURL: "https://api.openai.com/v1"},
-		"anthropic":         {adapter: "anthropic_compat", baseURL: "https://api.anthropic.com/v1"},
-		"gemini":            {adapter: "openai_compat", baseURL: "https://generativelanguage.googleapis.com/v1beta/openai"},
-		"xai":               {adapter: "openai_compat", baseURL: "https://api.x.ai/v1"},
-		"openrouter":        {adapter: "openai_compat", baseURL: "https://openrouter.ai/api/v1"},
-		"stepfun_cn":        {adapter: "openai_compat", baseURL: "https://api.stepfun.com/v1"},
-		"tencent_tokenhub":  {adapter: "openai_compat", baseURL: "https://tokenhub.tencentmaas.com/v1"},
-		"tencent_lkeap":     {adapter: "openai_compat", baseURL: "https://api.lkeap.cloud.tencent.com/v3"},
-		"groq":              {adapter: "openai_compat", baseURL: "https://api.groq.com/openai/v1"},
-		"mistral":           {adapter: "openai_compat", baseURL: "https://api.mistral.ai/v1"},
-		"together":          {adapter: "openai_compat", baseURL: "https://api.together.ai/v1"},
+		"kimi_cn":          {adapter: "openai_compat", baseURL: "https://api.moonshot.cn/v1"},
+		"zhipu_cn":         {adapter: "openai_compat", baseURL: "https://open.bigmodel.cn/api/paas/v4"},
+		"bailian_cn":       {adapter: "openai_compat", baseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1"},
+		"minimax_text_cn":  {adapter: "openai_compat", baseURL: "https://api.minimaxi.com/v1"},
+		"qianfan_cn":       {adapter: "openai_compat", baseURL: "https://qianfan.baidubce.com/v2"},
+		"openai":           {adapter: "openai_compat", baseURL: "https://api.openai.com/v1"},
+		"anthropic":        {adapter: "anthropic_compat", baseURL: "https://api.anthropic.com/v1"},
+		"gemini":           {adapter: "openai_compat", baseURL: "https://generativelanguage.googleapis.com/v1beta/openai"},
+		"xai":              {adapter: "openai_compat", baseURL: "https://api.x.ai/v1"},
+		"openrouter":       {adapter: "openai_compat", baseURL: "https://openrouter.ai/api/v1"},
+		"tencent_tokenhub": {adapter: "openai_compat", baseURL: "https://tokenhub.tencentmaas.com/v1"},
+		"groq":             {adapter: "openai_compat", baseURL: "https://api.groq.com/openai/v1"},
+		"mistral":          {adapter: "openai_compat", baseURL: "https://api.mistral.ai/v1"},
+		"chenyu":           {adapter: "openai_compat", baseURL: "https://api.chenyu.pro/v1"},
+		"chenyu_anthropic": {adapter: "anthropic_compat", baseURL: "https://api.chenyu.pro/v1"},
 	}
 	found := make(map[string]bool, len(want))
 	// 内置订阅套餐型（id == type）的文本选单同样非空且只收文本：qwen_plan 与
@@ -192,9 +197,10 @@ func TestBuiltinPriorityAPIKeyProfiles(t *testing.T) {
 
 // TestBuiltinEntriesAreWellFormed：内嵌清单里的每条都得是设备真收得下的形态
 // ——上游类型认识、kind 三选一、AIGC 必须声明本 kind 圈内的协议面且 text 不
-// 声明、名字不带空白（目录名规范）。
+// 声明、名字不带空白（目录名规范）、价目字段集合本 kind。
 func TestBuiltinEntriesAreWellFormed(t *testing.T) {
 	seenID := map[string]bool{}
+	priced := 0
 	for _, p := range Builtin().Platforms {
 		if !knownTypes[p.Type] {
 			t.Errorf("平台 %q 不是设备认识的上游类型", p.Type)
@@ -221,6 +227,22 @@ func TestBuiltinEntriesAreWellFormed(t *testing.T) {
 				t.Errorf("平台 %q 的模型 %q kind=%q 不合法", p.Type, m.Name, m.Kind)
 				continue
 			}
+			if len(m.Pricing) > 0 {
+				priced++
+				pricing, err := usage.ParsePricing(string(m.Pricing))
+				if err != nil || !pricing.Priced() {
+					t.Errorf("平台 %q 的模型 %q 价目不合法：%v", p.ID, m.Name, err)
+				}
+				allowed := map[string]bool{}
+				for _, f := range usage.FieldsFor(m.Kind) {
+					allowed[f] = true
+				}
+				for f := range pricing {
+					if !allowed[f] {
+						t.Errorf("平台 %q 的模型 %q 价目含 %s 模型不认的字段 %q", p.ID, m.Name, m.Kind, f)
+					}
+				}
+			}
 			if m.Kind == "text" {
 				if m.Family != "" {
 					t.Errorf("平台 %q 的文本模型 %q 不该声明协议面", p.Type, m.Name)
@@ -242,12 +264,16 @@ func TestBuiltinEntriesAreWellFormed(t *testing.T) {
 			}
 		}
 	}
+	if priced == 0 {
+		t.Error("内嵌副本里一条带价的模型都没有")
+	}
 }
 
 // TestBuiltinAgentEntriesAreWellFormed：agents 段的绊线比 platforms 段严——
 // 设备照着这一段**建模型行**，一条写错的条目会在每台连了该订阅的设备上凭空
 // 长出一行改不掉的模型。除形态外还多两条：模型名在整段里全局唯一（一个名字
 // 只有一行，两份订阅抢同一个名字是发布错误），以及 agents 段只收文本模型。
+// 四家都在场，各自的文本型号带名义价（Cursor 逐条必带，其余缺价只记日志）。
 func TestBuiltinAgentEntriesAreWellFormed(t *testing.T) {
 	seenProvider := map[string]bool{}
 	seenName := map[string]bool{} // 跨 provider 全局
@@ -261,6 +287,9 @@ func TestBuiltinAgentEntriesAreWellFormed(t *testing.T) {
 		seenProvider[a.Provider] = true
 		if a.Source == "" || a.CheckedAt == "" {
 			t.Errorf("订阅 %q 缺 source/checked_at（收录纪律：没有出处的型号不入表）", a.Provider)
+		}
+		if len(a.Models) == 0 {
+			t.Errorf("订阅 %q 一个型号都没有", a.Provider)
 		}
 		for _, m := range a.Models {
 			nameKey := strings.ToLower(m.Name)
@@ -279,15 +308,36 @@ func TestBuiltinAgentEntriesAreWellFormed(t *testing.T) {
 			if m.Kind != "text" {
 				t.Errorf("订阅 %q 的模型 %q kind=%q：agents 段只收文本模型", a.Provider, m.Name, m.Kind)
 			}
+			if a.Provider == "cursor" {
+				if _, err := usage.ParseCursorPrice(string(m.Pricing)); err != nil {
+					t.Errorf("Cursor %s: %v", m.Name, err)
+				}
+				continue
+			}
+			if len(m.Pricing) == 0 {
+				t.Logf("订阅 %q 的 %q 没有参考价——设备会为它建一行记 0 元的模型", a.Provider, m.Name)
+				continue
+			}
+			if p, err := usage.ParsePricing(string(m.Pricing)); err != nil || p[usage.FieldIn] == 0 && p[usage.FieldOut] == 0 {
+				t.Errorf("订阅 %q 的 %q 名义价不合法：%v", a.Provider, m.Name, err)
+			}
 		}
+	}
+	for _, provider := range []string{"codex", "grok", "claude", "cursor"} {
+		if !seenProvider[provider] {
+			t.Errorf("内嵌副本缺 %s 订阅清单", provider)
+		}
+	}
+	if _, ok := Builtin().AgentModel("cursor", "cursor-auto"); !ok {
+		t.Error("Cursor 清单缺本地统计名 cursor-auto")
 	}
 }
 
 // TestBuiltinMatchesWebsiteCopy：官网伺服的那份（website/public/updates/data/）
 // 必须与固件内嵌的逐字节一致——同步下来的与开箱自带的是同一份文件，改哪边都
-// 要同步另一边（同 codexhelper 的绊线口径）。
+// 要同步另一边。
 func TestBuiltinMatchesWebsiteCopy(t *testing.T) {
-	path := filepath.Join("..", "..", "..", "website", "public", "updates", "data", "platform-models.json")
+	path := filepath.Join("..", "..", "..", "website", "public", "updates", "data", "model-catalog.json")
 	want, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		t.Skipf("website 副本不在场（%s）——仅允许出现在脱离仓库的独立构建里", path)
@@ -296,77 +346,7 @@ func TestBuiltinMatchesWebsiteCopy(t *testing.T) {
 		t.Fatalf("读 website 副本: %v", err)
 	}
 	if string(want) != string(BuiltinRaw()) {
-		t.Fatalf("内嵌的 platform-models.json 与 website/public/updates/data/ 的副本不一致——两份必须逐字节相同")
-	}
-}
-
-// TestBuiltinAgentTextModelsHavePricing：agents 段的**文本**型号与同目录
-// official-pricing.json 里带 agent 标记的条目必须一一对上，名字逐字节相同、
-// agent 取值相同。两份文件是一对，但改的是两个地方，最容易出的两种错都在这里
-// 兜住：收录了型号却忘了录价（设备照建行，金额恒 0——2026-08-19 之前 claude
-// 整条线就是这个症状），或者两边把同一个型号写成了两种写法（运行期按名区分
-// 大小写精确匹配，写法不一致等于没录）。
-//
-// 订阅内含的图片/视频**刻意反着来**：那两族恒记 0 元，价目文件里不该有它们。
-func TestBuiltinAgentTextModelsHavePricing(t *testing.T) {
-	path := filepath.Join("..", "..", "..", "website", "public", "updates", "data", "official-pricing.json")
-	raw, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
-		t.Skipf("价目文件不在场（%s）——仅允许出现在脱离仓库的独立构建里", path)
-	}
-	if err != nil {
-		t.Fatalf("读价目文件: %v", err)
-	}
-	// 只取这条绊线要看的两个字段；价目文件的权威解析在 internal/officialsite。
-	var priced struct {
-		Models []struct {
-			Name  string `json:"name"`
-			Agent string `json:"agent"`
-		} `json:"models"`
-	}
-	if err := json.Unmarshal(raw, &priced); err != nil {
-		t.Fatalf("解析价目文件: %v", err)
-	}
-	pricedAgent := map[string]string{}
-	for _, m := range priced.Models {
-		if m.Agent != "" {
-			pricedAgent[m.Name] = m.Agent
-		}
-	}
-	inCatalog := map[string]bool{}
-	for _, a := range Builtin().Agents {
-		for _, m := range a.Models {
-			if a.Provider == "cursor" {
-				if _, err := usage.ParseCursorPrice(string(m.Pricing)); err != nil {
-					t.Errorf("Cursor %s: %v", m.Name, err)
-				}
-				continue
-			}
-			inCatalog[m.Name] = true
-			switch m.Kind {
-			case "text":
-				got, ok := pricedAgent[m.Name]
-				if !ok {
-					t.Errorf("订阅 %q 的文本型号 %q 在 official-pricing.json 里没有带 agent 标记的同名条目"+
-						"——设备会建出一行永远记 0 元的模型", a.Provider, m.Name)
-					continue
-				}
-				if got != a.Provider {
-					t.Errorf("型号 %q 的价目 agent = %q，目录里归 %q", m.Name, got, a.Provider)
-				}
-			default:
-				if _, ok := pricedAgent[m.Name]; ok {
-					t.Errorf("订阅内含的 %s 型号 %q 不该有目录价（恒记 0 元）", m.Kind, m.Name)
-				}
-			}
-		}
-	}
-	for name := range pricedAgent {
-		if !inCatalog[name] {
-			// 不是错：价目文件可以先于目录收录（也是管理员手工建同名行借价那条
-			// 旋钮的用法）。记一条，方便发布时看出两边差了什么。
-			t.Logf("价目文件里带 agent 标记的 %q 不在目录 agents 段里——设备不会自动为它建行", name)
-		}
+		t.Fatalf("内嵌的 model-catalog.json 与 website/public/updates/data/ 的副本不一致——两份必须逐字节相同")
 	}
 }
 
@@ -374,14 +354,17 @@ func TestParseRejectsWrongShape(t *testing.T) {
 	cases := []struct{ name, raw string }{
 		{"非 JSON", "<!doctype html>"},
 		{"形态标识不符", `{"schema":"other.platform-models/v1","platforms":[{"type":"deepseek"}]}`},
-		{"没有平台条目", `{"schema":"` + Schema + `","platforms":[]}`},
+		{"没有平台条目", docWith(1, "", "")},
+		{"币种不对", `{"schema":"` + Schema + `","version":1,"currency":"USD","unit":"micro_yuan","platforms":[{"type":"deepseek"}]}`},
+		{"价目不是整数表", docWith(1, `{"type":"deepseek","models":[{"name":"m","kind":"text","pricing":{"in":"1"}}]}`, "")},
+		{"有 schedule 没标准价", docWith(1, `{"type":"deepseek","models":[{"name":"m","kind":"text","schedule":{"timezone":"Asia/Shanghai"}}]}`, "")},
 	}
 	for _, c := range cases {
 		if _, err := Parse([]byte(c.raw)); err == nil {
 			t.Errorf("%s: Parse 应当报错", c.name)
 		}
 	}
-	doc, err := Parse([]byte(`{"schema":"` + Schema + `","version":2,"platforms":[{"type":"minimax","models":[{"name":"MiniMax-H3","kind":"video","family":"minimax_video"}]}]}`))
+	doc, err := Parse([]byte(docWith(2, `{"type":"minimax","models":[{"name":"MiniMax-H3","kind":"video","family":"minimax_video","pricing":{"minimax_video_sec_768p":500000}}]}`, "")))
 	if err != nil {
 		t.Fatalf("Parse 合法文件: %v", err)
 	}
@@ -392,10 +375,19 @@ func TestParseRejectsWrongShape(t *testing.T) {
 	if _, ok := doc.Platform("deepseek"); ok {
 		t.Fatalf("Platform(deepseek) 应当没有收录")
 	}
+	if m, ok := doc.PlatformModel("minimax", "minimax", "minimax-h3", "video"); !ok || len(m.Pricing) == 0 {
+		t.Fatalf("PlatformModel 应按名不分大小写找到带价的条目：%+v, %v", m, ok)
+	}
+	if _, ok := doc.PlatformModel("minimax", "minimax", "MiniMax-H3", "text"); ok {
+		t.Fatal("PlatformModel 不该跨种类匹配")
+	}
+	if got := doc.ModelsNamed("minimax-h3", ""); len(got) != 1 {
+		t.Fatalf("ModelsNamed = %+v", got)
+	}
 }
 
-func TestV2DynamicPlatformAndCapabilities(t *testing.T) {
-	raw := `{"schema":"llmgate.platform-models/v2","version":9,"platforms":[{
+func TestDynamicPlatformAndCapabilities(t *testing.T) {
+	raw := docWith(9, `{
 		"id":"example_ai","type":"openai_compat","vendor":"Example AI",
 		"base_url":"https://api.example.invalid/v1","billing_mode":"subscription",
 		"models":[{"name":"example-reasoner","kind":"text","capabilities":{
@@ -403,7 +395,7 @@ func TestV2DynamicPlatformAndCapabilities(t *testing.T) {
 				"thinking_type":"enabled","drop_tool_choice":true,"effort_map":{"xhigh":"max"}},
 			"codex":{"default_reasoning_level":"xhigh","supported_reasoning_levels":[
 				{"effort":"xhigh","description":"Maximum reasoning"}]}
-		}}]}]}`
+		}}]}`, "")
 	doc, err := Parse([]byte(raw))
 	if err != nil {
 		t.Fatalf("Parse dynamic platform: %v", err)
@@ -418,9 +410,9 @@ func TestV2DynamicPlatformAndCapabilities(t *testing.T) {
 	}
 }
 
-func TestV2RejectsUnsafeOrUnknownExtension(t *testing.T) {
+func TestRejectsUnsafeOrUnknownExtension(t *testing.T) {
 	platform := func(fields string) []byte {
-		return []byte(`{"schema":"llmgate.platform-models/v2","version":9,"platforms":[{` + fields + `}]}`)
+		return []byte(docWith(9, `{`+fields+`}`, ""))
 	}
 	cases := map[string][]byte{
 		"specialized adapter for dynamic platform": platform(`"id":"new_deepseek","type":"deepseek","base_url":"https://api.example.invalid/v1","billing_mode":"usage"`),
@@ -437,36 +429,44 @@ func TestV2RejectsUnsafeOrUnknownExtension(t *testing.T) {
 	}
 }
 
-// Cursor 数据在接收时整份校验，避免坏价格进入计费；同名订阅按 provider 隔离。
-func TestCursorCatalogValidation(t *testing.T) {
+// 订阅清单在接收时整份校验：Cursor 逐条必须带合法的输入 / 输出价（它没有落库这一步，
+// 坏价格会直接进计费）；其余三家的价可缺、有则必须是整数微元表。
+func TestAgentCatalogValidation(t *testing.T) {
+	base := func() Doc {
+		d, err := Parse(BuiltinRaw())
+		if err != nil {
+			t.Fatal(err)
+		}
+		d.Agents = []Agent{
+			{Provider: "cursor", Models: []AgentModel{{Name: "shared-model", Kind: "text", Pricing: json.RawMessage(`{"in":0,"out":0}`)}}},
+			{Provider: "codex", Models: []AgentModel{{Name: "shared-model", Kind: "text", Pricing: json.RawMessage(`{"in":1,"out":2}`)}, {Name: "unpriced", Kind: "text"}}},
+		}
+		return d
+	}
+	raw, _ := json.Marshal(base())
+	if _, err := Parse(raw); err != nil {
+		t.Fatalf("合法清单被拒：%v", err)
+	}
 	for _, tc := range []struct {
 		name   string
 		change func(*Doc)
 	}{
-		{"missing price", func(d *Doc) { d.Agents[0].Models[0].Pricing = nil }},
-		{"fractional price", func(d *Doc) { d.Agents[0].Models[0].Pricing = json.RawMessage(`{"in":1.5,"out":0}`) }},
-		{"negative price", func(d *Doc) { d.Agents[0].Models[0].Pricing = json.RawMessage(`{"in":-1,"out":0}`) }},
-		{"wrong field", func(d *Doc) { d.Agents[0].Models[0].Pricing = json.RawMessage(`{"in":0,"out":0,"image":1}`) }},
-		{"invalid name", func(d *Doc) { d.Agents[0].Models[0].Name = "bad model" }},
-		{"wrong kind", func(d *Doc) { d.Agents[0].Models[0].Kind = "image" }},
+		{"cursor missing price", func(d *Doc) { d.Agents[0].Models[0].Pricing = nil }},
+		{"cursor fractional price", func(d *Doc) { d.Agents[0].Models[0].Pricing = json.RawMessage(`{"in":1.5,"out":0}`) }},
+		{"cursor negative price", func(d *Doc) { d.Agents[0].Models[0].Pricing = json.RawMessage(`{"in":-1,"out":0}`) }},
+		{"cursor wrong field", func(d *Doc) { d.Agents[0].Models[0].Pricing = json.RawMessage(`{"in":0,"out":0,"image":1}`) }},
+		{"cursor invalid name", func(d *Doc) { d.Agents[0].Models[0].Name = "bad model" }},
+		{"cursor wrong kind", func(d *Doc) { d.Agents[0].Models[0].Kind = "image" }},
 		{"duplicate model", func(d *Doc) { d.Agents[0].Models = append(d.Agents[0].Models, d.Agents[0].Models[0]) }},
 		{"duplicate provider", func(d *Doc) { d.Agents = append(d.Agents, d.Agents[0]) }},
-		{"other provider pricing", func(d *Doc) { d.Agents[0].Provider = "codex" }},
+		{"codex non-integer price", func(d *Doc) { d.Agents[1].Models[0].Pricing = json.RawMessage(`{"in":"1","out":2}`) }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			d, err := Parse(BuiltinRaw())
-			if err != nil {
-				t.Fatal(err)
-			}
-			d.Agents = []Agent{{Provider: "cursor", Models: []AgentModel{{Name: "shared-model", Kind: "text", Pricing: json.RawMessage(`{"in":0,"out":0}`)}}}}
-			raw, _ := json.Marshal(d)
-			if _, err := Parse(raw); err != nil {
-				t.Fatalf("valid free price rejected: %v", err)
-			}
+			d := base()
 			tc.change(&d)
-			raw, _ = json.Marshal(d)
+			raw, _ := json.Marshal(d)
 			if _, err := Parse(raw); err == nil {
-				t.Fatal("invalid Cursor catalog accepted")
+				t.Fatal("invalid agent catalog accepted")
 			}
 		})
 	}

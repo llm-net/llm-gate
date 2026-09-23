@@ -38,7 +38,7 @@ CREATE TABLE usage_hourly (
     -- 上游账户名快照；准入被拒（429）的行没走到选路，此列为空串。
     upstream_name      TEXT    NOT NULL DEFAULT '',
     -- 入口 chat|messages|video|image 与模型 kind text|video|image：管理员按
-    -- 「文本/视频/图片」拆分消费的直接依据。刻意不设 CHECK——入口词汇的增补
+    -- 「文本/视频/图像」拆分消费的直接依据。刻意不设 CHECK——入口词汇的增补
     -- 不该要求一次重建型迁移（同 aigc_tasks.status 的处置）。
     entry              TEXT    NOT NULL DEFAULT '',
     kind               TEXT    NOT NULL DEFAULT '',
@@ -77,7 +77,7 @@ CREATE UNIQUE INDEX idx_usage_hourly_dim
     ON usage_hourly (bucket_hour, user_id, key_id, model_name, upstream_name, entry);
 
 -- ② 模型目录价：单列 JSON，**形态定字段**（文本三价 / Seedance 两档 /
---    H3 秒价档+附加 / 图片张价），唯一的读写方是 internal/usage 的计价函数与
+--    H3 秒价档+附加 / 图像张价），唯一的读写方是 internal/usage 的计价函数与
 --    管理台表单，SQLite 侧没有按价格查询的需求。离散三列方案已被否——形态间
 --    字段集异构，并集稀疏且每加一种形态就要一次迁移。
 --    值一律**整数微元**（管理台按 元/百万 token 录入并换算）；空串 = 未定价
@@ -98,7 +98,7 @@ ALTER TABLE api_keys ADD COLUMN rpm_limit INTEGER;
 -- ④ 异步任务的清算列（0005 建的 aigc_tasks）。cost_micro **NULL = 未清算**，
 --    这正是一次性清算的判据：SettleAIGCTask 的条件更新只在 cost_micro IS NULL
 --    时写入，于是「客户端查询路径顺手观测到完成」与「懒对账协程扫到它」重叠
---    时也只入账一次。estimated 标记该笔金额是否含估算成分（视频/图片不估算
+--    时也只入账一次。estimated 标记该笔金额是否含估算成分（视频/图像不估算
 --    token，此标位表示厂商 usage 缺失或已过查询窗口而按 0 元记）。
 ALTER TABLE aigc_tasks ADD COLUMN cost_micro INTEGER;
 ALTER TABLE aigc_tasks ADD COLUMN estimated  INTEGER NOT NULL DEFAULT 0;

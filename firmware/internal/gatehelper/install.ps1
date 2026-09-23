@@ -179,15 +179,16 @@ try {
   Expand-Archive -Force (Join-Path $temp $name) $temp
   $source = Join-Path $temp 'gate.exe'
   if (-not (Test-Path $source)) { throw '压缩包缺少 gate.exe' }
-  $commitFile = Join-Path $temp 'commit.ps1'
-  [IO.File]::WriteAllText($commitFile, $commitScript, (New-Object Text.UTF8Encoding($true)))
+  # 提交脚本以 -EncodedCommand 内存传入，不写成 .ps1 文件：执行策略（Restricted / AllSigned，
+  # 含组策略强制值）只管脚本文件，与外层通过 irm + scriptblock 运行的方式一致。
+  $encodedCommit = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($commitScript))
   $env:GATE_INSTALL_BASE = $BaseUrl
   $env:GATE_INSTALL_KEY = $ApiKey
   $env:GATE_INSTALL_STAGE = $temp
   $env:GATE_INSTALL_TARGET_DIR = $installDir
   $env:GATE_INSTALL_CONFIG_ROOT = $configRoot
   $hostProgram = [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
-  & $source __installer-exec $hostProgram -NoLogo -NoProfile -NonInteractive -File $commitFile
+  & $source __installer-exec $hostProgram -NoLogo -NoProfile -NonInteractive -OutputFormat Text -EncodedCommand $encodedCommit
   if ($LASTEXITCODE -ne 0) { throw 'gate 安装提交失败，确切原因见上方输出；已尝试恢复原状态' }
   $sessionParts = @("$env:Path" -split ';')
   if (-not ($sessionParts | Where-Object { $_.TrimEnd('\') -ieq $installDir.TrimEnd('\') })) {

@@ -1,4 +1,4 @@
-// 开发工具接入页分成两层：先安装 gate，再用 gate 管理五种开发工具；Codex CLI 与
+// 开发工具接入页分成两层：先安装 gate，再用 gate 接入开发工具；Codex CLI 与
 // Codex App 各有一张帮助标签。接入地址和 API 密钥只作为第一层安装脚本的生成选项；
 // 工具标签页只切换第二层使用帮助，不能
 // 反过来改变 gate 安装命令。订阅授权和额外模型归每一把 API 密钥，在「API密钥 →
@@ -125,6 +125,16 @@ const TOOLS: ToolUI[] = [
     ),
     subscription: true,
   },
+  {
+    key: "mcode",
+    provider: "mcode",
+    icon: "mcode",
+    label: "MiniMax Code",
+    binary: "mcode",
+    intro: t("用 LLM Gate 专用配置启动 MiniMax Code，使用这把 Key 获准的 OpenAI Chat 目录模型。配置与会话独立于直接运行 mcode 时的数据，不使用设备订阅。"),
+    installNote: t("已有 mcode 时只建立关联；缺失时用官方安装器在 gate 独立目录安装程序、Node.js 与 npm 依赖。依赖下载需要主机访问官方源；派生配置以仅当前用户可读的权限保存 API Key。"),
+    subscription: false,
+  },
 ];
 
 interface CommandUI {
@@ -158,7 +168,7 @@ function toolCommands(tool: ToolUI): CommandUI[] {
   return [
     { command: prefix, desc: t("用 LLM Gate 专用配置启动 {binary}；后续参数原样传给工具。", { binary }) },
     { command: `${prefix} connect`, desc: t("关联 PATH 中已有的 {binary}，不下载、不升级。", { binary }) },
-    { command: `${prefix} install`, desc: t("确保 {binary} 可用；已有时只关联，缺失时经设备安装。", { binary }) },
+    { command: `${prefix} install`, desc: t("确保 {binary} 可用；已有时只关联，缺失时安装（先官方源，不可达再经设备）。", { binary }) },
     { command: `${prefix} status`, desc: t("查看关联路径、版本、来源和当前可见模型。") },
     { command: `${prefix} update`, desc: t("升级由 gate 安装和管理的 {binary}。", { binary }) },
     { command: `${prefix} update --adopt`, desc: t("明确改用设备提供的官方安装链，并交由 gate 管理。") },
@@ -503,7 +513,12 @@ export function DevToolGuide({
                       <h4 className="text-sm font-medium">{t("首次使用")}</h4>
                       <p className="text-muted-foreground mt-1 text-xs leading-5">{tool.installNote}</p>
                     </div>
-                    <Sample title={t("安装或关联，然后启动")} text={`gate ${tool.key} install\nsoc ${tool.key}`} />
+                    <Sample title={t("安装或关联，然后启动")} text={`gate ${tool.key} install\ngate ${tool.key}`} />
+                    {tool.key === "mcode" ? (
+                      <a href="https://github.com/MiniMax-AI/minimax-code#quick-start" target="_blank" rel="noreferrer" className="text-primary text-xs underline">
+                        {t("MiniMax Code 官方安装说明")}
+                      </a>
+                    ) : null}
                     <p className="text-muted-foreground text-xs leading-5">
                       {holder === undefined
                         ? t(

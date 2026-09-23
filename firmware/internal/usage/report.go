@@ -82,11 +82,13 @@ type Summary struct {
 	CacheReadTokens     int64 `json:"cache_read_tokens"`
 	CacheWriteTokens    int64 `json:"cache_write_tokens"`
 	TotalTokens         int64 `json:"total_tokens"`
-	// VideoSeconds / ImageCount 是非 token 形态的计费量（H3 按秒 + 参考图张数、
-	// Seedream 按出图张数）。功能边界的「金额为主、token/**秒**为辅」就靠这两列
-	// 兑现：没有它们，每一行视频消费在页面上都是「Token 0」。
+	// VideoSeconds / ImageCount / VideoCount 是非 token 形态的计费量（H3 按秒 +
+	// 参考图张数、Seedream / Grok Imagine 按出图张数、Grok Imagine 视频按受理
+	// 个数）。功能边界的「金额为主、token/**秒**为辅」就靠这几列兑现：没有它们，
+	// 每一行视频消费在页面上都是「Token 0」。
 	VideoSeconds  int64 `json:"video_seconds"`
 	ImageCount    int64 `json:"image_count"`
+	VideoCount    int64 `json:"video_count"`
 	DurationMsSum int64 `json:"duration_ms_sum"`
 }
 
@@ -105,6 +107,7 @@ func (s *Summary) add(d store.UsageDelta) {
 	s.TotalTokens += d.TotalTokens
 	s.VideoSeconds += d.VideoSeconds
 	s.ImageCount += d.ImageCount
+	s.VideoCount += d.VideoCount
 	s.DurationMsSum += d.DurationMsSum
 }
 
@@ -117,6 +120,8 @@ type DimRow struct {
 	// Label 只在按 API 密钥维度出现，取密钥当前的管理标签。标签不参与
 	// 分组：管理员改标签后历史用量仍归在同一个 key_id 下，只更新展示名。
 	Label string `json:"label,omitempty"`
+	// Archived 只在按 API 密钥维度出现：这把密钥已归档（凭据作废、行只为账留名）。
+	Archived bool `json:"archived,omitempty"`
 	// Priced 只在**按模型**这一个维度出现，且只对目录里真的有这一行的名字给值：
 	// true = 已录目录价，false = 目录里有这个模型但没录价（页面挂「未定价」
 	// 徽章），缺省（nil）= 无从判断——客户端随口给的模型名、被并进
@@ -136,6 +141,8 @@ type KeyRef struct {
 	ID      int64  `json:"id"`
 	Display string `json:"display"`
 	Label   string `json:"label,omitempty"`
+	// Archived 标记已归档的密钥：只在本区间有用量时才出现在选择项里。
+	Archived bool `json:"archived,omitempty"`
 }
 
 // DayPoint 是按日序列的一个点（Day 为设备**本地**日期，YYYY-MM-DD）。
@@ -280,11 +287,12 @@ func (m *Meter) report(ctx context.Context, from, to time.Time, keyID int64) (*R
 	return rep, nil
 }
 
-// annotateKeys 把 API 密钥当前标签补到按密钥汇总与选择项，并把当前存在但本
-// 区间没有用量的密钥追加到选择项。读取失败只让标签与闲置项缺席，不影响账本
-// 主读数；与 annotatePricing 的降级方向一致。
+// annotateKeys 把 API 密钥当前标签补到按密钥汇总与选择项，并把当前在用但本
+// 区间没有用量的密钥追加到选择项。已归档的密钥只对名（标签与归档标记），本区间
+// 没有用量就不进选择项——它们退场了，不该还占着下拉框。读取失败只让标签与闲置
+// 项缺席，不影响账本主读数；与 annotatePricing 的降级方向一致。
 func (m *Meter) annotateKeys(ctx context.Context, rep *Report) {
-	keys, err := m.st.ListAPIKeys(ctx)
+	keys, err := m.st.ListAllAPIKeys(ctx)
 	if err != nil {
 		if ctx.Err() == nil {
 			m.log.Warn("读取 API 密钥标签失败，用量页本次只显示脱敏 Key", "err", err.Error())
@@ -304,17 +312,23 @@ func (m *Meter) annotateKeys(ctx context.Context, rep *Report) {
 	}
 	for _, k := range keys {
 		display := k.DisplayPrefix + "…" + k.DisplayLast4
+		archived := k.Archived()
 		if row := rowsByID[k.ID]; row != nil {
 			row.Label = k.Label
+			row.Archived = archived
 			if row.Key == "" {
 				row.Key = display
 			}
 		}
 		if i, ok := refsByID[k.ID]; ok {
 			rep.Keys[i].Label = k.Label
+			rep.Keys[i].Archived = archived
 			if rep.Keys[i].Display == "" {
 				rep.Keys[i].Display = display
 			}
+			continue
+		}
+		if archived {
 			continue
 		}
 		rep.Keys = append(rep.Keys, KeyRef{ID: k.ID, Display: display, Label: k.Label})

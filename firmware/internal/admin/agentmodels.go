@@ -6,7 +6,7 @@ package admin
 //
 // 数据流一句话：
 //
-//	模型目录数据 platform-models.json 的 agents 段（生效那份：内嵌基线，
+//	模型目录数据 model-catalog.json 的 agents 段（生效那份：内嵌基线，
 //	  或版本号更大的同步副本）  ×  agent_accounts 里在场的订阅
 //	  =  设备目录里那批 Agent 模型行（本文件把两边收敛成一致）
 //
@@ -39,8 +39,8 @@ package admin
 //     表现成"整批模型行被清空"。账本记的是"我建/认领过谁"，读不到时它是空集，
 //     那一轮一行都不认领——降级只会少删，绝不会多删。读订阅列表失败则整次
 //     收敛就地返回，一行都不动。
-//  3. **价只填不洗**：价目文件里有价才写，没有（没同步过、这次没取到、厂商下架了
-//     这一条）一律保留现状。一次失败的价目同步不该把设备上已有的名义单价抹平。
+//  3. **价只填不洗**：目录 agents 段里有价才写，没有（数据仓库没收录它的参考价、
+//     厂商下架了这一条）一律保留现状。一次失败的数据升级不该把设备上已有的名义单价抹平。
 
 import (
 	"context"
@@ -303,9 +303,8 @@ func (s *Server) syncAgentModels(ctx context.Context, actor agentModelActor) (ag
 			fmt.Sprintf("name=%s kind=%s", m.Name, m.Kind))
 	}
 
-	// 二、建 / 补。价目按已存文件取（没有就先建未定价的行——那行仍要显示，
-	// 只是名义金额记 0；下次同步到价会补上）。
-	pricing := s.storedPricingByName(ctx)
+	// 二、建 / 补。价目按生效目录 agents 段里那条取（没有就先建未定价的行——
+	// 那行仍要显示，只是名义金额记 0；下次数据升级带来价会补上）。
 	for _, key := range order {
 		w := want[key]
 		m := byName[key]
@@ -324,7 +323,8 @@ func (s *Server) syncAgentModels(ctx context.Context, actor agentModelActor) (ag
 		// 一条来源都没挂）：账本自此记着它，将来厂商撤型号或管理员撤订阅时
 		// 回收得掉。
 		mine[key] = true
-		created, updated, err := s.ensureAgentTextModel(ctx, actor, w, m, pricing[key].Pricing)
+		entry, _ := doc.AgentModel(w.Provider, w.Name)
+		created, updated, err := s.ensureAgentTextModel(ctx, actor, w, m, entry.Pricing)
 		if err != nil {
 			return res, err
 		}
@@ -395,7 +395,7 @@ func (s *Server) ensureAgentTextModel(ctx context.Context, actor agentModelActor
 	if perr != nil {
 		// 价目文件里那条不合形态：建行照建（未定价），别让一条坏价目把模型
 		// 从界面上抹掉。同步端点那一侧会把这条报成 invalid_pricing。
-		s.log.Warn("官方价目文件里的订阅模型价不合形态，本行按未定价处理",
+		s.log.Warn("模型目录 agents 段里的订阅模型价不合形态，本行按未定价处理",
 			"model", w.Name, "err", perr.Error())
 		pricing = ""
 	}

@@ -216,6 +216,9 @@ func (s *Server) handlePutKeyAPIModels(w http.ResponseWriter, r *http.Request) {
 			fmt.Sprintf("开发工具可见的模型最多选择 %d 个", store.MaxDevToolModels))
 		return
 	}
+	if _, ok := s.keyForWrite(w, r, id); !ok {
+		return
+	}
 	current, err := s.st.GetKeyAPIModelConfig(r.Context(), id)
 	if err != nil {
 		s.writeKeyError(w, r, err)
@@ -321,12 +324,12 @@ func (s *Server) handlePutKeyAPIModels(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	nextDev, devChanged, err := s.st.ReplaceDevToolConfig(r.Context(), store.DevToolConfig{
-		KeyID:                   id,
-		AllowCodexSubscription:  currentDev.AllowCodexSubscription,
-		AllowGrokSubscription:   currentDev.AllowGrokSubscription,
-		AllowClaudeSubscription: currentDev.AllowClaudeSubscription,
-		AllowCursorSubscription: currentDev.AllowCursorSubscription,
-		CatalogModelIDs:         devIDs,
+		KeyID:           id,
+		CodexAccountID:  currentDev.CodexAccountID,
+		GrokAccountID:   currentDev.GrokAccountID,
+		ClaudeAccountID: currentDev.ClaudeAccountID,
+		CursorAccountID: currentDev.CursorAccountID,
+		CatalogModelIDs: devIDs,
 	})
 	if err != nil {
 		s.writeKeyError(w, r, err)
@@ -335,9 +338,7 @@ func (s *Server) handlePutKeyAPIModels(w http.ResponseWriter, r *http.Request) {
 	if devChanged {
 		s.audit(r.Context(), store.AuditEvent{
 			Event: EventKeyDevToolsUpdate, Entity: entityKey(id), RemoteIP: remoteIP(r),
-			Detail: fmt.Sprintf("codex=%t grok=%t claude=%t cursor=%t model_ids=%v revision=%d",
-				nextDev.AllowCodexSubscription, nextDev.AllowGrokSubscription, nextDev.AllowClaudeSubscription,
-				nextDev.AllowCursorSubscription, nextDev.CatalogModelIDs, nextDev.Revision),
+			Detail: devToolsAuditDetail(nextDev),
 		})
 	}
 	resp, err := s.apiModelsResponse(r, id)

@@ -12,6 +12,12 @@ package admin
 //	DELETE /admin/v1/agent-accounts/{id}            删除
 //	POST   /admin/v1/agent-accounts/{id}/refresh    自检（强制换一代令牌）
 //
+// 同一种订阅可以录入多个账号。四条连接写入路（callback / import / claude
+// setup-token 与 login/callback / cursor api-key）都收可选的 account_id：缺省或
+// 0 新建一个账号行，非零则把凭据覆盖进那一行（重新登录 / 重新连接），行必须
+// 存在且是同一种订阅。哪把 Key 用哪个账号在 API密钥页的「可用订阅」里钉死
+// （devtools.go）。
+//
 // 全部 admin-only——不在 isSelfServicePath 名单里就是管理端点（withSession
 // 默认拒绝），本文件因此一个角色判断都不写。
 //
@@ -97,10 +103,10 @@ const agentLabelMaxRunes = 128
 // 接口定义在本包而不是 import 数据面：与 [UsageReader] 同一条
 // 装配纪律——管理面 handler 先于 gateway 构造，倒过来持有会成环。
 type AgentTokens interface {
-	// RefreshAgent 强制给该 provider 的订阅句柄换一代令牌，走的是数据面
+	// RefreshAgent 强制给该账号行的订阅句柄换一代令牌，走的是数据面
 	// 那**同一个** Provider（单刷新者不变量）。刷新成功后的落库与失效标记
 	// 由数据面的回调完成，本包只看返回的错误分类。
-	RefreshAgent(ctx context.Context, provider string) error
+	RefreshAgent(ctx context.Context, id int64) error
 }
 
 // agentLoginState 是「模型接入」页订阅接入标签页的进程内状态。零值可用。
@@ -350,7 +356,7 @@ type agentAccountResponse struct {
 	Account agentAccountJSON `json:"account"`
 }
 
-// handleListAgentAccounts 列出全部订阅账号（当前最多一行——单账户语义）。
+// handleListAgentAccounts 列出全部订阅账号（同一种订阅可有多行，按 provider、id 排）。
 func (s *Server) handleListAgentAccounts(w http.ResponseWriter, r *http.Request) {
 	accts, err := s.st.ListAgentAccounts(r.Context())
 	if err != nil {
@@ -467,6 +473,7 @@ func (s *Server) handleAgentLoginCallback(w http.ResponseWriter, r *http.Request
 		CallbackURL  string `json:"callback_url"`
 		Label        string `json:"label"`
 		DefaultModel string `json:"default_model"`
+		AccountID    int64  `json:"account_id"`
 	}
 	if !decodeJSON(w, r, &req) {
 		return
@@ -479,8 +486,11 @@ func (s *Server) handleAgentLoginCallback(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
+	if !s.checkAgentTarget(w, r, provider, req.AccountID) {
+		return
+	}
 	if provider == store.AgentProviderGrok {
-		s.finishGrokLogin(w, r, label, model)
+		s.finishGrokLogin(w, r, label, model, req.AccountID)
 		return
 	}
 	login := s.agents.currentLogin()
@@ -506,11 +516,11 @@ func (s *Server) handleAgentLoginCallback(w http.ResponseWriter, r *http.Request
 		s.internalError(w, r, err)
 		return
 	}
-	s.connectAgentAccount(w, r, store.AgentProviderCodex, auth.AccountID(), blob, label, model, "login")
+	s.connectAgentAccount(w, r, req.AccountID, store.AgentProviderCodex, auth.AccountID(), blob, label, model, "login")
 }
 
 // finishGrokLogin 是 grok 设备码流的收尾半步：一次令牌端点问询 + 三类答复。
-func (s *Server) finishGrokLogin(w http.ResponseWriter, r *http.Request, label, model string) {
+func (s *Server) finishGrokLogin(w http.ResponseWriter, r *http.Request, label, model string, rowID int64) {
 	login := s.agents.currentGrokLogin()
 	if login == nil {
 		writeError(w, http.StatusConflict, "agent_login_not_started",
@@ -553,7 +563,7 @@ func (s *Server) finishGrokLogin(w http.ResponseWriter, r *http.Request, label, 
 		s.internalError(w, r, err)
 		return
 	}
-	s.connectAgentAccount(w, r, store.AgentProviderGrok, auth.Account(), blob, label, model, "login")
+	s.connectAgentAccount(w, r, rowID, store.AgentProviderGrok, auth.Account(), blob, label, model, "login")
 }
 
 // handleImportAgentAccount 是「粘贴 auth.json」兜底入口（决策 4 备选②）：
@@ -568,6 +578,7 @@ func (s *Server) handleImportAgentAccount(w http.ResponseWriter, r *http.Request
 		AuthJSON     string `json:"auth_json"`
 		Label        string `json:"label"`
 		DefaultModel string `json:"default_model"`
+		AccountID    int64  `json:"account_id"`
 	}
 	if !decodeJSON(w, r, &req) {
 		return
@@ -578,6 +589,9 @@ func (s *Server) handleImportAgentAccount(w http.ResponseWriter, r *http.Request
 	}
 	label, model, ok := s.readAgentProfile(w, req.Label, req.DefaultModel)
 	if !ok {
+		return
+	}
+	if !s.checkAgentTarget(w, r, provider, req.AccountID) {
 		return
 	}
 	// 形态错误只说缺什么、该怎么办，不回显原文（§15.1，两个解析器同一纪律）。
@@ -605,7 +619,7 @@ func (s *Server) handleImportAgentAccount(w http.ResponseWriter, r *http.Request
 		}
 		accountID = auth.AccountID()
 	}
-	s.connectAgentAccount(w, r, provider, accountID, blob, label, model, "import")
+	s.connectAgentAccount(w, r, req.AccountID, provider, accountID, blob, label, model, "import")
 }
 
 // handleConnectClaudeSetupToken accepts the official CLI's static credential.
@@ -615,12 +629,16 @@ func (s *Server) handleConnectClaudeSetupToken(w http.ResponseWriter, r *http.Re
 		SetupToken   string `json:"setup_token"`
 		Label        string `json:"label"`
 		DefaultModel string `json:"default_model"`
+		AccountID    int64  `json:"account_id"`
 	}
 	if !decodeJSON(w, r, &req) {
 		return
 	}
 	label, model, ok := s.readAgentProfile(w, req.Label, req.DefaultModel)
 	if !ok {
+		return
+	}
+	if !s.checkAgentTarget(w, r, store.AgentProviderClaude, req.AccountID) {
 		return
 	}
 	cred, err := claudeauth.FromSetupToken(req.SetupToken)
@@ -633,7 +651,7 @@ func (s *Server) handleConnectClaudeSetupToken(w http.ResponseWriter, r *http.Re
 		s.internalError(w, r, err)
 		return
 	}
-	s.connectAgentAccount(w, r, store.AgentProviderClaude, "", blob, label, model, "setup_token")
+	s.connectAgentAccount(w, r, req.AccountID, store.AgentProviderClaude, "", blob, label, model, "setup_token")
 }
 
 // handleConnectCursorAPIKey 是 Cursor 订阅唯一的连接写入路：管理员把
@@ -646,6 +664,7 @@ func (s *Server) handleConnectCursorAPIKey(w http.ResponseWriter, r *http.Reques
 		APIKey       string `json:"api_key"`
 		Label        string `json:"label"`
 		DefaultModel string `json:"default_model"`
+		AccountID    int64  `json:"account_id"`
 	}
 	if !decodeJSON(w, r, &req) {
 		return
@@ -659,6 +678,9 @@ func (s *Server) handleConnectCursorAPIKey(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
+	if !s.checkAgentTarget(w, r, store.AgentProviderCursor, req.AccountID) {
+		return
+	}
 	// 形态错误只说缺什么，不回显原文（§15.1，cursorauth 的错误恒不含明文）。
 	cred, err := cursorauth.FromAPIKey(req.APIKey)
 	if err != nil {
@@ -670,27 +692,52 @@ func (s *Server) handleConnectCursorAPIKey(w http.ResponseWriter, r *http.Reques
 		s.internalError(w, r, err)
 		return
 	}
-	s.connectAgentAccount(w, r, store.AgentProviderCursor, "", blob, label, "", "api_key")
+	s.connectAgentAccount(w, r, req.AccountID, store.AgentProviderCursor, "", blob, label, "", "api_key")
+}
+
+// checkAgentTarget 校验连接写入路的可选 account_id：0 = 新建；非零必须是已有的、
+// 同一种订阅的账号行（不存在 404，种类不符 400 agent_account_invalid）。校验先于
+// 出网换码，管理员不会在授权完成后才发现目标填错。
+func (s *Server) checkAgentTarget(w http.ResponseWriter, r *http.Request, provider string, rowID int64) bool {
+	if rowID == 0 {
+		return true
+	}
+	if rowID < 0 {
+		writeError(w, http.StatusBadRequest, "agent_account_invalid", "account_id 须为已有订阅账号的 id")
+		return false
+	}
+	current, err := s.st.GetAgentAccount(r.Context(), rowID)
+	if err != nil {
+		s.writeAgentError(w, r, err)
+		return false
+	}
+	if current.Provider != provider {
+		writeError(w, http.StatusBadRequest, "agent_account_invalid",
+			"account_id 指向的不是 "+agentProviderLabel(provider)+" 订阅账号")
+		return false
+	}
+	return true
 }
 
 // connectAgentAccount 是两条连接路径（登录 / 粘贴导入）的共同收尾：密封落库、
-// 记审计、回管理视图。
+// 记审计、回管理视图。rowID 非零表示覆盖既有账号行（已由 checkAgentTarget 校验）。
 //
 // authBlob 是 [codexauth.Auth.JSON] / [grokauth.Auth.JSON] 的输出而不是管理员
 // 粘来的原文：它保真带回了原文里所有不认识的键，同时保证落进去的东西一定
 // 解析得回来。
-func (s *Server) connectAgentAccount(w http.ResponseWriter, r *http.Request,
+func (s *Server) connectAgentAccount(w http.ResponseWriter, r *http.Request, rowID int64,
 	provider, accountID, authBlob, label, defaultModel, source string) {
 	if provider == store.AgentProviderClaude {
 		s.claudeLogin.mu.Lock()
 		defer s.claudeLogin.mu.Unlock()
 	}
-	s.saveAgentAccount(w, r, provider, accountID, authBlob, label, defaultModel, source)
+	s.saveAgentAccount(w, r, rowID, provider, accountID, authBlob, label, defaultModel, source)
 }
 
-func (s *Server) saveAgentAccount(w http.ResponseWriter, r *http.Request,
+func (s *Server) saveAgentAccount(w http.ResponseWriter, r *http.Request, rowID int64,
 	provider, accountID, authBlob, label, defaultModel, source string) {
 	in := store.NewAgentAccount{
+		ID:           rowID,
 		Provider:     provider,
 		Label:        label,
 		AccountID:    accountID,
@@ -705,6 +752,11 @@ func (s *Server) saveAgentAccount(w http.ResponseWriter, r *http.Request,
 		acct, err = s.st.UpsertAgentAccount(r.Context(), in)
 	}
 	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			// 校验与落库之间账号被删了：按不存在答，管理员重来一次即可。
+			writeError(w, http.StatusNotFound, "not_found", "Agents 账号不存在")
+			return
+		}
 		s.internalError(w, r, err)
 		return
 	}
@@ -896,7 +948,7 @@ func (s *Server) handleRefreshAgentAccount(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if current.Provider == store.AgentProviderClaude {
-		_, blob, readErr := s.st.GetAgentCredential(r.Context(), current.Provider)
+		_, blob, readErr := s.st.GetAgentCredential(r.Context(), current.ID)
 		if readErr != nil {
 			s.writeAgentError(w, r, readErr)
 			return
@@ -924,7 +976,7 @@ func (s *Server) handleRefreshAgentAccount(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	err = tokens.RefreshAgent(r.Context(), current.Provider)
+	err = tokens.RefreshAgent(r.Context(), current.ID)
 	s.audit(r.Context(), store.AuditEvent{
 		Event:    EventAgentRefresh,
 		Entity:   entityAgent(id),

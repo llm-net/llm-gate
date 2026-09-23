@@ -110,14 +110,14 @@ func issuerRejects() http.HandlerFunc {
 
 type fakeAgentTokens struct {
 	mu    sync.Mutex
-	calls []string
+	calls []int64 // 每次委托刷新时传来的账号行 id
 	err   error
 }
 
-func (f *fakeAgentTokens) RefreshAgent(_ context.Context, provider string) error {
+func (f *fakeAgentTokens) RefreshAgent(_ context.Context, id int64) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.calls = append(f.calls, provider)
+	f.calls = append(f.calls, id)
 	return f.err
 }
 
@@ -214,10 +214,16 @@ func (a *agentEnv) list() []agentDTO {
 	return out.Accounts
 }
 
-// importAuth 走「粘贴 auth.json」兜底入口。
+// importAuth 走「粘贴 auth.json」兜底入口（新建一个账号行）。
 func (a *agentEnv) importAuth(blob, label, model string) *http.Response {
 	a.t.Helper()
-	body := fmt.Sprintf(`{"auth_json":%q,"label":%q,"default_model":%q}`, blob, label, model)
+	return a.importAuthTo(blob, label, model, 0)
+}
+
+// importAuthTo 同上，accountID 非零时把凭据覆盖进既有账号行（重新连接）。
+func (a *agentEnv) importAuthTo(blob, label, model string, accountID int64) *http.Response {
+	a.t.Helper()
+	body := fmt.Sprintf(`{"auth_json":%q,"label":%q,"default_model":%q,"account_id":%d}`, blob, label, model, accountID)
 	return a.do("POST", "/admin/v1/agent-accounts/import", a.cookie, body)
 }
 
@@ -324,7 +330,7 @@ func TestAgentLoginFlow(t *testing.T) {
 	}
 
 	// 落库的是**能解回来的**句柄：取令牌视图解封后拿到的就是刚才那一代。
-	acct, authJSON, err := e.st.GetAgentCredential(context.Background(), store.AgentProviderCodex)
+	acct, authJSON, err := e.st.GetAgentCredential(context.Background(), out.Account.ID)
 	if err != nil {
 		t.Fatalf("GetAgentCredential: %v", err)
 	}
@@ -452,23 +458,42 @@ func TestAgentImport(t *testing.T) {
 		}
 	}
 
-	// 单账户语义：再导入一次是覆盖而不是增行，且**不带 label 时保持原名**。
-	resp = e.importAuth(agentAuthJSON("access-2", "refresh-2", agentAcctID), "", "")
+	// 带 account_id 再导入是覆盖那一行而不是增行，且**不带 label 时保持原名**。
+	resp = e.importAuthTo(agentAuthJSON("access-2", "refresh-2", agentAcctID), "", "", out.Account.ID)
 	wantStatus(t, resp, http.StatusOK)
 	accounts := e.list()
 	if len(accounts) != 1 {
-		t.Fatalf("重复连接后 = %d 行，期望 1（同 provider 覆盖）", len(accounts))
+		t.Fatalf("重新连接后 = %d 行，期望 1（按 id 覆盖）", len(accounts))
 	}
 	if accounts[0].Label != "我的 Codex" || accounts[0].DefaultModel != "gpt-5-codex" {
 		t.Fatalf("重连抹掉了管理员的配置：label=%q default_model=%q",
 			accounts[0].Label, accounts[0].DefaultModel)
 	}
-	_, authJSON, err := e.st.GetAgentCredential(context.Background(), store.AgentProviderCodex)
+	_, authJSON, err := e.st.GetAgentCredential(context.Background(), out.Account.ID)
 	if err != nil {
 		t.Fatalf("GetAgentCredential: %v", err)
 	}
 	if !strings.Contains(authJSON, "refresh-2") {
-		t.Fatal("重复连接没有换掉凭据")
+		t.Fatal("重新连接没有换掉凭据")
+	}
+
+	// 不带 account_id 再导入是第二个 Codex 账号：两行并存，各持各的凭据。
+	resp = e.importAuth(agentAuthJSON("access-3", "refresh-3", "acct-second"), "第二个 Codex", "")
+	wantStatus(t, resp, http.StatusOK)
+	decodeInto(t, resp, &out)
+	accounts = e.list()
+	if len(accounts) != 2 || out.Account.ID == accounts[0].ID || out.Account.Label != "第二个 Codex" {
+		t.Fatalf("多账号导入不符：%+v", accounts)
+	}
+	if _, authJSON, err := e.st.GetAgentCredential(context.Background(), accounts[0].ID); err != nil || !strings.Contains(authJSON, "refresh-2") {
+		t.Fatalf("第二个账号动到了第一个账号的凭据 (err=%v)", err)
+	}
+
+	// account_id 指向不存在的行 404、指向别家订阅的行 400，两者都不写盘。
+	resp = e.importAuthTo(agentAuthJSON("access-4", "refresh-4", agentAcctID), "", "", 9999)
+	wantStatus(t, resp, http.StatusNotFound)
+	if len(e.list()) != 2 {
+		t.Fatal("指向不存在账号的导入不该建行")
 	}
 }
 
@@ -571,7 +596,7 @@ func TestAgentDelete(t *testing.T) {
 	if got := e.list(); len(got) != 0 {
 		t.Fatalf("删除后仍有 %d 行", len(got))
 	}
-	if _, _, err := e.st.GetAgentCredential(context.Background(), store.AgentProviderCodex); !errors.Is(err, store.ErrNotFound) {
+	if _, _, err := e.st.GetAgentCredential(context.Background(), id); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("删除后 GetAgentCredential err = %v，期望 ErrNotFound", err)
 	}
 	resp = e.do("DELETE", fmt.Sprintf("/admin/v1/agent-accounts/%d", id), e.cookie, "")

@@ -2,7 +2,7 @@
 //
 // 三张卡：
 //   1. Mihomo 内核组件先决条件卡（features/components/prereq-card.tsx）——只展示装没装、哪版、
-//      有没有更新；安装 / 升级 / 回退 / 卸载去「第三方组件」页。
+//      有没有更新；安装 / 升级 / 回退 / 卸载去「组件管理」页。
 //   2. Clash 订阅——填机场给的 https 订阅地址（只活在输入框内存，任何响应都不回显）；固件只取
 //      其中的节点列表，剔除不支持的协议；显示节点数、用量与到期。
 //   3. 内核——选节点（自动选择 / 指定）、启用 / 停用、运行状态；启用后出站代理自动指向
@@ -232,7 +232,7 @@ function CoreCard({ status, busy, run }: { status: api.ProxyCoreStatus; busy: st
   const badge = coreBadge(status.core, status.enabled);
   const canEnable = status.component.installed && status.subscription.node_count > 0 && status.component.engine_available;
   const blocker = !status.component.installed
-    ? t("先到「第三方组件」页安装 Mihomo 内核")
+    ? t("先到「组件管理」页安装 Mihomo 内核")
     : status.subscription.node_count === 0
       ? t("先设置订阅并取得节点")
       : !status.component.engine_available

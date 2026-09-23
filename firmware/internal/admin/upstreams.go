@@ -38,10 +38,13 @@ package admin
 // 写得出 base_url 的人本来就握着明文 Key。
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -148,15 +151,16 @@ func validateAPIKey(key string) error {
 // 或密文（§15.1）。APIKeyLast4 为空有三种含义——无凭证的 mock、凭证过短、
 // 或设备密钥与密文不匹配（需在本页重新录入 Key）。
 type upstreamJSON struct {
-	ID            int64  `json:"id"`
-	Name          string `json:"name"`
-	Type          string `json:"type"`
-	CatalogID     string `json:"catalog_id"`
-	PlatformLabel string `json:"platform_label"`
-	BillingMode   string `json:"billing_mode"`
-	APIKeyLast4   string `json:"api_key_last4"`
-	BaseURL       string `json:"base_url"`
-	Disabled      bool   `json:"disabled"`
+	ID            int64             `json:"id"`
+	Name          string            `json:"name"`
+	Type          string            `json:"type"`
+	CatalogID     string            `json:"catalog_id"`
+	PlatformLabel string            `json:"platform_label"`
+	BillingMode   string            `json:"billing_mode"`
+	APIKeyLast4   string            `json:"api_key_last4"`
+	BaseURL       string            `json:"base_url"`
+	ProtocolURLs  map[string]string `json:"protocol_urls,omitempty"`
+	Disabled      bool              `json:"disabled"`
 	// EgressMode 是该账号的出站方式覆盖（inherit|direct|proxy，internal/egress）。
 	EgressMode string `json:"egress_mode"`
 	// BalanceSupported 表示该类型支持平台余额查询（特化平台能力，服务端
@@ -177,6 +181,7 @@ func toUpstreamJSON(u *store.Upstream, doc platformcatalog.Doc) upstreamJSON {
 		BillingMode:      u.BillingMode,
 		APIKeyLast4:      u.APIKeyLast4,
 		BaseURL:          u.BaseURL,
+		ProtocolURLs:     decodeProtocolURLs(u.ProtocolURLs),
 		Disabled:         u.Disabled,
 		EgressMode:       egressModeOf(u.EgressMode),
 		BalanceSupported: upstream.SupportsBalance(u.Type),
@@ -186,6 +191,12 @@ func toUpstreamJSON(u *store.Upstream, doc platformcatalog.Doc) upstreamJSON {
 }
 
 func catalogPlatformLabel(doc platformcatalog.Doc, catalogID, adapter string) string {
+	if adapter == config.UpstreamGeneric {
+		return "通用适配"
+	}
+	if adapter == config.UpstreamSystemOne {
+		return "System One"
+	}
 	if p, ok := doc.PlatformByID(catalogID, adapter); ok && p.Vendor != "" {
 		return p.Vendor
 	}
@@ -203,9 +214,9 @@ type platformProfileJSON struct {
 	CustomBaseURL bool     `json:"custom_base_url"`
 	BillingMode   string   `json:"billing_mode"`
 	SuggestedName string   `json:"suggested_name"`
-	Entries       string   `json:"entries"`
+	Entries       string   `json:"entries" i18n:"text"`
 	Protocols     []string `json:"protocols"`
-	Ability       string   `json:"ability"`
+	Ability       string   `json:"ability" i18n:"text"`
 }
 
 func (s *Server) handleListUpstreamPlatforms(w http.ResponseWriter, r *http.Request) {
@@ -214,13 +225,16 @@ func (s *Server) handleListUpstreamPlatforms(w http.ResponseWriter, r *http.Requ
 		Platforms []platformProfileJSON `json:"platforms"`
 	}{Platforms: make([]platformProfileJSON, 0, len(doc.Platforms))}
 	for _, p := range doc.Platforms {
+		if p.ID == config.UpstreamOpenAICompat || p.ID == config.UpstreamAnthropicCompat {
+			continue
+		}
 		baseURL := p.BaseURL
 		if p.CustomBaseURL && baseURL == "" {
 			// 自填地址平台要求创建时录入地址；这里只算协议能力，不发请求。
 			baseURL = "https://api.example.com"
 		}
 		protocols := []string{}
-		for _, kind := range []string{store.ModelKindText, store.ModelKindVideo, store.ModelKindImage} {
+		for _, kind := range []string{store.ModelKindText, store.ModelKindVideo, store.ModelKindImage, store.ModelKindSystemOne} {
 			protocols = append(protocols, servableProtocols(kind, p.Type, baseURL)...)
 		}
 		out.Platforms = append(out.Platforms, platformProfileJSON{
@@ -229,6 +243,13 @@ func (s *Server) handleListUpstreamPlatforms(w http.ResponseWriter, r *http.Requ
 			SuggestedName: p.SuggestedName, Entries: p.Entries, Protocols: protocols, Ability: p.Ability,
 		})
 	}
+	// 自填地址协议适配器属于固件能力；不向公开模型目录写入客户服务或模型名。
+	out.Platforms = append(out.Platforms, platformProfileJSON{
+		ID: config.UpstreamGeneric, Type: config.UpstreamGeneric, Vendor: "通用适配",
+		CustomBaseURL: true, BillingMode: platformcatalog.BillingNone, SuggestedName: "generic",
+		Entries: "自选协议面", Protocols: []string{config.ProtocolOpenAIChat, config.ProtocolOpenAIResponses, config.ProtocolAnthropicMessages, config.ProtocolSystemOne},
+		Ability: "勾选协议面，分别填写服务地址并测试。",
+	})
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -258,11 +279,12 @@ func (s *Server) handleListUpstreams(w http.ResponseWriter, r *http.Request) {
 // mock 须 base_url，非 mock 须 api_key 且不得带 base_url。
 func (s *Server) handleCreateUpstream(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Name      string `json:"name"`
-		Type      string `json:"type"`
-		CatalogID string `json:"catalog_id"`
-		APIKey    string `json:"api_key"`
-		BaseURL   string `json:"base_url"`
+		Name         string            `json:"name"`
+		Type         string            `json:"type"`
+		CatalogID    string            `json:"catalog_id"`
+		APIKey       string            `json:"api_key"`
+		BaseURL      string            `json:"base_url"`
+		ProtocolURLs map[string]string `json:"protocol_urls"`
 	}
 	if !decodeJSON(w, r, &req) {
 		return
@@ -287,7 +309,29 @@ func (s *Server) handleCreateUpstream(w http.ResponseWriter, r *http.Request) {
 		req.BaseURL = profile.BaseURL
 		billingMode = profile.BillingMode
 	}
+	urls := ""
+	if req.Type == config.UpstreamGeneric {
+		var err error
+		urls, err = validateProtocolURLs(req.ProtocolURLs)
+		if err != nil {
+			writeError(w, 400, "invalid_protocol_urls", err.Error())
+			return
+		}
+	} else if req.ProtocolURLs != nil {
+		writeError(w, 400, "invalid_protocol_urls", "只有通用适配可以配置协议面地址")
+		return
+	}
 	switch req.Type {
+	case config.UpstreamGeneric:
+		if req.BaseURL != "" {
+			writeError(w, 400, "invalid_base_url", "通用适配请分别填写协议面地址")
+			return
+		}
+		if req.APIKey == "" {
+			writeError(w, 400, "api_key_required", "请填写上游 API Key")
+			return
+		}
+
 	case config.UpstreamDeepseek, config.UpstreamArk, config.UpstreamArkPlan, config.UpstreamQwenPlan, config.UpstreamOpenCodeGo:
 		if req.APIKey == "" {
 			writeError(w, http.StatusBadRequest, "api_key_required",
@@ -309,7 +353,7 @@ func (s *Server) handleCreateUpstream(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "invalid_base_url", minimaxSiteMsg)
 			return
 		}
-	case config.UpstreamOpenAICompat, config.UpstreamAnthropicCompat:
+	case config.UpstreamOpenAICompat, config.UpstreamAnthropicCompat, config.UpstreamSystemOne:
 		// 通用适配两样都要：地址不内置，Key 与地址一起录入（改址规则见
 		// 文件头注释——发往任何主机的 Key 都是管理员亲手为它输入的）。
 		if req.APIKey == "" {
@@ -319,7 +363,7 @@ func (s *Server) handleCreateUpstream(w http.ResponseWriter, r *http.Request) {
 		}
 		if req.BaseURL == "" {
 			writeError(w, http.StatusBadRequest, "base_url_required",
-				fmt.Sprintf("type %s 必须提供 base_url（兼容服务的端点根，通常以 /v1 结尾）", req.Type))
+				fmt.Sprintf("type %s 必须提供 base_url（服务端点根；System One 填服务根地址，不附加 /v1）", req.Type))
 			return
 		}
 	case config.UpstreamMock:
@@ -330,9 +374,9 @@ func (s *Server) handleCreateUpstream(w http.ResponseWriter, r *http.Request) {
 		}
 	default:
 		writeError(w, http.StatusBadRequest, "invalid_type",
-			fmt.Sprintf("未知上游类型 %q（可选 %s|%s|%s|%s|%s|%s|%s|%s|%s）", req.Type,
+			fmt.Sprintf("未知上游类型 %q（可选 %s|%s|%s|%s|%s|%s|%s|%s|%s|%s）", req.Type,
 				config.UpstreamDeepseek, config.UpstreamArk, config.UpstreamArkPlan,
-				config.UpstreamQwenPlan, config.UpstreamOpenCodeGo, config.UpstreamMinimax, config.UpstreamOpenAICompat, config.UpstreamAnthropicCompat,
+				config.UpstreamQwenPlan, config.UpstreamOpenCodeGo, config.UpstreamMinimax, config.UpstreamOpenAICompat, config.UpstreamAnthropicCompat, config.UpstreamSystemOne,
 				config.UpstreamMock))
 		return
 	}
@@ -349,7 +393,9 @@ func (s *Server) handleCreateUpstream(w http.ResponseWriter, r *http.Request) {
 
 	var u *store.Upstream
 	var err error
-	if req.CatalogID != "" && req.CatalogID != req.Type {
+	if req.Type == config.UpstreamGeneric {
+		u, err = s.st.CreateCatalogUpstream(r.Context(), req.Name, req.Type, req.Type, platformcatalog.BillingNone, req.APIKey, "", urls)
+	} else if req.CatalogID != "" && req.CatalogID != req.Type {
 		u, err = s.st.CreateCatalogUpstream(r.Context(), req.Name, req.Type, req.CatalogID, billingMode, req.APIKey, req.BaseURL)
 	} else {
 		u, err = s.st.CreateUpstream(r.Context(), req.Name, req.Type, req.APIKey, req.BaseURL)
@@ -385,12 +431,13 @@ func (s *Server) handlePatchUpstream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Name       *string `json:"name"`
-		Type       string  `json:"type"` // 仅允许回传现值（见 type_immutable）
-		APIKey     *string `json:"api_key"`
-		BaseURL    *string `json:"base_url"`
-		Disabled   *bool   `json:"disabled"`
-		EgressMode *string `json:"egress_mode"`
+		Name         *string           `json:"name"`
+		Type         string            `json:"type"` // 仅允许回传现值（见 type_immutable）
+		APIKey       *string           `json:"api_key"`
+		BaseURL      *string           `json:"base_url"`
+		ProtocolURLs map[string]string `json:"protocol_urls"`
+		Disabled     *bool             `json:"disabled"`
+		EgressMode   *string           `json:"egress_mode"`
 	}
 	if !decodeJSON(w, r, &req) {
 		return
@@ -437,7 +484,7 @@ func (s *Server) handlePatchUpstream(w http.ResponseWriter, r *http.Request) {
 		// openai_compat 收任意合法地址，但改址须同请求重录 Key（见下）。
 		if *req.BaseURL != "" {
 			switch current.Type {
-			case config.UpstreamMock, config.UpstreamOpenAICompat, config.UpstreamAnthropicCompat:
+			case config.UpstreamMock, config.UpstreamOpenAICompat, config.UpstreamAnthropicCompat, config.UpstreamSystemOne:
 			case config.UpstreamMinimax:
 				if !minimaxSiteAllowed(*req.BaseURL) {
 					writeError(w, http.StatusBadRequest, "invalid_base_url", minimaxSiteMsg)
@@ -455,7 +502,7 @@ func (s *Server) handlePatchUpstream(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "base_url_required",
 			"type mock 必须提供 base_url（指向本地 mock 上游），否则两个入口都无法服务")
 		return
-	case (current.Type == config.UpstreamOpenAICompat || current.Type == config.UpstreamAnthropicCompat) && baseURL == "":
+	case (current.Type == config.UpstreamOpenAICompat || current.Type == config.UpstreamAnthropicCompat || current.Type == config.UpstreamSystemOne) && baseURL == "":
 		writeError(w, http.StatusBadRequest, "base_url_required",
 			"兼容适配器必须提供 base_url（服务的端点根），否则入口无法服务")
 		return
@@ -467,11 +514,25 @@ func (s *Server) handlePatchUpstream(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	urls := current.ProtocolURLs
+	urlsChanged := false
+	if req.ProtocolURLs != nil {
+		if current.Type != config.UpstreamGeneric {
+			writeError(w, 400, "invalid_protocol_urls", "只有通用适配可以配置协议面地址")
+			return
+		}
+		urls, err = validateProtocolURLs(req.ProtocolURLs)
+		if err != nil {
+			writeError(w, 400, "invalid_protocol_urls", err.Error())
+			return
+		}
+		urlsChanged = !maps.Equal(decodeProtocolURLs(current.ProtocolURLs), decodeProtocolURLs(urls))
+	}
 	// openai_compat 改址必须同请求重录 Key，且两者原子落库：数据面发往新主机
 	// 的永远是管理员刚输入的 Key，封存的旧 Key 绝不会被一次改址带去新地址
 	// （文件头注释的安全论证；拆成两步写会留下「旧 Key 配新地址」的中间态）。
-	compatType := current.Type == config.UpstreamOpenAICompat || current.Type == config.UpstreamAnthropicCompat
-	repointing := compatType && baseURL != current.BaseURL
+	compatType := current.Type == config.UpstreamOpenAICompat || current.Type == config.UpstreamAnthropicCompat || current.Type == config.UpstreamSystemOne
+	repointing := (compatType && baseURL != current.BaseURL) || urlsChanged
 	if repointing && current.CatalogID != "" && current.CatalogID != current.Type {
 		writeError(w, http.StatusBadRequest, "catalog_endpoint_immutable",
 			"目录平台的端点是录入 Key 时确认的快照；换地址请删除账号后按新平台重建")
@@ -479,13 +540,19 @@ func (s *Server) handlePatchUpstream(w http.ResponseWriter, r *http.Request) {
 	}
 	if repointing && !keyProvided {
 		writeError(w, http.StatusBadRequest, "base_url_requires_key",
-			"修改兼容上游的 base_url 时必须同时重新输入 api_key：封存的旧 Key 不能被发往新地址")
+			"修改服务地址或协议面配置时必须重新输入上游 Key：封存的旧 Key 不能被发往新地址")
 		return
 	}
 
-	if name != current.Name || baseURL != current.BaseURL {
+	if name != current.Name || baseURL != current.BaseURL || urlsChanged {
 		var err error
-		if repointing {
+		if current.Type == config.UpstreamGeneric {
+			key := ""
+			if keyProvided {
+				key = *req.APIKey
+			}
+			err = s.st.UpdateGenericUpstream(r.Context(), id, name, urls, key)
+		} else if repointing {
 			err = s.st.UpdateUpstreamAddressAndKey(r.Context(), id, name, baseURL, *req.APIKey)
 		} else {
 			err = s.st.UpdateUpstream(r.Context(), id, name, baseURL)
@@ -616,4 +683,37 @@ func (s *Server) writeCatalogError(w http.ResponseWriter, r *http.Request, err e
 		return
 	}
 	s.internalError(w, r, err)
+}
+
+func decodeProtocolURLs(raw string) map[string]string {
+	var urls map[string]string
+	_ = json.Unmarshal([]byte(raw), &urls)
+	return urls
+}
+
+func validateProtocolURLs(urls map[string]string) (string, error) {
+	if len(urls) == 0 {
+		return "", errors.New("请至少选择一个协议面并填写地址")
+	}
+	normalized := make(map[string]string, len(urls))
+	for protocol, raw := range urls {
+		switch protocol {
+		case config.ProtocolOpenAIChat, config.ProtocolOpenAIResponses, config.ProtocolAnthropicMessages, config.ProtocolSystemOne:
+		default:
+			return "", errors.New("未知协议面")
+		}
+		raw = strings.TrimRight(strings.TrimSpace(raw), "/")
+		if raw == "" {
+			return "", errors.New("每个勾选的协议面都必须填写地址")
+		}
+		if err := validateBaseURL(raw); err != nil {
+			return "", errors.New("协议面地址必须是无凭据的 http(s) URL")
+		}
+		if strings.ContainsAny(raw, "?#") {
+			return "", errors.New("协议面地址不能含查询参数或片段")
+		}
+		normalized[protocol] = raw
+	}
+	b, err := json.Marshal(normalized)
+	return string(b), err
 }

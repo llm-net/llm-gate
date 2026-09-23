@@ -1,4 +1,4 @@
-// 设备更新页：把设备上的东西**换新**——官网数据升级（官方目录价、平台模型信息）
+// 设备更新页：把设备上的东西**换新**——官网数据升级（模型目录：平台、模型与估算目录价）
 // 与固件升级/回退。设备怎么被连上（网卡 IPv4、内网域名）在「网络/域名/代理」页。
 //
 // 两件事都以官网为可选只读来源：官网不可达时，数据沿用固件内嵌基线、固件仍可手动
@@ -39,8 +39,7 @@ function CatalogPanel({ s, reload }: { s: api.DataStatus; reload: () => void }) 
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<api.CatalogSyncResult | null>(null);
 
-  const official = s.official_pricing;
-  const platform = s.platform_models;
+  const catalog = s.model_catalog;
 
   return (
     <Card className="gap-3 p-5">
@@ -71,22 +70,11 @@ function CatalogPanel({ s, reload }: { s: api.DataStatus; reload: () => void }) 
         </Button>
       </div>
       <dl className="grid grid-cols-[7rem_1fr] gap-y-1 text-xs">
-        <dt className="text-muted-foreground">{t("官方目录价")}</dt>
+        <dt className="text-muted-foreground">{t("模型目录")}</dt>
         <dd>
-          {official.supported
-            ? `${official.synced_at === undefined ? t("固件内嵌") : t("官网")} v${official.version ?? 0}` +
-              (official.entries === undefined ? "" : ` · ${t("{n} 条", { n: official.entries })}`) +
-              (official.synced_at === undefined
-                ? ""
-                : ` · ${t("同步于 {time}", { time: fmtTime(official.synced_at) })}`)
-            : t("不可用")}
-        </dd>
-        <dt className="text-muted-foreground">{t("平台模型信息")}</dt>
-        <dd>
-          {platform.supported
-            ? `${platform.origin === "synced" ? t("官网") : t("固件内嵌")} v${platform.version} · ` +
-              t("{p} 个平台 / {m} 个型号", { p: platform.platforms, m: platform.models })
-            : t("不可用")}
+          {`${catalog.origin === "synced" ? t("官网") : t("固件内嵌")} ${catalog.data_tag ?? `v${catalog.version}`} · ` +
+            t("{p} 个平台 / {m} 个型号（{n} 个带价）", { p: catalog.platforms, m: catalog.models, n: catalog.priced }) +
+            (catalog.synced_at === undefined ? "" : ` · ${t("同步于 {time}", { time: fmtTime(catalog.synced_at) })}`)}
         </dd>
       </dl>
       <p className="text-muted-foreground text-xs">
@@ -106,30 +94,28 @@ function CatalogPanel({ s, reload }: { s: api.DataStatus; reload: () => void }) 
             </DialogHeader>
             <p className="text-sm">
               {result.skipped.length === 0
-                ? t("目录价写入 {applied} 条；平台模型信息 v{version}（{p} 个平台 / {m} 个型号）。", {
+                ? t("目录价写入 {applied} 条；模型目录 {tag}（{p} 个平台 / {m} 个型号）。", {
                     applied: result.applied.length,
-                    version: result.platform_models.version,
-                    p: result.platform_models.platforms,
-                    m: result.platform_models.models,
+                    tag: result.source.data_tag ?? `v${result.source.version}`,
+                    p: result.source.platforms,
+                    m: result.source.models,
                   })
-                : t("目录价写入 {applied} 条，跳过 {skipped} 条；平台模型信息 v{version}（{p} 个平台 / {m} 个型号）。", {
+                : t("目录价写入 {applied} 条，跳过 {skipped} 条；模型目录 {tag}（{p} 个平台 / {m} 个型号）。", {
                     applied: result.applied.length,
                     skipped: result.skipped.length,
-                    version: result.platform_models.version,
-                    p: result.platform_models.platforms,
-                    m: result.platform_models.models,
+                    tag: result.source.data_tag ?? `v${result.source.version}`,
+                    p: result.source.platforms,
+                    m: result.source.models,
                   })}
             </p>
-            {result.platform_error === undefined || result.platform_error === "" ? null : (
-              <p className="text-signal-alert text-xs">
-                {t("平台模型信息未更新：{error}", { error: result.platform_error })}
-              </p>
-            )}
             {result.applied.length === 0 && result.skipped.length === 0 ? null : (
               <div className="flex flex-col gap-2">
                 {result.applied.map((m) => (
                   <div key={`a-${m.model}`} className="flex flex-wrap items-baseline gap-2 text-xs">
                     <code className="font-mono">{m.model}</code>
+                    {m.vendor === undefined || m.vendor === "" ? null : (
+                      <span className="text-muted-foreground">{m.vendor}</span>
+                    )}
                     <PricingItems kind={m.kind} pricing={m.pricing} />
                   </div>
                 ))}
@@ -452,7 +438,7 @@ export function UpdatesPage(): React.ReactElement {
           <>
             <SectionHead
               title={t("数据升级")}
-              desc={t("设备每小时匿名检查 LLM Gate官网，更新官方目录价与平台模型信息。请求不携带设备身份或凭据，也可随时手动立即更新。")}
+              desc={t("设备每小时匿名检查 LLM Gate官网，更新模型目录（平台、模型与估算目录价）。请求不携带设备身份或凭据，也可随时手动立即更新。")}
             />
             <CatalogPanel s={d.data} reload={res.reload} />
 

@@ -12,9 +12,9 @@
 // 一个 OpenAI/xAI 凭据都没有（决策 1）。
 //
 // 与另外三个消费入口最大的不同是**它不进模型目录**（决策 2）：不选路、不查
-// models/model_sources、没有多来源故障切换——订阅本就是单账户。这条路要的
-// 「上游」只有一个，就是 agent_accounts 里那一行。代价与收益都写在决策 2 里，
-// 别顺手把它接回 resolveRoute。
+// models/model_sources、没有多来源故障切换——一把 Key 每种订阅只钉一个账号。
+// 这条路要的「上游」只有一个，就是这把 Key 钉死的那一行 agent_accounts。代价与
+// 收益都写在决策 2 里，别顺手把它接回 resolveRoute。
 //
 // 三段职责：
 //
@@ -82,7 +82,7 @@ const codexActorAuthorizationHeader = "x-openai-actor-authorization"
 // 同性质：编译常量、不是配置项；开发期走 [Server.SetGrokEndpoints]。
 const grokBackendURL = "https://api.x.ai/v1/responses"
 
-// grokImagineBaseURL 是 Grok Imagine 图片/视频官方 API 的端点根：与订阅后端
+// grokImagineBaseURL 是 Grok Imagine 图像/视频官方 API 的端点根：与订阅后端
 // 同一宿主、同一份订阅令牌，设备在其后拼 /images/generations、/images/edits、
 // /videos/generations 与 /videos/{request_id}（imagine_grok.go）。同性质的编译
 // 常量；开发期与测试走 [Server.SetGrokImagineEndpoint]。
@@ -200,9 +200,7 @@ func (s *Server) SetGrokEndpoints(issuer, backendURL string) {
 // handleResponses 是兼容别名 POST /agents/v1/responses 的入口（已过认证中间件）：
 // provider 按 model 前缀猜（agentProviderFor）。
 func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
-	// 读体 + 通用 map 解析（未知字段保留）+ model 必填：与另外三个入口同一份
-	// 解码（entry.go）。Responses 协议的 model 同样必填。
-	payload, model, ok := decodeEntryPayload(w, r, openAIErrorStyle)
+	payload, model, ok := s.readAgentResponses(w, r)
 	if !ok {
 		return
 	}
@@ -212,11 +210,33 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 // handleGrokResponses 是 POST /agents/grok/v1/responses 的入口（已过认证与
 // withDevTool("grok")）：provider 由路径钉死，不看 model 名。
 func (s *Server) handleGrokResponses(w http.ResponseWriter, r *http.Request) {
-	payload, model, ok := decodeEntryPayload(w, r, openAIErrorStyle)
+	payload, model, ok := s.readAgentResponses(w, r)
 	if !ok {
 		return
 	}
 	s.handleAgentResponsesFor(w, r, store.AgentProviderGrok, payload, model)
+}
+
+// readAgentResponses 是 Agent 面 Responses 入口共同的读体：按读入上限读体 + 通用 map
+// 解析（未知字段保留）+ model 必填（entry.go），再收进转发上限——超出的部分由会话
+// 历史里较早的工具图片让出（omitEarlyToolImages），让不出时 413。返回 ok=false 时
+// 错误响应已写出。
+func (s *Server) readAgentResponses(w http.ResponseWriter, r *http.Request) (map[string]any, string, bool) {
+	r.Body = http.MaxBytesReader(w, r.Body, agentsResponsesReadLimit)
+	payload, model, size, ok := decodeEntryPayloadSized(w, r, openAIErrorStyle)
+	if !ok {
+		return nil, "", false
+	}
+	fitted, omitted := omitEarlyToolImages(payload, size, agentsResponsesBodyLimit)
+	if fitted > agentsResponsesBodyLimit {
+		writeBodyTooLarge(w, openAIErrorStyle, agentsResponsesBodyLimit)
+		return nil, "", false
+	}
+	if omitted > 0 {
+		s.log.Info("请求体超过转发上限，已省略会话历史里较早的工具图片", "request_id", infoFrom(r.Context()).id,
+			"omitted", omitted, "body_len", size, "forward_len", fitted)
+	}
+	return payload, model, true
 }
 
 // handleAgentResponsesFor 承接一份已经解码的订阅 Responses 请求，provider 由
@@ -248,6 +268,11 @@ func (s *Server) handleAgentResponsesFor(w http.ResponseWriter, r *http.Request,
 	sess, accountID, ok := s.agentCredential(w, r, provider)
 	if !ok {
 		return
+	}
+	if provider == store.AgentProviderCodex {
+		if n := replaceInvalidToolImages(payload); n > 0 {
+			s.log.Warn("Codex 工具结果中的无效内联图片已替换为重读提示", "request_id", info.id, "replaced", n)
+		}
 	}
 	// 请求体整读在手（已解析成 map，这里重序列化一份）：401 之后要原样重发，
 	// 而 r.Body 已经读干净了。model **不改写**——没有来源侧 ID 这回事。
@@ -310,17 +335,31 @@ func (s *Server) applyAgentModelPricingKind(r *http.Request, info *reqInfo, mode
 	}
 }
 
-// agentCredential 取「已连接且可用的订阅」（provider 由 model 分流决定）：
-// 每请求点查 agent_accounts，按状态分岔出机读原因，再拿到该句柄的进程内令牌
-// 状态。返回 ok=false 时错误响应已写出。
+// agentCredential 取这把 Key 为该 provider 钉死的那份订阅账号：先从策略快照拿
+// 账号行 id，再每请求点查 agent_accounts，按状态分岔出机读原因，最后拿到该句柄
+// 的进程内令牌状态。返回 ok=false 时错误响应已写出。
 //
 // 点查而不是缓存，理由与 Key 鉴权同一条：删除、停用、标失效都该在**下一个
 // 请求**生效，中间不留一层要失效的缓存。缓存的只有解封之后的令牌世代
 // （agentSession），那是内存态，不是权威。
 func (s *Server) agentCredential(w http.ResponseWriter, r *http.Request, provider string) (*agentSession, string, bool) {
 	info := infoFrom(r.Context())
-	acct, authJSON, err := s.store.GetAgentCredential(r.Context(), provider)
+	snapshot, ok := s.devToolSnapshot(w, r)
+	if !ok {
+		return nil, "", false
+	}
+	rowID := snapshot.Subscription(provider).AccountID
+	if rowID == 0 {
+		// 没给这把 Key 钉账号（或钉着的账号已被删）：对调用方等同于没有可用订阅。
+		writeAgentNotConfigured(w, provider)
+		return nil, "", false
+	}
+	acct, authJSON, err := s.store.GetAgentCredential(r.Context(), rowID)
 	switch {
+	case err == nil && acct.Provider != provider:
+		// 钉着的行不是这种订阅（只可能是手改过的库）：同样按未连接处理。
+		writeAgentNotConfigured(w, provider)
+		return nil, "", false
 	case err == nil:
 	case errors.Is(err, store.ErrNotFound):
 		writeAgentNotConfigured(w, provider)
@@ -390,7 +429,7 @@ func (s *Server) agentSessionFor(acct *store.AgentAccount, authJSON string) (*ag
 	s.agentMu.Lock()
 	defer s.agentMu.Unlock()
 
-	if sess := s.agentSessions[acct.Provider]; sess != nil && sess.rowID == acct.ID {
+	if sess := s.agentSessions[acct.ID]; sess != nil && sess.provider == acct.Provider {
 		// 只进不退：同一世代（绝大多数请求）与**迟到的旧快照**都走这一条，
 		// 直接复用内存里那一代。理由见 [agentSession] 的「只进不退」一段。
 		if !acct.UpdatedAt.After(sess.updatedAt) {
@@ -440,9 +479,9 @@ func (s *Server) agentSessionFor(acct *store.AgentAccount, authJSON string) (*ag
 		sess.tokens = agentauth.NewProvider(s.codexClientLocked(), auth, opts)
 	}
 	if s.agentSessions == nil {
-		s.agentSessions = make(map[string]*agentSession, 2)
+		s.agentSessions = make(map[int64]*agentSession, 4)
 	}
-	s.agentSessions[acct.Provider] = sess
+	s.agentSessions[acct.ID] = sess
 	return sess, nil
 }
 
@@ -516,43 +555,26 @@ func (s *Server) AgentSubscriptionModels(ctx context.Context) (map[string]string
 // created 从模型行取，所以还要一次目录读；那一次失败也走同一条降级。
 func (s *Server) handleAgentModels(w http.ResponseWriter, r *http.Request) {
 	list := s.agentModelList(r)
-	cfg, err := s.store.GetDevToolConfig(r.Context(), infoFrom(r.Context()).keyID)
-	if err != nil {
-		entryErrorStyle(r)(w, http.StatusInternalServerError, "internal_error", internalErrorMessage)
-		return
-	}
-	accounts, err := s.store.ListAgentAccounts(r.Context())
-	if err != nil {
-		entryErrorStyle(r)(w, http.StatusInternalServerError, "internal_error", internalErrorMessage)
-		return
-	}
-	allowed := map[string]bool{}
-	for _, account := range accounts {
-		if account.Status != store.AgentStatusActive {
-			continue
-		}
-		switch account.Provider {
-		case store.AgentProviderCodex:
-			allowed[account.Provider] = cfg.AllowCodexSubscription
-		case store.AgentProviderGrok:
-			allowed[account.Provider] = cfg.AllowGrokSubscription
-		case store.AgentProviderClaude:
-			if cfg.AllowClaudeSubscription {
-				_, blob, err := s.store.GetAgentCredential(r.Context(), account.Provider)
-				if err == nil {
-					cred, err := claudeauth.Parse(blob)
-					allowed[account.Provider] = err == nil && cred.HasSetupToken()
+	// 只列这把 Key 钉了账号、且该账号此刻可用（在场、active、Claude 配了
+	// setup-token）的订阅模型——判据与订阅面逐请求的裁决同一份（Available）。
+	// 策略算不出来走同一条降级：答空列表，不 5xx。
+	if len(list.Data) > 0 {
+		snapshot, err := s.policySnapshot(r)
+		if err != nil {
+			if r.Context().Err() == nil {
+				s.log.Warn("列出订阅模型时读策略失败", "request_id", infoFrom(r.Context()).id, "err", err.Error())
+			}
+			list.Data = []modelObject{}
+		} else {
+			visible := list.Data[:0]
+			for _, model := range list.Data {
+				if snapshot.Subscription(model.OwnedBy).Available {
+					visible = append(visible, model)
 				}
 			}
+			list.Data = visible
 		}
 	}
-	visible := list.Data[:0]
-	for _, model := range list.Data {
-		if allowed[model.OwnedBy] {
-			visible = append(visible, model)
-		}
-	}
-	list.Data = visible
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(list)
 }
@@ -576,10 +598,10 @@ func (s *Server) agentModelList(r *http.Request) modelList {
 	if len(owners) == 0 {
 		return list
 	}
-	// 每把 Key 只看到自己明确获准的订阅；列表隐藏不是权限边界，responses
-	// 入口还会逐请求执行同一开关。
+	// 每把 Key 只看到自己钉了账号的订阅；列表隐藏不是权限边界，responses
+	// 入口还会逐请求执行同一裁决。
 	if s.devTools != nil {
-		snapshot, err := s.devTools.Snapshot(r.Context(), infoFrom(r.Context()).keyID)
+		snapshot, err := s.policySnapshot(r)
 		if err != nil {
 			return list
 		}
@@ -627,16 +649,17 @@ func (s *Server) agentModelList(r *http.Request) modelList {
 //
 // 先点查再取会话，与数据面同一条路：库里那一行若比内存里的新（管理员刚重新
 // 登录过），agentSessionFor 会先换代再刷新；比内存里旧则忽略（只进不退）。
-func (s *Server) RefreshAgent(ctx context.Context, provider string) error {
+// id 是订阅账号行 id（同一 provider 可有多行，自检只动被点的那一行）。
+func (s *Server) RefreshAgent(ctx context.Context, id int64) error {
+	acct, authJSON, err := s.store.GetAgentCredential(ctx, id)
+	if err != nil {
+		return err
+	}
 	// Cursor 是静态 API Key + 上游换发（cursor.go），没有轮换句柄，也就没有
 	// agentSession/agentauth.Provider：它的自检 = 重新 exchange 一次，与数据面
 	// 共用同一个单飞会话，先分流出去。
-	if provider == store.AgentProviderCursor {
-		return s.refreshCursorAgent(ctx)
-	}
-	acct, authJSON, err := s.store.GetAgentCredential(ctx, provider)
-	if err != nil {
-		return err
+	if acct.Provider == store.AgentProviderCursor {
+		return s.refreshCursorAgent(ctx, acct, authJSON)
 	}
 	sess, err := s.agentSessionFor(acct, authJSON)
 	if err != nil {

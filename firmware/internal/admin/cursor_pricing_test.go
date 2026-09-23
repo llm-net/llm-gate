@@ -83,7 +83,7 @@ func TestCursorPricingReadOnlyCatalog(t *testing.T) {
 	raw, _ := json.Marshal(struct {
 		File platformcatalog.Doc `json:"file"`
 	}{doc})
-	if err := e.st.SetSetting(t.Context(), "platform_models", string(raw)); err != nil {
+	if err := e.st.SetSetting(t.Context(), "model_catalog", string(raw)); err != nil {
 		t.Fatal(err)
 	}
 	if got := read(); len(got) != 1 || got[0].Name != "catalog-only" || got[0].Pricing[usage.FieldIn] != 0 {
@@ -100,7 +100,7 @@ func TestCursorPricingReadOnlyCatalog(t *testing.T) {
 			t.Fatalf("wrong catalog pricing annotation: %+v", row)
 		}
 	}
-	if err := e.st.SetSetting(t.Context(), "platform_models", `{"file":{"schema":"invalid"}}`); err != nil {
+	if err := e.st.SetSetting(t.Context(), "model_catalog", `{"file":{"schema":"invalid"}}`); err != nil {
 		t.Fatal(err)
 	}
 	if got := read(); len(got) != len(agent.Models) {

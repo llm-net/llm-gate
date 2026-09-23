@@ -118,8 +118,8 @@ func (s *Server) upstreamForModels(w http.ResponseWriter, r *http.Request) (*sto
 // （servableProtocols），不另抄一张平台能力表。
 func servableKinds(up *store.Upstream) []upstreamKindJSON {
 	out := make([]upstreamKindJSON, 0, 3)
-	for _, kind := range []string{store.ModelKindText, store.ModelKindVideo, store.ModelKindImage} {
-		protos := servableProtocols(kind, up.Type, up.BaseURL)
+	for _, kind := range []string{store.ModelKindText, store.ModelKindVideo, store.ModelKindImage, store.ModelKindSystemOne} {
+		protos := servableProtocols(kind, up.Type, up.BaseURL, up.ProtocolURLs)
 		if len(protos) == 0 {
 			continue
 		}
@@ -141,12 +141,12 @@ func resolveFamily(up *store.Upstream, kind, want string) (string, error) {
 		if want != "" {
 			return "", errors.New("文本模型不声明协议面")
 		}
-		if len(servableProtocols(kind, up.Type, up.BaseURL)) == 0 {
+		if len(servableProtocols(kind, up.Type, up.BaseURL, up.ProtocolURLs)) == 0 {
 			return "", errors.New("该账号不服务文本入口")
 		}
 		return "", nil
 	}
-	protos := servableProtocols(kind, up.Type, up.BaseURL)
+	protos := servableProtocols(kind, up.Type, up.BaseURL, up.ProtocolURLs)
 	if len(protos) == 0 {
 		return "", fmt.Errorf("该账号不服务%s模型", kindText(kind))
 	}
@@ -160,6 +160,8 @@ func resolveFamily(up *store.Upstream, kind, want string) (string, error) {
 // kindText 是错误文案里的种类说法（用户可见文案的词汇同管理台 kindLabel）。
 func kindText(kind string) string {
 	switch kind {
+	case store.ModelKindSystemOne:
+		return "语义判断"
 	case store.ModelKindVideo:
 		return "视频"
 	case store.ModelKindImage:
@@ -179,7 +181,7 @@ func (s *Server) catalogEntries(doc platformcatalog.Doc, up *store.Upstream, ent
 	}
 	out := make([]upstreamModelJSON, 0, len(entries))
 	for _, e := range entries {
-		if len(sourceProtocols(doc, e.Kind, e.Name, e.UpstreamModelID, up.Type, up.CatalogID, up.BaseURL)) == 0 {
+		if len(sourceProtocols(doc, e.Kind, e.Name, e.UpstreamModelID, up.Type, up.CatalogID, up.BaseURL, up.ProtocolURLs)) == 0 {
 			continue
 		}
 		if validateCatalogName(e.Name) != nil {
@@ -189,7 +191,7 @@ func (s *Server) catalogEntries(doc platformcatalog.Doc, up *store.Upstream, ent
 			continue
 		}
 		switch e.Kind {
-		case store.ModelKindText, store.ModelKindVideo, store.ModelKindImage:
+		case store.ModelKindText, store.ModelKindVideo, store.ModelKindImage, store.ModelKindSystemOne:
 		default:
 			continue
 		}
@@ -324,11 +326,11 @@ func (s *Server) handleAddUpstreamModels(w http.ResponseWriter, r *http.Request)
 			}
 		}
 		switch m.Kind {
-		case store.ModelKindText, store.ModelKindVideo, store.ModelKindImage:
+		case store.ModelKindText, store.ModelKindVideo, store.ModelKindImage, store.ModelKindSystemOne:
 		default:
 			writeError(w, http.StatusBadRequest, "invalid_kind",
-				fmt.Sprintf("模型 %q 的种类 %q 未知（可选 %s|%s|%s）", m.Name, clipPricingField(m.Kind),
-					store.ModelKindText, store.ModelKindVideo, store.ModelKindImage))
+				fmt.Sprintf("模型 %q 的种类 %q 未知（可选 %s|%s|%s|%s）", m.Name, clipPricingField(m.Kind),
+					store.ModelKindText, store.ModelKindVideo, store.ModelKindImage, store.ModelKindSystemOne))
 			return
 		}
 		family, err := resolveFamily(up, m.Kind, m.Family)
@@ -340,7 +342,7 @@ func (s *Server) handleAddUpstreamModels(w http.ResponseWriter, r *http.Request)
 		if seen[m.Name] {
 			continue
 		}
-		if len(sourceProtocols(doc, m.Kind, m.Name, m.UpstreamModelID, up.Type, up.CatalogID, up.BaseURL)) == 0 {
+		if len(sourceProtocols(doc, m.Kind, m.Name, m.UpstreamModelID, up.Type, up.CatalogID, up.BaseURL, up.ProtocolURLs)) == 0 {
 			writeError(w, http.StatusBadRequest, "source_protocol_unservable",
 				fmt.Sprintf("模型 %q 的上游协议当前无法由固件承载，请选择其他模型", m.Name))
 			return
@@ -378,7 +380,11 @@ func (s *Server) addUpstreamModel(w http.ResponseWriter, r *http.Request, up *st
 	m, err := s.st.GetModelByName(r.Context(), name)
 	switch {
 	case errors.Is(err, store.ErrNotFound):
-		m, err = s.st.CreateModel(r.Context(), name, kind, "")
+		// 新行建出来就带价：从这条平台添加的模型按目录里这条平台的估算目录价
+		// 建行（找不到即未定价），不必等下一轮数据升级补填。已存在的行不动价
+		// ——那是管理员的口径。
+		pricing, pricedFrom := s.initialCatalogPricing(r.Context(), name, kind, up.CatalogID, up.Type)
+		m, err = s.st.CreateModel(r.Context(), name, kind, pricing)
 		if err != nil {
 			if errors.Is(err, store.ErrConflict) { // 并发建行：转认领路径
 				return s.addUpstreamModel(w, r, up, name, kind, family, upstreamModelID)
@@ -387,11 +393,15 @@ func (s *Server) addUpstreamModel(w http.ResponseWriter, r *http.Request, up *st
 			return false, false, false
 		}
 		createdModel = true
+		detail := fmt.Sprintf("name=%s kind=%s family=%s entries=%s pricing=%s upstream=%s",
+			m.Name, m.Kind, familyAudit(family), entriesLabel(true, true, true), pricingAudit(m.Pricing), up.Name)
+		if pricedFrom != "" {
+			detail += " pricing_source=model_catalog:" + pricedFrom
+		}
 		s.audit(r.Context(), store.AuditEvent{
-			Event:  EventModelCreate,
-			Entity: entityModel(m.ID),
-			Detail: fmt.Sprintf("name=%s kind=%s family=%s entries=%s pricing=%s upstream=%s",
-				m.Name, m.Kind, familyAudit(family), entriesLabel(true, true, true), pricingAudit(""), up.Name),
+			Event:    EventModelCreate,
+			Entity:   entityModel(m.ID),
+			Detail:   detail,
 			RemoteIP: remoteIP(r),
 		})
 	case err != nil:

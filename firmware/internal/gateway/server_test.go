@@ -315,7 +315,14 @@ func TestAdminMountDispatch(t *testing.T) {
 		w.Header().Set("X-Stub-Admin", r.URL.Path)
 		w.WriteHeader(http.StatusTeapot)
 	})
-	h := gateway.New(cfg, logger, st, gateway.NewStoreKeyAuthorizer(st, logger), stub, nil).Handler()
+	srv := gateway.New(cfg, logger, st, gateway.NewStoreKeyAuthorizer(st, logger), stub, nil)
+	mcpStub := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Stub-MCP", r.URL.Path)
+		w.WriteHeader(http.StatusAccepted)
+	})
+	srv.SetHostAgentMCP(mcpStub)
+	srv.SetStudioMCP(mcpStub)
+	h := srv.Handler()
 
 	// 管理面侧：无数据面凭证也直达管理面 handler（此处以 418 佐证），根路径、
 	// 管理 API、管理界面与任意未知路径都归它。
@@ -352,6 +359,27 @@ func TestAdminMountDispatch(t *testing.T) {
 	}
 	if _, code, _ := decodeError(t, w); code != "missing_api_key" {
 		t.Errorf("Codex 混合面 error.code = %q，期望 missing_api_key", code)
+	}
+	// 主机智能体的 MCP 工具端点在数据面链上：引擎实例的 POST 不带 X-LlmGate-CSRF，
+	// 落进管理面就会被 CSRF 中间件 403，必须直达注入的处理器。
+	mcpReq := httptest.NewRequest(http.MethodPost, "/agent-mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"ping"}`))
+	mcpReq.Header.Set("Content-Type", "application/json")
+	mcpReq.RemoteAddr = "127.0.0.1:40000"
+	wMCP := httptest.NewRecorder()
+	h.ServeHTTP(wMCP, mcpReq)
+	if wMCP.Code != http.StatusAccepted || wMCP.Header().Get("X-Stub-MCP") != "/agent-mcp" || wMCP.Header().Get("X-Stub-Admin") != "" {
+		t.Errorf("POST /agent-mcp = %d（X-Stub-MCP=%q X-Stub-Admin=%q），期望直达 MCP 处理器而非管理面",
+			wMCP.Code, wMCP.Header().Get("X-Stub-MCP"), wMCP.Header().Get("X-Stub-Admin"))
+	}
+	// 创作工作空间的 MCP 工具端点同理。
+	studioReq := httptest.NewRequest(http.MethodPost, "/studio-mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"ping"}`))
+	studioReq.Header.Set("Content-Type", "application/json")
+	studioReq.RemoteAddr = "127.0.0.1:40000"
+	wStudio := httptest.NewRecorder()
+	h.ServeHTTP(wStudio, studioReq)
+	if wStudio.Code != http.StatusAccepted || wStudio.Header().Get("X-Stub-MCP") != "/studio-mcp" || wStudio.Header().Get("X-Stub-Admin") != "" {
+		t.Errorf("POST /studio-mcp = %d（X-Stub-MCP=%q X-Stub-Admin=%q），期望直达 MCP 处理器而非管理面",
+			wStudio.Code, wStudio.Header().Get("X-Stub-MCP"), wStudio.Header().Get("X-Stub-Admin"))
 	}
 }
 

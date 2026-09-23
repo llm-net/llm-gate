@@ -1,0 +1,119 @@
+{
+  "instructions": "这些工具作用于当前创作工作空间；生成与文件变更都会记录到对话时间线。工作空间固定三个子目录：agent/（你自己的工作文档）、docs/（交付的创作文档）、media/（上传与生成的图像 / 视频 / 音频）。文件一律用「子目录/文件名」的路径引用（列目录看到的路径）。",
+  "tools": [
+    {
+      "name": "list_files",
+      "description": "列出工作空间三个子目录里的文件：路径（如 media/ref.png）、种类（image / video / audio / text / other）、大小、图像尺寸、来源（upload = 管理员上传，generated = 生成，agent = 你写的）以及生成它时用的提示词摘录。",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "dir": { "type": "string", "enum": ["agent", "docs", "media"], "description": "只列这一个子目录（可选）" },
+          "kind": { "type": "string", "enum": ["image", "video", "audio", "text", "other"], "description": "只列这一种（可选）" }
+        }
+      }
+    },
+    {
+      "name": "view_image",
+      "description": "查看 media/ 里的一张图像（返回缩放后的图像内容与尺寸信息）。用它看参考图、检查生成结果。",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path"],
+        "properties": {
+          "path": { "type": "string", "description": "文件路径，如 media/ref.png" },
+          "detail": { "type": "string", "enum": ["low", "high"], "description": "low = 短边 768（缺省），high = 短边 1536" }
+        }
+      }
+    },
+    {
+      "name": "read_text",
+      "description": "读取 agent/ 或 docs/ 里的一个文本文件（最多 256 KiB）：项目说明、分镜、文案等。",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path"],
+        "properties": {
+          "path": { "type": "string", "description": "文件路径，如 agent/PROJECT.md、docs/storyboard.md" }
+        }
+      }
+    },
+    {
+      "name": "write_text",
+      "description": "把文本写成文件（覆盖或追加，最多 256 KiB）。只能写进 agent/（你自己的工作文档：agent/PROJECT.md 项目说明、计划、提示词记录）或 docs/（交付给管理员的分镜脚本、文案、字幕等）；media/ 不收文本。",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "content"],
+        "properties": {
+          "path": { "type": "string", "description": "文件路径（带子目录与扩展名，如 agent/PROJECT.md、docs/storyboard.md）" },
+          "content": { "type": "string", "description": "完整内容（append 为真时为追加的内容）" },
+          "append": { "type": "boolean", "description": "追加而不是覆盖" }
+        }
+      }
+    },
+    {
+      "name": "generate_image",
+      "description": "用图像模型生成图像并保存到 media/，返回文件路径与缩放后的图像内容。参考图从 media/ 里按路径取。工具会等到结果落盘再返回（通常一两分钟）。这把密钥此刻能用哪些模型见开发者指令。",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["prompt"],
+        "properties": {
+          "prompt": { "type": "string", "description": "完整的生成提示词" },
+          "model": { "type": "string", "description": "模型名（开发者指令里列出的可用图像模型之一；缺省取第一个可用的）" },
+          "name": { "type": "string", "description": "保存的文件基名（不含目录与扩展名，如 hero-v2；缺省自动命名，重名自动加序号；结果恒落在 media/）" },
+          "reference_images": { "type": "array", "items": { "type": "string" }, "description": "参考图路径（media/…）" },
+          "params": { "type": "object", "description": "{{params:image}}" },
+          "count": { "type": "integer", "minimum": 1, "maximum": 3, "description": "一次出几个候选（各自保存成一个文件，缺省 1）" }
+        }
+      }
+    },
+    {
+      "name": "generate_video",
+      "description": "用视频模型生成、编辑或延长一段视频并保存到 media/。首帧 / 尾帧 / 参考图 / 源视频都从 media/ 里按路径取。工具会等到结果落盘再返回（常要几分钟）。这把密钥此刻能用哪些模型见开发者指令。",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "prompt": { "type": "string", "description": "生成提示词（部分模型带首帧或尾帧时可省略）" },
+          "model": { "type": "string", "description": "模型名（开发者指令里列出的可用视频模型之一；缺省取第一个可用的）" },
+          "name": { "type": "string", "description": "保存的文件基名（不含目录与扩展名；缺省自动命名；结果恒落在 media/）" },
+          "operation": { "type": "string", "enum": ["generate", "edit", "extend"], "description": "缺省 generate；edit / extend 需要 source_video，且只有部分模型支持" },
+          "first_frame": { "type": "string", "description": "首帧图像路径（media/…）" },
+          "last_frame": { "type": "string", "description": "尾帧图像路径（media/…）" },
+          "reference_images": { "type": "array", "items": { "type": "string" }, "description": "参考图路径（media/…）" },
+          "source_video": { "type": "string", "description": "源视频路径（media/….mp4，编辑 / 延长用）" },
+          "params": { "type": "object", "description": "{{params:video}}" },
+          "count": { "type": "integer", "minimum": 1, "maximum": 3, "description": "一次出几个候选（各自保存成一个文件，缺省 1）" }
+        }
+      }
+    },
+    {
+      "name": "delete_file",
+      "description": "删除一个文件。管理员上传的素材不要删；清理自己生成的废稿或过时文档时用。",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path"],
+        "properties": {
+          "path": { "type": "string", "description": "文件路径，如 media/draft-3.png" }
+        }
+      }
+    },
+    
+    {
+      "name": "rename_file",
+      "description": "给一个文件改名，或在三个子目录之间挪动（路径都带子目录与扩展名，目标不能已存在；文本只能在 agent/ 与 docs/ 之间，媒体只能留在 media/）。",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "new_path"],
+        "properties": {
+          "path": { "type": "string", "description": "现在的路径，如 media/draft.png" },
+          "new_path": { "type": "string", "description": "新路径，如 media/hero-final.png 或 docs/script.md" }
+        }
+      }
+    }
+  ]
+}

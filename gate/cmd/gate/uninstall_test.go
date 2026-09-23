@@ -69,6 +69,9 @@ func uninstallMissing(t *testing.T, path string) {
 func ownedFixture(t *testing.T, a *app, name string) string {
 	t.Helper()
 	entry := a.managedBinaryPath(name)
+	if name == "mcode" {
+		entry = mcodeEntry(filepath.Join(a.root, "tools", "mcode", "releases", "install-123"), runtime.GOOS)
+	}
 	if name == "codex" {
 		target, _ := codexVendorTarget(runtime.GOOS, runtime.GOARCH)
 		entry = filepath.Join(codexStandaloneDir(a.root), "releases", "1.2.3-"+target, "bin", toolBinaryName(name))

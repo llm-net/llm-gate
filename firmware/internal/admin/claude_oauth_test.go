@@ -40,7 +40,7 @@ func TestClaudeOAuthSelfCheckAndNoFileImport(t *testing.T) {
 		t.Fatal("quota self-check revived inference credential")
 	}
 	wantStatus(t, e.do("POST", "/admin/v1/agent-accounts/claude/oauth", e.cookie, `{"auth_json":"fake-file-credential"}`), http.StatusNotFound)
-	_, still, err := e.st.GetAgentCredential(t.Context(), "claude")
+	_, still, err := e.st.GetAgentCredential(t.Context(), a.ID)
 	if err != nil || still != fixture {
 		t.Fatal("removed file import changed the usable login")
 	}

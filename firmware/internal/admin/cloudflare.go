@@ -20,7 +20,7 @@ package admin
 //	DELETE /admin/v1/system/components/cloudflared/staged     丢弃已就绪制品
 //	DELETE /admin/v1/system/components/cloudflared            卸载组件（Tunnel 启用中 409；只限 LAN）
 //
-// 组件的安装/升级/回退/卸载统一在界面「第三方组件」页操作；「公网接入」分区只展示组件
+// 组件的安装/升级/回退/卸载统一在界面「组件管理」页操作；「公网接入」分区只展示组件
 // 状态并链接过去。卸载从不替管理员停用功能：Tunnel 启用中答 409 component_in_use。
 //
 // 边界：设备只持有 tunnel-scoped token，不代用户登录 Cloudflare、不建 zone、不改 DNS。

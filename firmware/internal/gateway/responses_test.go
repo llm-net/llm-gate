@@ -246,16 +246,13 @@ func newAgentEnvWithIssuer(t *testing.T, respond, refresh http.HandlerFunc) *age
 	issuer := newStubIssuer(t, refresh)
 	e.srv.SetAgentEndpoints(issuer.url, stubRoot(backend)+codexBackendPath)
 
-	acct, err := e.st.UpsertAgentAccount(t.Context(), store.NewAgentAccount{
+	acct := connectAgent(t, e.st, store.NewAgentAccount{
 		Provider:     store.AgentProviderCodex,
 		Label:        "订阅账号",
 		AccountID:    codexAccountID,
 		DefaultModel: codexModel,
 		AuthJSON:     codexAuthJSON(codexAccess1, codexRefresh1),
 	})
-	if err != nil {
-		t.Fatalf("UpsertAgentAccount: %v", err)
-	}
 	e.srv.SetAgentModels(&fakeAgentModels{owners: map[string]string{
 		codexModel: store.AgentProviderCodex,
 	}})
@@ -504,6 +501,21 @@ func TestResponsesBackendErrorPassthrough(t *testing.T) {
 	}
 }
 
+func TestResponsesRejectsOversizedBodyBeforeUpstream(t *testing.T) {
+	e := newAgentEnv(t, jsonReply(http.StatusOK, codexNonStreamBody))
+	body := `{"model":` + fmt.Sprintf("%q", codexModel) + `,"input":"` + strings.Repeat("x", (8<<20)+1024) + `"}`
+	w := do(e.h, http.MethodPost, "/agents/v1/responses", codexAuth, body)
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("状态码 = %d，期望 413；body: %s", w.Code, w.Body.String())
+	}
+	if _, code, _ := decodeError(t, w); code != "request_too_large" {
+		t.Fatalf("error.code = %q，期望 request_too_large", code)
+	}
+	if e.backend.count() != 0 {
+		t.Fatalf("超大请求不应触达上游，调用 = %d", e.backend.count())
+	}
+}
+
 // TestResponsesBackendUnreachable：代理这一跳出不了网（受限现场）→ 502 且文案
 // 说清是连不上，客户端可重试（决策 9 的第三条路，另两条是登录与刷新）。
 // 这里**没有下一个来源**可切——订阅是单账户，连不上就是连不上。
@@ -549,8 +561,9 @@ func TestResponsesAccountHeaderIsDeviceOnly(t *testing.T) {
 
 	t.Run("设备侧为空：一个都不发", func(t *testing.T) {
 		e := newAgentEnv(t, jsonReply(http.StatusOK, codexNonStreamBody))
-		// 句柄里没有 account_id，库里那列也空。
+		// 句柄里没有 account_id，库里那列也空（按 id 重连，account_id 随凭据清空）。
 		if _, err := e.st.UpsertAgentAccount(t.Context(), store.NewAgentAccount{
+			ID:       e.acctID,
 			Provider: store.AgentProviderCodex,
 			AuthJSON: codexAuthJSONFor(codexAccess1, codexRefresh1, ""),
 		}); err != nil {
@@ -801,13 +814,15 @@ func TestResponsesAdmit(t *testing.T) {
 
 // ---- 账号状态的两个机读原因 ----
 
-// TestResponsesAgentNotConfigured：没连订阅 / 订阅被停用，一律
-// 409 agent_not_configured（非 5xx——这是状态不是故障），且不碰后端。
+// TestResponsesAgentNotConfigured：这把 Key 没钉订阅账号 → 403
+// subscription_not_allowed（授权 = 钉了账号，设备上没账号就没有可钉的）；
+// 钉了但账号被停用 → 409 agent_not_configured（非 5xx——这是状态不是故障）。
+// 两种都不碰后端。
 func TestResponsesAgentNotConfigured(t *testing.T) {
-	t.Run("没有账号", func(t *testing.T) {
+	t.Run("没有钉账号", func(t *testing.T) {
 		e := newRouteEnv(t)
 		w := do(e.h, "POST", "/agents/v1/responses", codexAuth, codexReq(false))
-		assertAgentRefusal(t, w, http.StatusConflict, "agent_not_configured")
+		assertAgentRefusal(t, w, http.StatusForbidden, "subscription_not_allowed")
 	})
 	t.Run("账号被停用", func(t *testing.T) {
 		e := newAgentEnv(t, jsonReply(http.StatusOK, codexNonStreamBody))
@@ -875,7 +890,7 @@ func TestResponsesAgentRefusalUpstreamDimension(t *testing.T) {
 		}
 	})
 
-	t.Run("账号已删除时留空", func(t *testing.T) {
+	t.Run("账号已删除时授权随之解开", func(t *testing.T) {
 		e := newAgentEnv(t, jsonReply(http.StatusOK, codexNonStreamBody))
 		fm := &fakeMeter{}
 		e.srv.EnableMetering(fm)
@@ -883,15 +898,12 @@ func TestResponsesAgentRefusalUpstreamDimension(t *testing.T) {
 			t.Fatalf("DeleteAgentAccount: %v", err)
 		}
 
+		// 钉着的账号没了 = 这把 Key 不再持有该订阅的授权：在订阅闸就被拦下，
+		// 不进入订阅入口、不记订阅流量，也不出网。
 		w := do(e.h, "POST", "/agents/v1/responses", codexAuth, codexReq(false))
-		assertAgentRefusal(t, w, http.StatusConflict, "agent_not_configured")
-
-		s := fm.only(t)
-		if s.UpstreamName != "" {
-			t.Errorf("upstream = %q，期望留空：设备上已经没有这份订阅，无从归属", s.UpstreamName)
-		}
-		if s.Status != http.StatusConflict || s.Attempts != 0 {
-			t.Errorf("status = %d attempts = %d，期望 409/0（没发往后端）", s.Status, s.Attempts)
+		assertAgentRefusal(t, w, http.StatusForbidden, "subscription_not_allowed")
+		if fm.count() != 0 {
+			t.Errorf("记账笔数 = %d，期望 0（授权闸之前不入账）", fm.count())
 		}
 		if e.backend.count() != 0 {
 			t.Errorf("后端收到 %d 次请求，期望 0", e.backend.count())
@@ -964,7 +976,7 @@ func TestResponsesRefreshOn401(t *testing.T) {
 	}
 
 	// 新一代必须已经重新密封落库。
-	acct, authJSON, err := e.st.GetAgentCredential(t.Context(), store.AgentProviderCodex)
+	acct, authJSON, err := e.st.GetAgentCredential(t.Context(), e.acctID)
 	if err != nil {
 		t.Fatalf("GetAgentCredential: %v", err)
 	}
@@ -994,6 +1006,7 @@ func TestResponsesRelogin(t *testing.T) {
 
 	const relogin = "codex-access-token-relogin"
 	acct, err := e.st.UpsertAgentAccount(t.Context(), store.NewAgentAccount{
+		ID:        e.acctID,
 		Provider:  store.AgentProviderCodex,
 		AccountID: codexAccountID,
 		AuthJSON:  codexAuthJSON(relogin, "codex-refresh-relogin"),
@@ -1004,7 +1017,7 @@ func TestResponsesRelogin(t *testing.T) {
 		t.Fatalf("重新登录 Upsert: %v", err)
 	}
 	if acct.ID != e.acctID {
-		t.Fatalf("重新登录建出了第二行（id %d → %d）：单账户语义被破坏", e.acctID, acct.ID)
+		t.Fatalf("按 id 重新登录建出了第二行（id %d → %d）", e.acctID, acct.ID)
 	}
 
 	if w := do(e.h, "POST", "/agents/v1/responses", codexAuth, codexReq(false)); w.Code != http.StatusOK {
@@ -1046,6 +1059,7 @@ func TestResponsesStaleSnapshotNeverRegresses(t *testing.T) {
 	putGen := func(access, refresh string, at time.Time) {
 		t.Helper()
 		if _, err := e.st.UpsertAgentAccount(t.Context(), store.NewAgentAccount{
+			ID:        e.acctID,
 			Provider:  store.AgentProviderCodex,
 			AccountID: codexAccountID,
 			AuthJSON:  codexAuthJSON(access, refresh),
@@ -1203,12 +1217,13 @@ func TestResponsesRefreshUnreachable(t *testing.T) {
 func TestResponsesCorruptHandle(t *testing.T) {
 	e := newAgentEnv(t, jsonReply(http.StatusOK, codexNonStreamBody))
 	if _, err := e.st.UpsertAgentAccount(t.Context(), store.NewAgentAccount{
+		ID:       e.acctID,
 		Provider: store.AgentProviderCodex,
 		AuthJSON: `{"tokens":{"id_token":"x"}}`, // 没有 access/refresh
 	}); err != nil {
 		t.Fatalf("UpsertAgentAccount: %v", err)
 	}
-	acct, _, err := e.st.GetAgentCredential(t.Context(), store.AgentProviderCodex)
+	acct, _, err := e.st.GetAgentCredential(t.Context(), e.acctID)
 	if err != nil {
 		t.Fatalf("GetAgentCredential: %v", err)
 	}
@@ -1352,11 +1367,9 @@ func decodeModelList(t *testing.T, w *httptest.ResponseRecorder) []struct {
 
 func connectModelListProvider(t *testing.T, e *routeEnv, provider string) {
 	t.Helper()
-	if _, err := e.st.UpsertAgentAccount(t.Context(), store.NewAgentAccount{
+	connectAgent(t, e.st, store.NewAgentAccount{
 		Provider: provider, Label: "模型列表测试", AuthJSON: `{}`,
-	}); err != nil {
-		t.Fatalf("UpsertAgentAccount(%s): %v", provider, err)
-	}
+	})
 }
 
 func TestAgentModelsListsSubscriptionModels(t *testing.T) {
@@ -1394,18 +1407,10 @@ func TestAgentModelsListsSubscriptionModels(t *testing.T) {
 			t.Errorf("%s: created = %d，应取模型行的建行时刻", m.ID, m.Created)
 		}
 	}
-	keys, err := e.st.ListAPIKeys(t.Context())
-	if err != nil || len(keys) != 1 {
-		t.Fatalf("ListAPIKeys: %v (%d)", err, len(keys))
-	}
-	if _, _, err := e.st.ReplaceDevToolConfig(t.Context(), store.DevToolConfig{
-		KeyID: keys[0].ID, AllowCodexSubscription: true,
-	}); err != nil {
-		t.Fatal(err)
-	}
+	pinSubscription(t, e.st, store.AgentProviderGrok, 0)
 	got = decodeModelList(t, do(e.h, http.MethodGet, "/agents/v1/models", chatAuth, ""))
 	if len(got) != 1 || got[0].OwnedBy != store.AgentProviderCodex {
-		t.Fatalf("停用 Grok 后直接订阅模型列表仍泄漏：%+v", got)
+		t.Fatalf("解开 Grok 后直接订阅模型列表仍泄漏：%+v", got)
 	}
 }
 

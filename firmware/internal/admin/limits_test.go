@@ -290,7 +290,7 @@ func TestModelPricingKindFieldSet(t *testing.T) {
 	}{
 		{"文本模型收视频字段", "text", `{"ark_video_token":1}`},
 		{"视频模型收文本字段", "video", `{"in":1}`},
-		{"图片模型收秒价", "image", `{"minimax_video_sec_2k":1}`},
+		{"图像模型收秒价", "image", `{"minimax_video_sec_2k":1}`},
 		{"拼错的字段名", "text", `{"input":1}`},
 		{"负价", "text", `{"in":-1}`},
 		{"小数价", "text", `{"in":1.5}`},

@@ -7,7 +7,8 @@ package upstream
 //
 // §15.1 边界：探测结果只带状态码、耗时与**上游错误体里的简短摘要**——摘要
 // 流向管理 API 响应（管理员就是要看拒绝原因），但绝不落日志与审计 detail；
-// 成功响应的内容不做任何解析与留存。凭证只经 Account.Authorize 注入请求头。
+// 通用适配只返回安全的状态摘要，成功体校验协议形状；正文不留存。
+// 凭证只经 Account.Authorize 注入请求头。
 
 import (
 	"bytes"
@@ -42,7 +43,8 @@ const probeMessageMaxRunes = 200
 
 // ProbeResult 是一次 (来源, 入口协议) 探测的结果。
 type ProbeResult struct {
-	// OK 表示上游返回 2xx。
+	Questions []SystemOneProbeQuestion
+	// OK 表示上游返回 2xx；通用适配还要求响应符合所选协议的基本形状。
 	OK bool
 	// Status 是上游 HTTP 状态码；0 表示未收到 HTTP 响应（连接失败/超时）。
 	Status int
@@ -57,6 +59,12 @@ type ProbeResult struct {
 // 超时由 ctx 控制（调用方限定单次探测上限）；client 复用数据面的分层超时配置。
 func Probe(ctx context.Context, client *http.Client, acct Account, protocol, modelID string) ProbeResult {
 	path := "/chat/completions"
+	if protocol == config.ProtocolOpenAIResponses {
+		path = "/responses"
+	}
+	if protocol == config.ProtocolSystemOne {
+		path = "/v1/systemone"
+	}
 	if protocol == config.ProtocolAnthropicMessages {
 		path = "/messages"
 	}
@@ -89,17 +97,49 @@ func Probe(ctx context.Context, client *http.Client, acct Account, protocol, mod
 		return ProbeResult{LatencyMS: sinceMS(start), Message: transportMessage(err)}
 	}
 	defer resp.Body.Close()
-	// 限量读体：非 2xx 用于摘要提取；2xx 排空以复用连接，内容不解析不留存。
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, probeReadCap))
+	// 限量读体：通用适配与 System One 校验响应结构，其余非 2xx 提取摘要；
+	// 响应正文不落日志或持久化。
+	body, readErr := io.ReadAll(io.LimitReader(resp.Body, probeReadCap+1))
 	latency := sinceMS(start)
+	if acct.Type == config.UpstreamGeneric || protocol == config.ProtocolSystemOne {
+		result := ProbeResult{Status: resp.StatusCode, LatencyMS: latency}
+		if resp.StatusCode/100 != 2 {
+			result.Message = fmt.Sprintf("上游返回 HTTP %d", resp.StatusCode)
+			return result
+		}
+		if readErr != nil || len(body) > probeReadCap {
+			result.Message = "响应读取失败或超过测试大小限制"
+			return result
+		}
+		var payload map[string]json.RawMessage
+		field := map[string]string{config.ProtocolOpenAIChat: "choices", config.ProtocolOpenAIResponses: "output", config.ProtocolAnthropicMessages: "content", config.ProtocolSystemOne: "answers"}[protocol]
+		if json.Unmarshal(body, &payload) != nil || payload[field] == nil || string(payload[field]) == "null" {
+			result.Message = "响应格式不符合所选协议面"
+			return result
+		}
+		if protocol == config.ProtocolSystemOne {
+			result.Questions, result.OK = systemOneProbeResults(payload[field])
+			if !result.OK {
+				result.Message = "System One 混合测试未全部通过"
+			}
+			return result
+		} else {
+			var items []json.RawMessage
+			if json.Unmarshal(payload[field], &items) != nil {
+				result.Message = "响应格式不符合所选协议面"
+				return result
+			}
+		}
+		result.OK = true
+		return result
+	}
 	if resp.StatusCode/100 == 2 {
 		return ProbeResult{OK: true, Status: resp.StatusCode, LatencyMS: latency}
 	}
 	return ProbeResult{Status: resp.StatusCode, LatencyMS: latency, Message: errorSummary(body)}
 }
 
-// probeBody 构造探测请求体。两个协议都用同一条固定 "ping"，max_tokens=1 把
-// 生成与扣费压到最小；anthropic 协议 max_tokens 本就是必填字段。
+// probeBody 使用固定测试输入；System One 单次请求包含 Choice、Noul、Score 三题。
 func probeBody(protocol, modelID string) []byte {
 	payload := map[string]any{
 		"model":      modelID,
@@ -108,6 +148,12 @@ func probeBody(protocol, modelID string) []byte {
 	}
 	if protocol == config.ProtocolOpenAIChat {
 		payload["stream"] = false
+	}
+	switch protocol {
+	case config.ProtocolOpenAIResponses:
+		payload = map[string]any{"model": modelID, "input": "ping", "max_output_tokens": 16, "stream": false, "store": false}
+	case config.ProtocolSystemOne:
+		payload = systemOneProbePayload(modelID)
 	}
 	b, _ := json.Marshal(payload) // 固定形状的 map，序列化不失败
 	return b

@@ -25,8 +25,8 @@ package admin
 // 能读到同一份）。
 //
 // 资源约定（与「零轮询」规则配套）：一次 net.Interfaces（netlink 一问一答）、
-// 一次 settings 单键点查、两次模型目录查询（文本与视频/图片各一，板上规模是
-// 几行）、一次 Agents 订阅查询（每 provider 单账户，当前至多四行），无 exec、
+// 一次 settings 单键点查、两次模型目录查询（文本与视频/图像各一，板上规模是
+// 几行）、一次 Agents 订阅查询（每种订阅可多账号，行数以管理员录入为限），无 exec、
 // 无 /proc 遍历；页面打开取一次。只读端点，不写审计。
 
 import (
@@ -96,8 +96,9 @@ type aigcModelJSON struct {
 }
 
 type apiModelCountJSON struct {
-	Text int `json:"text"`
-	AIGC int `json:"aigc"`
+	Text      int `json:"text"`
+	AIGC      int `json:"aigc"`
+	SystemOne int `json:"systemone"`
 }
 
 // agentsAccessJSON 是「这台设备现在能不能当某种 agent 后端用」的读数（迭代 11
@@ -129,8 +130,9 @@ type agentsAccessJSON struct {
 type endpointsResponse struct {
 	Endpoints endpointsJSON       `json:"endpoints"`
 	Models    []servableModelJSON `json:"models"`
-	// AIGCModels 是视频/图片模型清单；多数设备没有这类模型，空清单不出现。
-	AIGCModels []aigcModelJSON `json:"aigc_models,omitempty"`
+	// AIGCModels 是视频/图像模型清单；多数设备没有这类模型，空清单不出现。
+	AIGCModels      []aigcModelJSON      `json:"aigc_models,omitempty"`
+	SystemOneModels []systemOneModelJSON `json:"systemone_models,omitempty"`
 	// 按可用来源的账号计费模式分别去重；同一模型可在两组各计一次。
 	APIModelCounts map[string]apiModelCountJSON `json:"api_model_counts"`
 	// Agents 是订阅代理的可用性读数（迭代 11；2026-08-12 起为**数组**，恒含
@@ -161,7 +163,7 @@ func (s *Server) endpointsSnapshot(r *http.Request) endpointsJSON {
 }
 
 // servableModels 汇总「客户端现在就能调用的模型」：与数据面 /v1/models 同一
-// 口径（store 侧同一组谓词，恒为文本口径——kind=text 钉在 SQL 里，视频/图片
+// 口径（store 侧同一组谓词，恒为文本口径——kind=text 钉在 SQL 里，视频/图像
 // 模型不进这份读数，它们走 aigcModels 那份），每个模型标出它能服务的入口
 // 协议——同一模型的多条来源取并集，因为客户端看不见来源，只看得见「这个
 // 名字能不能在这个入口用」。
@@ -192,7 +194,7 @@ func (s *Server) servableModels(ctx context.Context, scope store.KeyAPIModelScop
 		// 这条读数只有文本模型（见上），协议圈定恒为文本三个协议面；来源能力再
 		// 与模型的调用入口开关求交集——关掉的入口对客户端就是不存在，绝不
 		// 在这份成员可读的清单里替它做广告。
-		for _, p := range sourceProtocols(doc, store.ModelKindText, row.ModelName, row.UpstreamModelID, row.UpstreamType, row.UpstreamCatalogID, row.UpstreamBaseURL) {
+		for _, p := range sourceProtocols(doc, store.ModelKindText, row.ModelName, row.UpstreamModelID, row.UpstreamType, row.UpstreamCatalogID, row.UpstreamBaseURL, row.UpstreamProtocolURLs) {
 			if p == config.ProtocolOpenAIChat && !row.EntryOpenAI {
 				continue
 			}
@@ -227,12 +229,12 @@ func (s *Server) servableModels(ctx context.Context, scope store.KeyAPIModelScop
 // kind 显式圈定 video|image）。available 按协议表现算：该模型任一来源的上游
 // 类型服务其 kind 的入口协议即为真，api 记下那个协议面的标识（同格式约束由
 // 管理写入侧保证，多来源必同面——取第一个命中即可）。scope 同 servableModels：
-// 视频/图片模型也受 Key 的 API模型范围约束（数据面提交时同一份谓词）。读失败同
+// 视频/图像模型也受 Key 的 API模型范围约束（数据面提交时同一份谓词）。读失败同
 // servableModels 只降级：记一条 warn、这一节缺省。
 func (s *Server) aigcModels(ctx context.Context, scope store.KeyAPIModelScope) []aigcModelJSON {
 	rows, err := s.st.ListServableAIGCSources(ctx)
 	if err != nil {
-		s.log.Warn("读取视频/图片模型清单失败，接入读数暂不含它", "err", err.Error())
+		s.log.Warn("读取视频/图像模型清单失败，接入读数暂不含它", "err", err.Error())
 		return nil
 	}
 	var out []aigcModelJSON
@@ -247,7 +249,7 @@ func (s *Server) aigcModels(ctx context.Context, scope store.KeyAPIModelScope) [
 			idx[row.ModelName] = i
 			out = append(out, aigcModelJSON{Name: row.ModelName, Kind: row.Kind, billingModes: make(map[string]bool)})
 		}
-		if ps := servableProtocols(row.Kind, row.UpstreamType, row.UpstreamBaseURL); len(ps) > 0 {
+		if ps := servableProtocols(row.Kind, row.UpstreamType, row.UpstreamBaseURL, row.UpstreamProtocolURLs); len(ps) > 0 {
 			if out[i].API == "" {
 				out[i].API = ps[0]
 				out[i].ProtocolFace = config.ProtocolFace(ps[0])
@@ -325,12 +327,17 @@ func (s *Server) agentsAccess(ctx context.Context) []agentsAccessJSON {
 	return out
 }
 
-// endpointsSnapshotFull 组装完整接入读数（地址 + 可用模型 + 视频/图片模型 +
+// endpointsSnapshotFull 组装完整接入读数（地址 + 可用模型 + 视频/图像模型 +
 // Agents 可用性）。
 func (s *Server) endpointsSnapshotFull(r *http.Request) endpointsResponse {
 	// 管理员视角不套 Key 范围：零值 scope 放行全部模型。
 	models := s.servableModels(r.Context(), store.KeyAPIModelScope{})
 	aigc := s.aigcModels(r.Context(), store.KeyAPIModelScope{})
+	systemone := s.systemOneModels(r.Context(), store.KeyAPIModelScope{})
+	counts := apiModelCounts(models, aigc)
+	count := counts["usage"]
+	count.SystemOne = len(systemone)
+	counts["usage"] = count
 	name, err := s.st.DeviceName(r.Context())
 	if err != nil {
 		s.log.Warn("读取设备名失败", "err", err.Error())
@@ -339,7 +346,8 @@ func (s *Server) endpointsSnapshotFull(r *http.Request) endpointsResponse {
 		Endpoints:       s.endpointsSnapshot(r),
 		Models:          models,
 		AIGCModels:      aigc,
-		APIModelCounts:  apiModelCounts(models, aigc),
+		SystemOneModels: systemone,
+		APIModelCounts:  counts,
 		Agents:          s.agentsAccess(r.Context()),
 		FirmwareVersion: buildinfo.Version,
 		HardwareModel:   s.hardwareModel,

@@ -45,6 +45,7 @@ export function PageContainer({
 export function PageHeader({
   title,
   note,
+  leading,
   actions,
   refreshing = false,
   onRefresh,
@@ -52,6 +53,8 @@ export function PageHeader({
 }: {
   title: string;
   note?: React.ReactNode;
+  /** 标题左侧的东西（如「返回」按钮）。 */
+  leading?: React.ReactNode;
   actions?: React.ReactNode;
   refreshing?: boolean;
   onRefresh?: () => void;
@@ -66,7 +69,10 @@ export function PageHeader({
       )}
     >
       <div className={cn("flex min-w-48 flex-1 flex-wrap items-baseline gap-x-3 gap-y-1", compact && "contents sm:flex")}>
-        <h1 className={cn("shrink-0 text-xl font-semibold tracking-tight", compact && "text-lg")}>{title}</h1>
+        <h1 className={cn("flex shrink-0 items-center gap-2 text-xl font-semibold tracking-tight", compact && "text-lg")}>
+          {leading}
+          {title}
+        </h1>
         {note === undefined ? null : (
           <p className={cn("text-muted-foreground min-w-0 text-sm leading-5", compact && "col-span-2 row-start-2 text-xs")}>{note}</p>
         )}

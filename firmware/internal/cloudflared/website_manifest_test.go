@@ -25,4 +25,13 @@ func TestWebsiteManifestVerifies(t *testing.T) {
 	if len(v.Index.Releases) == 0 || v.Index.Releases[0].Platform != "linux-arm64" {
 		t.Fatalf("首条不是 linux-arm64: %+v", v.Index.Releases)
 	}
+	for _, platform := range []string{"linux-arm64", "linux-amd64"} {
+		found := false
+		for _, r := range v.Index.Releases {
+			found = found || (r.Platform == platform && r.Version == "2026.8.2" && r.AllowInstall)
+		}
+		if !found {
+			t.Fatalf("%s 没有可安装的 2026.8.2: %+v", platform, v.Index.Releases)
+		}
+	}
 }

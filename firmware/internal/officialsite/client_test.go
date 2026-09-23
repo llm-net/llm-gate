@@ -14,46 +14,40 @@ import (
 	"testing"
 
 	"github.com/llm-net/llm-gate/firmware/internal/buildinfo"
+	"github.com/llm-net/llm-gate/firmware/internal/platformcatalog"
 )
 
 type fixedModel string
 
 func (m fixedModel) Model() (string, error) { return string(m), nil }
 
-func TestDataFilesUseStaticPathsETagAndSchemas(t *testing.T) {
+const catalogBody = `{"schema":"llmgate.model-catalog/v1","version":7,"currency":"CNY","unit":"micro_yuan","source":{"tag":"data-2026.09.17.2"},` +
+	`"platforms":[{"type":"deepseek","models":[{"name":"m","kind":"text","pricing":{"in":1,"out":1}}]}]}`
+
+func TestDataFileUsesStaticPathETagAndSchema(t *testing.T) {
 	mux := http.NewServeMux()
-	mux.HandleFunc(OfficialPricingPath, func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("If-None-Match") == `"price-v7"` {
-			w.Header().Set("ETag", `"price-v7"`)
+	mux.HandleFunc(ModelCatalogPath, func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("If-None-Match") == `"catalog-v7"` {
+			w.Header().Set("ETag", `"catalog-v7"`)
 			w.WriteHeader(http.StatusNotModified)
 			return
 		}
-		w.Header().Set("ETag", `"price-v7"`)
-		io.WriteString(w, `{"schema":"llmgate.official-pricing/v1","version":7,"models":[{"name":"m","kind":"text","pricing":{"in":1,"out":1}}]}`)
-	})
-	mux.HandleFunc(PlatformModelsPath, func(w http.ResponseWriter, _ *http.Request) {
-		io.WriteString(w, `{"schema":"llmgate.platform-models/v2","version":4,"platforms":[{"type":"deepseek","models":[]}]}`)
+		w.Header().Set("ETag", `"catalog-v7"`)
+		io.WriteString(w, catalogBody)
 	})
 	ts := httptest.NewServer(mux)
 	defer ts.Close()
 	c := NewClient(ts.URL, nil)
 
-	price, err := c.FetchOfficialPricing(context.Background(), "")
+	file, err := c.FetchModelCatalog(context.Background(), "")
 	if err != nil {
-		t.Fatalf("FetchOfficialPricing: %v", err)
+		t.Fatalf("FetchModelCatalog: %v", err)
 	}
-	if price.URL != ts.URL+OfficialPricingPath || price.ETag != `"price-v7"` || price.Doc.Version != 7 {
-		t.Fatalf("price = %+v", price)
+	if file.URL != ts.URL+ModelCatalogPath || file.ETag != `"catalog-v7"` || file.Doc.Version != 7 || file.Doc.Source.Tag != "data-2026.09.17.2" {
+		t.Fatalf("file = %+v", file)
 	}
-	if _, err := c.FetchOfficialPricing(context.Background(), `"price-v7"`); err != ErrNotModified {
+	if _, err := c.FetchModelCatalog(context.Background(), `"catalog-v7"`); err != ErrNotModified {
 		t.Fatalf("条件 GET = %v，期望 ErrNotModified", err)
-	}
-	models, err := c.FetchPlatformModels(context.Background(), "")
-	if err != nil {
-		t.Fatalf("FetchPlatformModels: %v", err)
-	}
-	if models.URL != ts.URL+PlatformModelsPath || models.Doc.Version != 4 {
-		t.Fatalf("models = %+v", models)
 	}
 }
 
@@ -62,15 +56,16 @@ func TestDataFileRejectsWrongSchemaAndOversize(t *testing.T) {
 		body string
 		want string
 	}{
-		"wrong schema": {`{"schema":"other/v1","models":[{"name":"m"}]}`, "形态不符"},
-		"oversize":     {strings.Repeat("x", OfficialPricingMaxBytes+1), "超过"},
+		"wrong schema": {`{"schema":"other/v1","platforms":[{"type":"deepseek"}]}`, "形态不符"},
+		"html fallback": {`<!doctype html><title>LLM Gate</title>`, "不是合法 JSON"},
+		"oversize":      {strings.Repeat("x", platformcatalog.MaxBytes+1), "超过"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				io.WriteString(w, tc.body)
 			}))
 			defer ts.Close()
-			_, err := NewClient(ts.URL, nil).FetchOfficialPricing(context.Background(), "")
+			_, err := NewClient(ts.URL, nil).FetchModelCatalog(context.Background(), "")
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("err = %v，期望包含 %q", err, tc.want)
 			}

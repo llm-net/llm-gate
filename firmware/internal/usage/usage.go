@@ -30,10 +30,11 @@ import (
 // gateway 与 admin 一律引用这里的常量，别再各写一份字面量——两家 cache 口径
 // 相反，entry 写错一个字母就是整条入口的账算错了。
 const (
-	EntryChat     = "chat"     // POST /v1/chat/completions（OpenAI 形 usage）
-	EntryMessages = "messages" // POST /v1/messages（Anthropic 形 usage）
-	EntryVideo    = "video"    // POST /v1/video/generations（异步任务面）
-	EntryImage    = "image"    // POST /v1/images/generations（同步出图）
+	EntrySystemOne = "systemone" // POST /typesafe/v1/systemone
+	EntryChat      = "chat"      // POST /v1/chat/completions（OpenAI 形 usage）
+	EntryMessages  = "messages"  // POST /v1/messages（Anthropic 形 usage）
+	EntryVideo     = "video"     // POST /v1/video/generations（异步任务面）
+	EntryImage     = "image"     // POST /v1/images/generations（同步出图）
 	// EntryResponses 是 POST /v1/responses（标准 Responses 目录面，2026-08-13，
 	// docs/firmware-gateway.md「Responses 目录面」）：走目录选路、按目录价正常
 	// 记账，金额是真钱。上游打的是所选来源的 chat 端点，usage 是 OpenAI 形——
@@ -109,9 +110,10 @@ func reportModelDimension(entry, model string) (string, bool) {
 //   - 金额恒 0 元是**真值**（订阅无边际成本），不打 estimated；管理员在模型目录
 //     建一行同名 image 模型并录 ark_image_each 时，画图门按张数记名义金额——
 //     同 Codex/Grok 文本订阅代理的名义价旋钮，只是形态换成按张；
-//   - 画图门记张数（TaskUsage.GeneratedImages = 响应 data[] 长度）；视频提交只记
-//     「1 次请求、0 元」，没有任务行与清算；GET /videos/{request_id} 轮询不计量，
-//     只进访问日志（同 Cursor 的辅助 RPC 口径）。
+//   - 画图门记张数（TaskUsage.GeneratedImages = 响应 data[] 长度）；视频提交门
+//     记受理个数（TaskUsage.GeneratedVideos = 1，落 video_count 列），0 元，
+//     没有任务行与清算；GET /videos/{request_id} 轮询不计量，只进访问日志
+//     （同 Cursor 的辅助 RPC 口径）。
 //
 // 取值与账本里同名的历史行完全相同，历史小时行不需要迁移。
 const (
@@ -123,6 +125,8 @@ const (
 // responses 同属文本），聚合表因此不把 kind 放进唯一索引——它由 entry 唯一决定。
 func EntryKind(entry string) string {
 	switch entry {
+	case EntrySystemOne:
+		return store.ModelKindSystemOne
 	case EntryVideo, EntryImagineVideo:
 		return store.ModelKindVideo
 	case EntryImage, EntryImagineImage:
@@ -200,7 +204,7 @@ type Sample struct {
 	Pricing string
 
 	Tokens Tokens
-	// TaskUsage 是视频/图片形态的用量（厂商 usage 原文解析结果）。
+	// TaskUsage 是视频/图像形态的用量（厂商 usage 原文解析结果）。
 	TaskUsage TaskUsage
 	// HasVideoInput / Resolution 是提交时即固化的计费特征（Seedance 分档判据 /
 	// H3 秒价档判据），来自 aigc_tasks 行。
@@ -254,22 +258,24 @@ type quantities struct {
 	total   int64
 	seconds int64
 	images  int64
+	videos  int64
 }
 
 // quantities 按 kind 摊出本样本的记账量。**按 kind 二选一，不相加**：
-// 文本面的量在 Tokens 里，视频/图片面的在 TaskUsage 里（厂商 usage 的解析
+// 文本面的量在 Tokens 里，视频/图像面的在 TaskUsage 里（厂商 usage 的解析
 // 结果），一个样本只可能是其中一种形态。相加看着更"宽容"，实际是给未来某天
 // 两处同时有值时的重复计数留门。
 //
-// 视频/图片形态的落位（字段名带厂商前缀，天然互斥，故同列可以合并）：
+// 视频/图像形态的落位（字段名带厂商前缀，天然互斥，故同列可以合并）：
 //
 //	completion  ← 方舟 Seedance 的 completion_tokens、Seedream 的 output_tokens、
 //	              H3 Context-IR 的 completion_tokens
 //	prompt      ← H3 Context-IR 的 prompt_tokens
 //	seconds     ← H3 的 output_seconds + input_seconds（同一秒价，合计即计价量）
-//	images      ← H3 的 input_image_count 或 Seedream 的 generated_images
+//	images      ← H3 的 input_image_count 或 Seedream / Grok Imagine 的 generated_images
+//	videos      ← Grok Imagine 视频提交的受理个数
 func (s Sample) quantities() quantities {
-	if s.kind() == store.ModelKindText {
+	if s.kind() == store.ModelKindText || s.kind() == store.ModelKindSystemOne {
 		return quantities{tokens: s.Tokens, total: s.Tokens.Total(s.Entry)}
 	}
 	u := s.TaskUsage
@@ -282,6 +288,7 @@ func (s Sample) quantities() quantities {
 		total:   tok.Prompt + tok.Completion,
 		seconds: nonNeg(u.OutputSeconds) + nonNeg(u.InputSeconds),
 		images:  nonNeg(u.InputImages) + nonNeg(u.GeneratedImages),
+		videos:  nonNeg(u.GeneratedVideos),
 	}
 }
 
@@ -305,11 +312,13 @@ type Event struct {
 	TotalTokens      int64     `json:"total_tokens"`
 	CacheReadTokens  int64     `json:"cache_read_tokens"`
 	CacheWriteTokens int64     `json:"cache_write_tokens"`
-	// VideoSeconds / ImageCount 是非 token 形态的计费量（H3 按秒、按参考图张数，
-	// Seedream 按出图张数）。文本行恒为 0——视频行的「Token 0」不是没花钱，
-	// 是这一行的量本来就不按 token 计。
+	// VideoSeconds / ImageCount / VideoCount 是非 token 形态的计费量（H3 按秒、
+	// 按参考图张数，Seedream / Grok Imagine 按出图张数，Grok Imagine 视频按受理
+	// 个数）。文本行恒为 0——视频行的「Token 0」不是没花钱，是这一行的量本来
+	// 就不按 token 计。
 	VideoSeconds     int64  `json:"video_seconds"`
 	ImageCount       int64  `json:"image_count"`
+	VideoCount       int64  `json:"video_count"`
 	CostMicro        int64  `json:"cost_micro"`
 	DurationMs       int64  `json:"duration_ms"`
 	Estimated        bool   `json:"estimated,omitempty"`

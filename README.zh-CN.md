@@ -58,7 +58,7 @@ curl -fsSL https://llm.net/install.sh | sudo sh
 | `gate-{linux,darwin,windows}-{amd64,arm64}` 压缩包 | 六平台预编译引导器；Unix 为 `.tar.gz`，Windows 为 `.zip` |
 | `SHA256SUMS` | Release 下载文件的校验清单 |
 
-每个 Release tag 指向对应的固件源码快照，固件和 `gate` 下载使用同一版本。官网与 `gate` 引导器源码未包含在本仓，`gate` 以预编译文件提供。第三方依赖与单独安装的组件遵循各自许可证。
+每个 Release tag 指向对应的固件源码快照，固件和 `gate` 下载使用同一版本。官网源码未包含在本仓。`gate` 预编译压缩包不入库：固件构建时从 `gate/` 源码重建，并作为 Release 下载发布。第三方依赖与单独安装的组件遵循各自许可证。
 
 ## 构建固件
 

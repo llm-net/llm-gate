@@ -20,6 +20,14 @@ func connectClaude(t *testing.T, e *agentEnv, token, label string) *http.Respons
 	return e.send(r)
 }
 
+// reconnectClaude 把新 setup-token 覆盖进既有账号行（account_id 非零）。
+func reconnectClaude(t *testing.T, e *agentEnv, accountID int64, token, label string) *http.Response {
+	t.Helper()
+	body := fmt.Sprintf(`{"setup_token":%q,"label":%q,"account_id":%d}`, token, label, accountID)
+	r := e.req(http.MethodPost, "/admin/v1/agent-accounts/claude/setup-token", e.cookie, body)
+	return e.send(r)
+}
+
 func TestClaudeSetupTokenAcceptsProxyHTTPOriginAndIsSealed(t *testing.T) {
 	e := newAgentAdminEnv(t, issuerGrants(agentAccess, agentRefresh))
 	body := fmt.Sprintf(`{"setup_token":%q,"label":"Claude 主订阅"}`, claudeSetupFake)
@@ -30,7 +38,7 @@ func TestClaudeSetupTokenAcceptsProxyHTTPOriginAndIsSealed(t *testing.T) {
 	if strings.Contains(responseBody, claudeSetupFake) || strings.Contains(responseBody, `"setup_token":`) {
 		t.Fatal("连接响应泄露 setup-token")
 	}
-	acct, blob, err := e.st.GetAgentCredential(t.Context(), store.AgentProviderClaude)
+	acct, blob, err := e.st.GetAgentCredential(t.Context(), e.list()[0].ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,10 +59,14 @@ func TestClaudeSetupTokenAcceptsProxyHTTPOriginAndIsSealed(t *testing.T) {
 func TestClaudeReconnectReplacesCredentialAndRefreshIsUnsupported(t *testing.T) {
 	e := newAgentAdminEnv(t, issuerGrants(agentAccess, agentRefresh))
 	wantStatus(t, connectClaude(t, e, claudeSetupFake, "Claude"), http.StatusOK)
+	id := e.list()[0].ID
 	const replacement = "fake-claude-replacement-credential-never-real-9876543210"
-	wantStatus(t, connectClaude(t, e, replacement, ""), http.StatusOK)
+	wantStatus(t, reconnectClaude(t, e, id, replacement, ""), http.StatusOK)
 
-	acct, blob, err := e.st.GetAgentCredential(t.Context(), store.AgentProviderClaude)
+	if accounts := e.list(); len(accounts) != 1 {
+		t.Fatalf("按 id 重连后 = %d 行，期望 1", len(accounts))
+	}
+	acct, blob, err := e.st.GetAgentCredential(t.Context(), id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,9 +118,10 @@ func TestClaudeVisibleModelPersists(t *testing.T) {
 	r := e.req(http.MethodPost, "/admin/v1/agent-accounts/claude/setup-token", e.cookie, body)
 	wantStatus(t, e.send(r), http.StatusOK)
 
+	id := e.list()[0].ID
 	visible := func() *store.AgentAccount {
 		t.Helper()
-		acct, _, err := e.st.GetAgentCredential(t.Context(), store.AgentProviderClaude)
+		acct, _, err := e.st.GetAgentCredential(t.Context(), id)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -119,7 +132,7 @@ func TestClaudeVisibleModelPersists(t *testing.T) {
 	}
 
 	// 重连不带该字段 = 保持既有值（Upsert 的「空即保持」）。
-	wantStatus(t, connectClaude(t, e, claudeSetupFake, "Claude 主订阅"), http.StatusOK)
+	wantStatus(t, reconnectClaude(t, e, id, claudeSetupFake, "Claude 主订阅"), http.StatusOK)
 	acct := visible()
 	if acct.DefaultModel != "claude-fable-5" {
 		t.Fatalf("重连抹掉了可见模型：%q", acct.DefaultModel)

@@ -50,7 +50,7 @@ func (s *Server) ProbeTask(ctx context.Context, task store.AIGCTask) (store.AIGC
 	if !ok { // 行由适配器写入，类型必有适配器；防御分支
 		return task, fmt.Errorf("上游类型 %s 无任务适配器", ru.Type)
 	}
-	acct := upstream.Account{Name: ru.Name, Type: ru.Type, APIKey: ru.APIKey, BaseURL: ru.BaseURL, EgressMode: ru.EgressMode}
+	acct := upstream.Account{Name: ru.Name, Type: ru.Type, APIKey: ru.APIKey, BaseURL: ru.BaseURL, ProtocolURLs: ru.ProtocolURLs, EgressMode: ru.EgressMode}
 
 	res, err := s.queryVendorTask(ctx, acct, ad, task.VendorTaskID)
 	if err != nil {

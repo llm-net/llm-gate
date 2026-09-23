@@ -298,7 +298,7 @@ func TestEndpointsModels(t *testing.T) {
 	}
 }
 
-// TestEndpointsAIGCModels：视频/图片模型的最小可见性。2026-08-09 厂商官方
+// TestEndpointsAIGCModels：视频/图像模型的最小可见性。2026-08-09 厂商官方
 // 接口改版起，member 可读的清单带 api（协议面协议名，如 minimax_video）——
 // 模型固定源头厂商官方接口后，协议面就是客户端契约，使用API页要靠它教官方
 // 路径；仍然不得泄露的是上游**账户**（账户名、来源侧模型 ID、凭据）。
@@ -331,7 +331,7 @@ func TestEndpointsAIGCModels(t *testing.T) {
 
 	snap := e.access(root)
 	if len(snap.Models) != 1 || snap.Models[0].Name != "text-model" {
-		t.Errorf("文本清单 = %+v，期望不受视频/图片模型影响", snap.Models)
+		t.Errorf("文本清单 = %+v，期望不受视频/图像模型影响", snap.Models)
 	}
 	want := []aigcModelDTO{
 		{Name: "dead-video", Kind: "video", API: "", Available: false},
@@ -367,7 +367,7 @@ func TestEndpointsAIGCModels(t *testing.T) {
 
 // TestKeyAccessSnapshotNarrowsToKeyScope：凭 Key 自证的读数（数据面
 // GET /gate-helper/v1/endpoints 的执行体 KeyAccessSnapshot）与管理员视角同一份地址、
-// 端口与铭牌；模型清单（文本与视频/图片）按这把 Key 的 API模型范围裁剪——范围外
+// 端口与铭牌；模型清单（文本与视频/图像）按这把 Key 的 API模型范围裁剪——范围外
 // 的名字整个不出现，与 /v1/models 同一口径；不带订阅读数（那归 /gate-helper/v1/config）。
 // 管理员视角的 /admin/v1/endpoints 不受任何 Key 范围影响。
 func TestKeyAccessSnapshotNarrowsToKeyScope(t *testing.T) {

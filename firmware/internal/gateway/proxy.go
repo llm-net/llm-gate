@@ -1,4 +1,4 @@
-// proxy.go 是 chat / messages / 图片三个同步入口共享的透传核心，分成两段
+// proxy.go 是 chat / messages / 图像三个同步入口共享的透传核心，分成两段
 // （iteration-5 决策 5）：
 //
 //   - [Server.forward]「发起并取响应」——按优先级逐个候选来源尝试，未向客户端
@@ -77,10 +77,12 @@ var hopByHopHeaders = []string{
 // 上游端点，body 每来源重建一次（model 改写为该来源的 upstream_model_id），
 // model 是客户端提交的模型名（响应 model 回写目标，也用于脱敏日志）。
 type forwardSpec struct {
-	protocol string
-	path     string
-	model    string
-	body     func(upstreamModelID string) ([]byte, error)
+	// forCandidate selects the wire protocol and response handling for each failover attempt.
+	forCandidate func(candidate) forwardSpec
+	protocol     string
+	path         string
+	model        string
+	body         func(upstreamModelID string) ([]byte, error)
 	// bodyFor 在请求体行为还取决于具体平台能力时使用；非 nil 时优先于 body。
 	bodyFor func(candidate) ([]byte, error)
 	// contentType 覆盖上游请求的 Content-Type；空串沿用客户端原值。
@@ -156,15 +158,19 @@ func (s *Server) forward(w http.ResponseWriter, r *http.Request, cands []candida
 	}
 
 	for i, c := range cands {
+		attemptSpec := spec
+		if spec.forCandidate != nil {
+			attemptSpec = spec.forCandidate(c)
+		}
 		last := i == len(cands)-1
 		info.attempts, info.upstream = i+1, c.account.Name
-		// 计价形态随上游产品类型（视频/图片两条路都要），不进任何存储列。
+		// 计价形态随上游产品类型（视频/图像两条路都要），不进任何存储列。
 		info.bill.upstreamType = c.account.Type
 
 		// 每次尝试挂在自己的可取消 context 上（父仍是 r.Context()，客户端断开
 		// 照样传播）：切换时用它给"丢弃响应体"设时间上限。
 		attemptCtx, cancel := context.WithCancel(r.Context())
-		req, ok := s.buildAttempt(attemptCtx, w, r, c, spec)
+		req, ok := s.buildAttempt(attemptCtx, w, r, c, attemptSpec)
 		if !ok {
 			cancel()
 			return // 内部错误已写出（装配失败不是可切换故障）
@@ -201,12 +207,12 @@ func (s *Server) forward(w http.ResponseWriter, r *http.Request, cands []candida
 		// 提交：此后绝不再切换来源。取消推迟到回写完成之后（提前取消会掐断
 		// 正在转发的 SSE 长流）。
 		defer cancel()
-		if spec.commit != nil {
-			spec.commit(w, r, resp)
+		if attemptSpec.commit != nil {
+			attemptSpec.commit(w, r, resp)
 			return
 		}
 		s.commitResponse(w, r, resp,
-			respRewrite{model: spec.model, observe: spec.observe}, spec.errStyle)
+			respRewrite{model: attemptSpec.model, observe: attemptSpec.observe}, spec.errStyle)
 		return
 	}
 }
@@ -272,7 +278,7 @@ func discardBody(resp *http.Response, cancel context.CancelFunc) {
 // （非流式整读 round-trip、SSE 逐 data: 行，见文件头），其余内容不解析——
 // [DONE]、anthropic 事件帧与未知 finish_reason/stop_reason 原样到达客户端。
 // 2xx 载荷解析成功后还先喂给 rw.observe（若有）：入口各自的账单事实观测点
-// （图片入口的厂商 usage、文本入口的 token 计量，见 metering.go）。
+// （图像入口的厂商 usage、文本入口的 token 计量，见 metering.go）。
 // 进入本函数即视为「已提交」：此后的任何失败都只记日志，不切换来源。
 //
 // 它**不依赖选路**（不取候选、不碰上游账户），所以 Agents 代理那条自己拼请求

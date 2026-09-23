@@ -252,6 +252,63 @@ exit 0
 	}
 }
 
+// 订阅名单上的型号可能已被官方从新版 bundled 撤掉：略去并提示，默认模型落到
+// 第一个保留的模型；目录模型缺元数据是设备侧问题，照旧报错。
+func TestCodexCatalogSkipsSubscriptionModelsMissingFromBundled(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell fixtures")
+	}
+	deviceCatalog := `{"models":[{"slug":"deepseek-v4","display_name":"DeepSeek V4"}]}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer "+fakeKey {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		switch r.URL.Path {
+		case "/gate-helper/v1/config":
+			_, _ = w.Write([]byte(`{"schema_version":1,"revision":1,"subscriptions":[{"provider":"codex","configured":true,"available":true,"default_model":"gpt-gone"}],"tools":{"codex":{"default_model":"gpt-gone","models":[{"name":"gpt-gone","source":"subscription"},{"name":"gpt-test","source":"subscription"},{"name":"deepseek-v4","source":"catalog"}]},"grok":{"default_model":"","models":[]},"claude":{"default_model":"","models":[]}}}`))
+		case "/agents/codex/v1/model-catalog":
+			_, _ = w.Write([]byte(deviceCatalog))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	bin := writeScript(t, t.TempDir(), "codex", `#!/bin/sh
+if [ "$1" = "--version" ]; then echo 'codex-cli 1.5.0'; exit 0; fi
+if [ "$1 $2 $3" = "debug models --bundled" ]; then echo '{"models":[{"slug":"gpt-test","display_name":"GPT Test"}]}'; exit 0; fi
+if [ "$1 $2" = "debug models" ]; then exit 0; fi
+exit 0
+`)
+	a := newCodexApp(t, srv.URL)
+	if err := a.connect("codex", bin, "external"); err != nil {
+		t.Fatal(err)
+	}
+	if warn := a.err.(*bytes.Buffer).String(); !strings.Contains(warn, "gpt-gone") || !strings.Contains(warn, "codex-cli 1.5.0") {
+		t.Fatalf("skipped model not reported: %q", warn)
+	}
+	body, err := os.ReadFile(filepath.Join(a.derivedDir("codex"), "model-catalog.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), "gpt-gone") || !strings.Contains(string(body), `"gpt-test"`) || !strings.Contains(string(body), `"deepseek-v4"`) {
+		t.Fatalf("catalog should hold the two known models: %s", body)
+	}
+	toml, err := os.ReadFile(filepath.Join(a.derivedDir("codex"), "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(toml), "model = \"gpt-test\"\n") {
+		t.Fatalf("default model should fall back to the first kept model:\n%s", toml)
+	}
+
+	deviceCatalog = `{"models":[]}`
+	err = a.connect("codex", bin, "external")
+	if err == nil || isCLIUnusable(err) || !strings.Contains(err.Error(), `"deepseek-v4"`) {
+		t.Fatalf("missing catalog model must fail as a device-side error: %v", err)
+	}
+}
+
 func TestTomlPatchHelpers(t *testing.T) {
 	text := "# note\nmodel = \"gpt-5\"\nmodel_provider = 'openai' # comment\n\n[projects.\"/x\"]\ntrust_level = \"trusted\"\n"
 	if v, ok := tomlTopLevel(text, "model_provider"); !ok || v != "openai" {

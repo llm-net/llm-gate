@@ -142,6 +142,37 @@ func newCompEnv(t *testing.T) *compEnv {
 	return env
 }
 
+// packageArtifact 造一个假的 codex-app-server 目录包（入口 + code-mode host + 自述 + 资源）并
+// 返回安装请求：Path 是目录，SHA256 是入口文件的。
+func (env *compEnv) packageArtifact(version string) ComponentInstallRequest {
+	env.t.Helper()
+	body := []byte("ELF:" + version)
+	dir := filepath.Join(env.stage, "cas-"+version)
+	for _, d := range []string{"bin", "codex-path", "codex-resources/zsh/bin"} {
+		if err := os.MkdirAll(filepath.Join(dir, d), 0o700); err != nil {
+			env.t.Fatal(err)
+		}
+	}
+	files := map[string]struct {
+		body []byte
+		mode os.FileMode
+	}{
+		"bin/codex-app-server":        {body, 0o700},
+		"bin/codex-code-mode-host":    {[]byte("ELF:host"), 0o700},
+		"codex-package.json":          {[]byte(`{"layoutVersion":1,"version":"` + version + `"}`), 0o600},
+		"codex-path/rg":               {[]byte("ELF:rg"), 0o700},
+		"codex-resources/bwrap":       {[]byte("ELF:bwrap"), 0o700},
+		"codex-resources/zsh/bin/zsh": {[]byte("ELF:zsh"), 0o700},
+	}
+	for name, f := range files {
+		if err := os.WriteFile(filepath.Join(dir, filepath.FromSlash(name)), f.body, f.mode); err != nil {
+			env.t.Fatal(err)
+		}
+	}
+	sum := sha256.Sum256(body)
+	return ComponentInstallRequest{Path: dir, Version: version, SHA256: hex.EncodeToString(sum[:])}
+}
+
 // artifact 造一个假制品并返回安装请求。
 func (env *compEnv) artifact(version string) ComponentInstallRequest {
 	env.t.Helper()
@@ -397,5 +428,125 @@ func TestComponentUDSRoundTrip(t *testing.T) {
 	st, err = c.ComponentRemove(ctx, ComponentCloudflared)
 	if err != nil || st.Installed {
 		t.Fatalf("经 UDS 卸载: %+v %v", st, err)
+	}
+}
+
+// codex-app-server 是目录包、没有常驻 unit：整棵树进槽位（入口 bin/codex-app-server，旁边的
+// code-mode host、自述与资源一并到位，权限按执行位 0755/0644），安装、回退、卸载都只动槽位，
+// 一次都不碰 systemctl，也不等就绪；自述版本走缺省的 --version（假制品回 "<组件> version <版本>"）。
+// 单文件请求装不进目录包组件，目录请求也装不进单文件组件。
+func TestCodexAppServerSlotsWithoutService(t *testing.T) {
+	env := newCompEnv(t)
+	ctx := context.Background()
+	if _, err := env.e.ComponentInstall(ctx, ComponentCodexAppServer, env.artifact("0.154.0")); err == nil || !strings.Contains(err.Error(), "目录") {
+		t.Fatalf("单文件请求应被拒: %v", err)
+	}
+	if _, err := env.e.ComponentInstall(ctx, ComponentCloudflared, env.packageArtifact("0.154.0")); err == nil || !strings.Contains(err.Error(), "目录") {
+		t.Fatalf("目录请求装单文件组件应被拒: %v", err)
+	}
+	// 旧固件装的单文件残件占着 slot a：不算已安装，也不算可回退的上一版本。
+	compDir := filepath.Join(env.e.opt.ComponentsDir, ComponentCodexAppServer)
+	legacy := filepath.Join(compDir, "slots", "a")
+	if err := os.MkdirAll(legacy, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(legacy, "codex-app-server"), []byte("ELF:0.154.0"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(legacy, "manifest.json"), []byte(`{"version":"0.154.0","sha256":"x","size_bytes":11}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := env.e.switchCurrent(ComponentCodexAppServer, "a"); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := env.e.ComponentStatus(ComponentCodexAppServer); st.Installed || st.Previous != nil {
+		t.Fatalf("单文件残件不该算已安装: %+v", st)
+	}
+	// 目录包缺 code-mode host：拒装。
+	incomplete := env.packageArtifact("0.150.0")
+	if err := os.Remove(filepath.Join(incomplete.Path, "bin", "codex-code-mode-host")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.e.ComponentInstall(ctx, ComponentCodexAppServer, incomplete); err == nil || !strings.Contains(err.Error(), "codex-code-mode-host") {
+		t.Fatalf("缺伴侣的目录包应拒: %v", err)
+	}
+
+	st, err := env.e.ComponentInstall(ctx, ComponentCodexAppServer, env.packageArtifact("0.154.0"))
+	if err != nil {
+		t.Fatalf("首次安装: %v", err)
+	}
+	if !st.Installed || st.CurrentSlot != "b" || st.Current.Version != "0.154.0" || st.Current.SizeBytes != int64(len("ELF:0.154.0")) {
+		t.Fatalf("首次安装后状态不对: %+v", st)
+	}
+	cur := filepath.Join(compDir, "current")
+	if raw, err := os.ReadFile(filepath.Join(cur, "bin", "codex-app-server")); err != nil || string(raw) != "ELF:0.154.0" {
+		t.Fatalf("current 链接没指到装好的入口: %v %q", err, raw)
+	}
+	for name, want := range map[string]os.FileMode{
+		"bin/codex-code-mode-host": 0o755, "codex-path/rg": 0o755, "codex-resources/bwrap": 0o755,
+		"codex-resources/zsh/bin/zsh": 0o755, "codex-package.json": 0o644,
+	} {
+		info, err := os.Stat(filepath.Join(cur, filepath.FromSlash(name)))
+		if err != nil || info.Mode().Perm() != want {
+			t.Fatalf("%s 应随包落位且权限为 %o: %v %v", name, want, info, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(compDir, "slots", "b.next")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("临时目录应已换成槽位: %v", err)
+	}
+	// 让 connector / 内核的假 unit 处于 active，确认与本组件无关：安装升级不重启任何服务。
+	_ = env.unit.Run(ctx, "start", "x")
+	// 升级进 slot a：残件被整目录清掉。
+	st, err = env.e.ComponentInstall(ctx, ComponentCodexAppServer, env.packageArtifact("0.155.0"))
+	if err != nil {
+		t.Fatalf("第二次安装: %v", err)
+	}
+	if st.CurrentSlot != "a" || st.Current.Version != "0.155.0" || st.Previous == nil || st.Previous.Version != "0.154.0" {
+		t.Fatalf("升级后状态不对: %+v", st)
+	}
+	if _, err := os.Stat(filepath.Join(legacy, "codex-app-server")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("旧残件应被清掉: %v", err)
+	}
+	if st, err = env.e.ComponentRollback(ctx, ComponentCodexAppServer); err != nil || st.Current.Version != "0.154.0" {
+		t.Fatalf("回退: %+v %v", st, err)
+	}
+	// 上一槽位（a，0.155.0）若丢了 code-mode host：不再算可回退的上一版本，回退答 ErrNoPreviousSlot。
+	hostA := filepath.Join(compDir, "slots", "a", "bin", "codex-code-mode-host")
+	if err := os.Rename(hostA, hostA+".bak"); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ = env.e.ComponentStatus(ComponentCodexAppServer); st.Previous != nil {
+		t.Fatalf("缺伴侣的槽位不该算上一版本: %+v", st)
+	}
+	if _, err := env.e.ComponentRollback(ctx, ComponentCodexAppServer); !errors.Is(err, ErrNoPreviousSlot) {
+		t.Fatalf("缺伴侣的槽位不该可回退: %v", err)
+	}
+	if err := os.Rename(hostA+".bak", hostA); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ = env.e.ComponentStatus(ComponentCodexAppServer); st.Previous == nil || st.Previous.Version != "0.155.0" {
+		t.Fatalf("伴侣回来后应恢复: %+v", st)
+	}
+	// 自述版本不符：整棵临时树删掉，槽位不动。
+	bad := env.packageArtifact("0.156.0")
+	env.verOut = "codex-app-server 0.1.0"
+	if _, err := env.e.ComponentInstall(ctx, ComponentCodexAppServer, bad); err == nil || !strings.Contains(err.Error(), "自述版本") {
+		t.Fatalf("自述版本不符应拒: %v", err)
+	}
+	env.verOut = ""
+	if _, err := os.Stat(filepath.Join(compDir, "slots", "a.next")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("失败后不该留临时目录: %v", err)
+	}
+	if st, _ = env.e.ComponentStatus(ComponentCodexAppServer); st.Current.Version != "0.154.0" || st.Previous.Version != "0.155.0" {
+		t.Fatalf("失败后槽位应原样: %+v", st)
+	}
+	if st, _ = env.e.ComponentRemove(ctx, ComponentCodexAppServer); st.Installed {
+		t.Fatalf("卸载后仍算已安装: %+v", st)
+	}
+	if env.unit.saw("restart") != 0 || env.unit.saw("stop") != 0 {
+		t.Fatalf("无服务组件不该操作 unit: %v", env.unit.calls)
+	}
+	if _, err := os.Stat(compDir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("卸载应删整个组件目录: %v", err)
 	}
 }

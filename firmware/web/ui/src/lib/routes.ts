@@ -11,7 +11,16 @@
 // 三组路由作用域不同，加路由时别搞混：
 // - `/model-routing/*` 教「怎么把客户端或开发工具连到这台设备」；
 // - `/upstreams/*` 与 `/agent-accounts` 是「模型接入」菜单组的四页——API按量计费、
-//   API订阅套餐、API私有部署、开发工具订阅——各占一条路由，侧栏各是一项。
+//   API订阅套餐、API私有部署、开发工具订阅——各占一条路由，侧栏各是一项；
+// - `/agent-hosts` 是「智能体」菜单组的「主机/SoC」：登记可被智能体远程管理的
+//   主机与 SoC 开发板，管设备访问证书与免密登录，每行还记着有没有装守护进程
+//   llmgate-devd，与模型接入无关；`/host-agent` 是某一台主机的「Agent远控」页（多个对话、
+//   指令队列、主机档案、操作日志），`/host-tools` 是某一台工作节点 / 模型服务节点的工具配置（devd 或 modeld / git / gate
+//   的安装与状态），两者主机 id 都在查询串 `?host=<id>` 里——路由表只认路径，参数由
+//   页面自己读；`/credentials` 是同一组的「凭证管理」：交给智能体使用的第三方凭证
+//   （git 托管站点的账号 + 令牌），令牌封存在设备上、不回显；`/workspaces` 是同一组的
+//   「工作空间管理」：工作节点上的目录（可选从仓库克隆），`/workspace?id=<id>` 是打开其中一个
+//   （文件 / Git、编辑器、tmux 终端三栏），id 同样在查询串里。
 //
 // 设备自身的两页按「常改的」与「偶尔做一次的」分开，别再合成一页：
 // - `/network` 是这台设备怎么被连上（网卡 IPv4 + 内网域名 + 公网接入），
@@ -24,11 +33,20 @@
 export const BUSINESS_ROUTES = [
   "/model-routing/api",
   "/model-routing/dev-tools",
+  "/api-debug",
+  "/media",
   "/keys",
   "/upstreams/usage",
   "/upstreams/plan",
   "/upstreams/private",
   "/agent-accounts",
+  "/agent-hosts",
+  "/host-agent",
+  "/host-tools",
+  "/host-model",
+  "/credentials",
+  "/workspaces",
+  "/workspace",
   "/usage",
   "/status",
   "/network",
@@ -75,6 +93,7 @@ const LEGACY_PATH: Readonly<Record<string, BusinessRoute>> = {
   "/users": "/keys", // 用户页没了，它下面真正在用的东西是密钥
   "/profile": "/network", // 个人资料没了，改密现在在顶栏
   "/my-usage": "/usage", // 个人账并进设备唯一的那本账
+  "/dev-hosts": "/agent-hosts", // 研发管理并进主机/SoC：守护进程状态是主机行的一部分
 };
 
 export function isBusinessRoute(route: Route): route is BusinessRoute {

@@ -149,16 +149,13 @@ func newGrokEnv(t *testing.T, respond, refresh http.HandlerFunc) *grokEnv {
 	issuer := newGrokStubIssuer(t, refresh)
 	e.srv.SetGrokEndpoints(issuer.url, stubRoot(backend)+grokBackendPath)
 
-	acct, err := e.st.UpsertAgentAccount(t.Context(), store.NewAgentAccount{
+	acct := connectAgent(t, e.st, store.NewAgentAccount{
 		Provider:     store.AgentProviderGrok,
 		Label:        "Grok 订阅",
 		AccountID:    "admin@example.invalid",
 		DefaultModel: grokModel,
 		AuthJSON:     grokAuthJSONFixture(grokAccess1, grokRefresh1),
 	})
-	if err != nil {
-		t.Fatalf("UpsertAgentAccount: %v", err)
-	}
 	return &grokEnv{routeEnv: e, backend: backend, issuer: issuer, acctID: acct.ID}
 }
 
@@ -235,8 +232,8 @@ func TestResponsesGrokFullPath(t *testing.T) {
 }
 
 // TestResponsesGrokDispatchByModel：分流契约（docs/firmware-agents-grok.md）。
-// 只连了 grok 的设备：grok-* 通、gpt-* 回 409 且指名 Codex；大小写不敏感。
-// 只连了 codex 的设备（复用 codex 环境）：grok-* 回 409 且指名 Grok Build。
+// 只钉了 grok 账号的 Key：grok-* 通、gpt-* 回 403 且指名 Codex；大小写不敏感。
+// 只钉了 codex 账号的 Key（复用 codex 环境）：grok-* 回 403 且指名 Grok Build。
 func TestResponsesGrokDispatchByModel(t *testing.T) {
 	e := newGrokEnv(t, jsonReply(http.StatusOK, grokNonStreamBody), issuerNever(t))
 
@@ -247,23 +244,23 @@ func TestResponsesGrokDispatchByModel(t *testing.T) {
 	}
 
 	w = do(e.h, "POST", "/agents/v1/responses", grokClientHeaders, grokReq(codexModel))
-	if w.Code != http.StatusConflict {
-		t.Fatalf("gpt-* 在只连 grok 的设备上状态码 = %d，期望 409", w.Code)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("gpt-* 在只钉 grok 的 Key 上状态码 = %d，期望 403", w.Code)
 	}
 	_, code, msg := decodeError(t, w)
-	if code != "agent_not_configured" || !strings.Contains(msg, "Codex") {
-		t.Errorf("错误 = %q %q，期望 agent_not_configured 且指名 Codex", code, msg)
+	if code != "subscription_not_allowed" || !strings.Contains(msg, "Codex") {
+		t.Errorf("错误 = %q %q，期望 subscription_not_allowed 且指名 Codex", code, msg)
 	}
 
-	// 反向：只连 codex 的设备上打 grok 模型。
+	// 反向：只钉 codex 的 Key 打 grok 模型。
 	ce := newAgentEnv(t, jsonReply(http.StatusOK, codexNonStreamBody))
 	w = do(ce.h, "POST", "/agents/v1/responses", codexAuth, grokReq(grokModel))
-	if w.Code != http.StatusConflict {
-		t.Fatalf("grok-* 在只连 codex 的设备上状态码 = %d，期望 409", w.Code)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("grok-* 在只钉 codex 的 Key 上状态码 = %d，期望 403", w.Code)
 	}
 	_, code, msg = decodeError(t, w)
-	if code != "agent_not_configured" || !strings.Contains(msg, "Grok Build") {
-		t.Errorf("错误 = %q %q，期望 agent_not_configured 且指名 Grok Build", code, msg)
+	if code != "subscription_not_allowed" || !strings.Contains(msg, "Grok Build") {
+		t.Errorf("错误 = %q %q，期望 subscription_not_allowed 且指名 Grok Build", code, msg)
 	}
 }
 

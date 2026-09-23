@@ -398,42 +398,41 @@ func TestQueryUsageRangeWindow(t *testing.T) {
 	}
 }
 
-// 已知边界的绊线（不是期望行为，是**已记录的缺口**）：api_keys 的主键是不带
-// AUTOINCREMENT 的 INTEGER PRIMARY KEY，删掉表中 id 最大的那把密钥后，下一把
-// 新签的密钥复用同一个 id，于是继承前任在 usage_hourly 里的历史。
-//
-// 本用例把这个事实钉死，好让后续迭代改动删除语义/主键策略时立刻看见它，
-// 也避免有人把「新密钥的账里混着旧账」当成新引入的回归。裁决（历史行随密钥
-// 删除如何改名/归零）属于产品决定。
-func TestUsageIDReuseInheritsHistory(t *testing.T) {
+// 有历史账的密钥不能物理删除（ErrKeyHasHistory，分文不动）；没有历史账的密钥
+// 删掉之后 id 不再复用（0048 AUTOINCREMENT），新密钥不会在本表里继承前任的账。
+func TestUsageKeyIDNeverReused(t *testing.T) {
 	s, _ := mustOpen(t)
 	ctx := context.Background()
 	bucket := bucketOf(time.Date(2026, 8, 8, 7, 0, 0, 0, time.UTC))
 
-	old := mustKey(t, s, "digest-old-1")
-
+	spentKey := mustKey(t, s, "digest-spent")
 	spent := sampleDelta(bucket)
-	spent.KeyID, spent.KeyDisplay = old.ID, "sk_oldprefix…oooo"
+	spent.KeyID, spent.KeyDisplay = spentKey.ID, "sk_oldprefix…oooo"
 	spent.CostMicro = 5_000_000
 	mustAdd(t, s, spent)
 
-	if err := s.DeleteAPIKey(ctx, old.ID); err != nil {
-		t.Fatalf("DeleteAPIKey: %v", err)
+	if err := s.DeleteAPIKey(ctx, spentKey.ID); !errors.Is(err, ErrKeyHasHistory) {
+		t.Fatalf("有历史账的密钥应拒绝物理删除（ErrKeyHasHistory），got %v", err)
 	}
-	fresh := mustKey(t, s, "digest-fresh-1")
-	if fresh.ID != old.ID {
-		t.Skipf("本次未复用 id（old=%d fresh=%d），绊线不适用", old.ID, fresh.ID)
+	if _, err := s.GetAPIKeyByID(ctx, spentKey.ID); err != nil {
+		t.Fatalf("被拒的删除不该动行: %v", err)
 	}
 
+	idle := mustKey(t, s, "digest-idle")
+	if err := s.DeleteAPIKey(ctx, idle.ID); err != nil {
+		t.Fatalf("无历史账的密钥应可删除: %v", err)
+	}
+	fresh := mustKey(t, s, "digest-fresh")
+	if fresh.ID <= idle.ID {
+		t.Fatalf("删除后新签密钥 id=%d 不应 ≤ 已删除的 id=%d（AUTOINCREMENT 失效）", fresh.ID, idle.ID)
+	}
 	rows, err := s.QueryUsageRange(ctx, bucket, bucket+1)
 	if err != nil {
 		t.Fatalf("QueryUsageRange: %v", err)
 	}
-	if len(rows) != 1 || rows[0].KeyID != fresh.ID || rows[0].CostMicro != 5_000_000 {
-		t.Fatalf("缺口形态已变（若已修复请连同本用例一起改写）: %+v", rows)
+	if len(rows) != 1 || rows[0].KeyID != spentKey.ID {
+		t.Fatalf("历史账应仍归原密钥: %+v", rows)
 	}
-	t.Logf("已知缺口：新密钥 id=%d 继承了前任的 %d 微元历史（key_display=%q）",
-		fresh.ID, rows[0].CostMicro, rows[0].KeyDisplay)
 }
 
 // SumUsageSince 按 (桶号, 密钥) 汇总消费额并保留桶时刻——本地时区窗口的
@@ -1048,6 +1047,61 @@ func TestMigration0007AddsQuantityColumns(t *testing.T) {
 	}
 	if len(names) != 1 || names[0] != "idx_usage_hourly_dim" {
 		t.Errorf("usage_hourly 的索引 = %v, 期望只有 idx_usage_hourly_dim", names)
+	}
+}
+
+// 迁移 0041 在带 0040 存量账本行的库上前向迁移成功：video_count 列参与 UPSERT
+// 相加，存量行取缺省 0，且仍只有维度唯一索引这一个索引。
+func TestMigration0041AddsVideoCountColumn(t *testing.T) {
+	dir := t.TempDir()
+	db := openLegacyDB(t, dir, 40)
+	bucket := bucketOf(time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC))
+	if _, err := db.Exec(`INSERT INTO usage_hourly
+		(bucket_hour, key_id, key_display, model_name, upstream_name,
+		 entry, kind, requests, total_tokens, cost_micro, duration_ms_sum)
+		VALUES (?, 7, 'sk_prefix12…wxyz', 'grok-imagine-video-1.5', 'Grok Build 订阅',
+		        'imagine_video', 'video', 1, 0, 0, 900)`, bucket); err != nil {
+		t.Fatalf("插入存量账本行: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("关闭存量库: %v", err)
+	}
+
+	s, err := Open(dir)
+	if err != nil {
+		t.Fatalf("升级 Open: %v", err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+
+	var v41 int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM schema_migrations WHERE version = 41`).Scan(&v41); err != nil || v41 != 1 {
+		t.Fatalf("schema_migrations 缺版本 41 (n=%d, err=%v)", v41, err)
+	}
+	rows, err := s.QueryUsageRange(ctx, bucket, bucket+1)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("存量行读取: %d 行 (err=%v)", len(rows), err)
+	}
+	if rows[0].VideoCount != 0 || rows[0].Requests != 1 {
+		t.Errorf("存量行应取缺省 0 且其余不变: %+v", rows[0])
+	}
+
+	// 新列参与相加：同一维度键连冲两次，个数从 0 长到 2。
+	d := sampleDelta(bucket)
+	d.ModelName, d.UpstreamName, d.Entry, d.Kind = "grok-imagine-video-1.5", "Grok Build 订阅", "imagine_video", ModelKindVideo
+	d.VideoCount = 1
+	mustAdd(t, s, d, d)
+	rows, err = s.QueryUsageRange(ctx, bucket, bucket+1)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("同维度键应合成 1 行: %d 行 (err=%v)", len(rows), err)
+	}
+	if rows[0].VideoCount != 2 || rows[0].Requests != 1+2*d.Requests {
+		t.Errorf("video_count 未参与 DO UPDATE 相加: %+v", rows[0])
+	}
+
+	var n int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND tbl_name = 'usage_hourly'`).Scan(&n); err != nil || n != 1 {
+		t.Errorf("usage_hourly 索引数 = %d (err=%v), 期望只有 idx_usage_hourly_dim", n, err)
 	}
 }
 

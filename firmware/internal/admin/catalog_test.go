@@ -615,7 +615,7 @@ func TestModelShapeValidation(t *testing.T) {
 // TestSourceProtocols：每条来源标注的可服务入口 = 运行时 (上游 type, 入口协议)
 // 过滤口径，且按所属模型的 kind 圈定——文本模型下 deepseek 双入口、ark 仅
 // chat、带 base_url 的 mock 双入口；视频模型下 minimax 是 minimax_video、
-// 方舟按量与订阅都是 ark_video；图片模型下方舟两型都是 ark_image。
+// 方舟按量与订阅都是 ark_video；图像模型下方舟两型都是 ark_image。
 // kind≠text 的来源守卫（2026-08-09 厂商官方接口改版）：不服务该 kind 协议面
 // 的上游类型在**写入时**被拒（source_kind_unservable，文本模型不设此闸——
 // 协议在入口层各自过滤），已有来源是别家协议面的被拒为 source_family_mismatch。
@@ -658,14 +658,14 @@ func TestSourceProtocols(t *testing.T) {
 	av := e.createModelKind(root, "doubao-seedance-2.0", "video")
 	e.createSource(root, av.ID, fmt.Sprintf(`{"upstream_id":%d,"priority":100}`, arkPlan.ID))
 	e.createSource(root, av.ID, fmt.Sprintf(`{"upstream_id":%d,"priority":200}`, ark.ID))
-	// 图片模型：方舟两型都服务 ark_image；minimax 不服务图片。
+	// 图像模型：方舟两型都服务 ark_image；minimax 不服务图像。
 	im := e.createModelKind(root, "doubao-seedream-5.0-lite", "image")
 	e.createSource(root, im.ID, fmt.Sprintf(`{"upstream_id":%d,"priority":100}`, arkPlan.ID))
 	resp = e.do("POST", fmt.Sprintf("/admin/v1/models/%d/sources", im.ID), root,
 		fmt.Sprintf(`{"upstream_id":%d,"priority":300}`, mm.ID))
 	wantStatus(t, resp, http.StatusBadRequest)
 	if got := errCode(t, resp); got != "source_kind_unservable" {
-		t.Errorf("图片模型挂 minimax 来源的 error.code = %q，期望 source_kind_unservable", got)
+		t.Errorf("图像模型挂 minimax 来源的 error.code = %q，期望 source_kind_unservable", got)
 	}
 
 	byName := map[string]modelDTO{}

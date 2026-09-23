@@ -76,6 +76,8 @@ const DefaultHTTPSListen = ":443"
 
 // settings 键。
 const (
+	// settingDeviceName 是管理员设的本地显示名（与 store.DeviceNameSetting 同一键），只用作关联时的自报名称。
+	settingDeviceName   = "device_name"
 	settingProvider     = "lan_domain.provider"
 	settingLinkToken    = "lan_domain.link_token" // sealed
 	settingLinkID       = "lan_domain.link_id"
@@ -244,9 +246,15 @@ type DNSRecord struct {
 	Type  string
 	Name  string
 	Value string
+	// Optional：只在域名（或其上级）已有 CAA 记录时才需要添加。
+	Optional bool
 }
 
-// DNSRecords 列出自有域名要设的记录：A 指到设备内网 IP、_acme-challenge 委托到官网。托管域名为空。
+// CAAIssueValue 是自有域名放行证书签发方的 CAA 记录值（Google Trust Services 的 caaIdentities）。
+const CAAIssueValue = `0 issue "pki.goog"`
+
+// DNSRecords 列出自有域名要设的记录：A 指到设备内网 IP、_acme-challenge 委托到官网，以及
+// 域名已有 CAA 时须补的放行记录（Optional）。托管域名为空。
 func (s State) DNSRecords() []DNSRecord {
 	if s.Provider != ProviderOwnDomain || s.Hostname == "" {
 		return nil
@@ -255,6 +263,7 @@ func (s State) DNSRecords() []DNSRecord {
 	if s.AcmeDelegate != "" {
 		out = append(out, DNSRecord{Type: "CNAME", Name: "_acme-challenge." + s.Hostname, Value: s.AcmeDelegate})
 	}
+	out = append(out, DNSRecord{Type: "CAA", Name: s.Hostname, Value: CAAIssueValue, Optional: true})
 	return out
 }
 
@@ -418,6 +427,8 @@ func (m *Manager) site() (*SiteClient, error) {
 	return m.opt.Site, nil
 }
 
+// recordError 把失败落到 lan_domain.last_error 并返回带步骤前缀的错误。返回值保留原错误链：
+// 管理面靠 IsSiteError / errors.Is 把官网的 401（令牌被撤销）、409、429、503 按原状态码透出。
 func (m *Manager) recordError(ctx context.Context, step string, err error) error {
 	full := step + "：" + err.Error()
 	if err := m.set(ctx, settingLastError, full); err != nil {
@@ -425,7 +436,7 @@ func (m *Manager) recordError(ctx context.Context, step string, err error) error
 	}
 	_ = m.set(ctx, settingLastErrorAt, fmtTime(m.now()))
 	m.log.Warn("内网域名操作失败", "step", step, "err", err.Error())
-	return errors.New(full)
+	return fmt.Errorf("%s：%w", step, err)
 }
 
 func (m *Manager) clearError(ctx context.Context) {
@@ -546,7 +557,11 @@ func (m *Manager) StartLink(ctx context.Context) (*LinkSession, error) {
 	}
 	m.mu.Unlock()
 
-	name := m.opt.DeviceName
+	// 自报名称：管理员在管理台设的设备名（settings device_name，随改随用）→ 装配时给的名字 → 主机名。
+	name := strings.TrimSpace(m.get(ctx, settingDeviceName))
+	if name == "" {
+		name = m.opt.DeviceName
+	}
 	if name == "" {
 		name, _ = os.Hostname()
 	}
@@ -714,10 +729,10 @@ func (m *Manager) Unlink(ctx context.Context) error {
 
 // ---- 域名 ----
 
-// ValidateLabel 是设备侧预检（官网为准）：5–32 位小写字母/数字/连字符，不以连字符开头结尾。
+// ValidateLabel 是设备侧预检（官网为准）：6–32 位小写字母/数字/连字符，不以连字符开头结尾。
 func ValidateLabel(label string) error {
-	if len(label) < 5 || len(label) > 32 {
-		return invalid("域名前缀长度须为 5–32 个字符")
+	if len(label) < 6 || len(label) > 32 {
+		return invalid("域名前缀长度须为 6–32 个字符")
 	}
 	for i := range len(label) {
 		c := label[i]

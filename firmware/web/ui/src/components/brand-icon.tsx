@@ -34,6 +34,7 @@ const DEV_TOOL_ICONS: Record<DevToolName, string> = {
   grok: grokIcon,
   claude: claudeIcon,
   opencode: opencodeIcon,
+  mcode: minimaxIcon,
   cursor: cursorIcon,
 };
 

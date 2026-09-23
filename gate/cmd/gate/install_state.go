@@ -16,7 +16,7 @@ import (
 	"strings"
 )
 
-var toolNames = []string{"codex", "grok", "claude", "cursor", "opencode"}
+var toolNames = []string{"codex", "grok", "claude", "cursor", "opencode", "mcode"}
 
 type ownedNode struct {
 	Kind string `json:"kind"`
@@ -151,6 +151,20 @@ func (a *app) programRoot(name, entry string) (string, error) {
 	}
 	root, _ := filepath.Abs(a.root)
 	want := filepath.Join(root, "tools", name, "bin")
+	if name == "mcode" {
+		want = filepath.Dir(abs)
+		if runtime.GOOS != "windows" {
+			want = filepath.Dir(want)
+		}
+		if filepath.Dir(want) != filepath.Join(root, "tools", "mcode", "releases") ||
+			!mcodeInstallNameRE.MatchString(filepath.Base(want)) || abs != mcodeEntry(want, runtime.GOOS) {
+			return "", errors.New("MiniMax Code 程序不在受管 release 落点")
+		}
+		if err := noLinkPath(want); err != nil {
+			return "", err
+		}
+		return want, nil
+	}
 	if name == "cursor" {
 		want = filepath.Join(root, "tools", name, "app")
 	}
@@ -225,7 +239,7 @@ func (a *app) recordProgram(name, entry string) error {
 	if err != nil {
 		return err
 	}
-	if name != "codex" && name != "cursor" {
+	if name != "codex" && name != "cursor" && name != "mcode" {
 		for rel := range nodes {
 			if filepath.Join(s.Root, rel) != dir && filepath.Join(s.Root, rel) != entry {
 				delete(nodes, rel)
@@ -258,6 +272,8 @@ func generatedNames(name string) []string {
 		return []string{"cli-config.json"}
 	case "opencode":
 		return []string{"opencode.json"}
+	case "mcode":
+		return []string{"config.yaml"}
 	}
 	return nil
 }

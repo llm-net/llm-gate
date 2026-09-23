@@ -1,0 +1,5420 @@
+{
+  "schema": "llmgate.model-catalog/v1",
+  "version": 20260923001,
+  "updated_at": "2026-09-23",
+  "currency": "CNY",
+  "unit": "micro_yuan",
+  "source": {
+    "repository": "https://github.com/llm-net/llm-model-data",
+    "tag": "data-2026.09.23.1",
+    "commit": "99b9f3ee110a1e9ec91ad043bace91be164057e0",
+    "usd_cny": "6.75"
+  },
+  "notes": [
+    "LLM Gate 的模型目录数据：哪个平台 / 订阅有哪些模型、各自多少钱。设备通过「数据升级」匿名下载本文件，官网不可达时用固件内嵌的同一份基线。",
+    "本文件由固件工具 tools/modeldata 从公开数据仓库 github.com/llm-net/llm-model-data 的正式发布 tag（source.tag）合成，不手工维护；改数据到数据仓库，改映射到固件源码 internal/modeldata。",
+    "version = tag 日期 YYYYMMDD × 1000 + 当日序号，与 tag 单调同序；设备取版本号更大的那份生效。",
+    "platforms 段按管理台「模型接入」分三类：billing_mode = usage（API 按量计费）、subscription（API 订阅套餐）、none（通用兼容适配，地址由管理员自填）；先后即各组的展示顺序。",
+    "  平台 id 与固件适配器 type 分开：内置平台两者相同；数据平台复用 openai_compat / anthropic_compat 并给固定 HTTPS base_url。固定 base_url 在管理员录入 Key 时快照进设备。",
+    "  models[].name 是客户端请求里的 model 值；kind 是 text | video | image；video / image 带 family（厂商协议面）。upstream_protocols 是该模型在这条平台实际接受的上游协议，只能收窄适配器。",
+    "  models[].pricing 是这条平台上这个模型的估算目录价（整数微元；token 类字段为 微元 / 百万 token，按张 / 按秒类为 微元 / 单位），按量产品取公开按量价，订阅产品取同平台或开发方的按量参考价。schedule 是分时段价，形态权威是固件 internal/usage.ParseSchedule。",
+    "  设备只给「未定价」的模型填价：从这条平台添加模型时用这条平台的价，管理员随时可在模型页改成自己的口径；已定价的模型绝不覆盖。",
+    "agents 段是工具订阅（codex | grok | claude | cursor）的计价清单：连接订阅后设备照此建只读计价行，名义金额按 pricing（官方 API 按量价）记，不折算订阅补贴。Cursor 独立计价、不建共享行。",
+    "美元价按 source.usd_cny 的固定汇率折算后取整；金额全链路整数微元，1 元 = 1000000 微元。",
+    "origin 字段记数据仓库里的来源（provider/offering[/model]），只供追溯。"
+  ],
+  "platforms": [
+    {
+      "id": "deepseek",
+      "type": "deepseek",
+      "vendor": "DeepSeek",
+      "billing_mode": "usage",
+      "suggested_name": "deepseek",
+      "entries": "OpenAI 兼容 与 Anthropic 兼容 双入口",
+      "ability": "支持查询平台余额。",
+      "source": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing",
+      "checked_at": "2026-09-16",
+      "note": "官方按高峰 / 空闲时段分档计价（含周末全天空闲价），分时段价见各模型的 schedule 段。",
+      "origin": [
+        "deepseek/api-cn"
+      ],
+      "models": [
+        {
+          "name": "deepseek-flash",
+          "kind": "text",
+          "note": "DeepSeek-V4.1-Flash",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses",
+            "anthropic_messages"
+          ],
+          "capabilities": {
+            "input_modalities": [
+              "text",
+              "image"
+            ],
+            "responses_chat": {
+              "profile": "reasoning_replay_v1",
+              "replay_reasoning_content": true,
+              "thinking_type": "enabled",
+              "drop_tool_choice": true,
+              "effort_map": {
+                "high": "high",
+                "low": "high",
+                "max": "max",
+                "medium": "high",
+                "minimal": "high",
+                "ultra": "max",
+                "xhigh": "max"
+              }
+            },
+            "codex": {
+              "default_reasoning_level": "high",
+              "supported_reasoning_levels": [
+                {
+                  "effort": "high",
+                  "description": "Deep reasoning"
+                },
+                {
+                  "effort": "xhigh",
+                  "description": "Maximum reasoning"
+                }
+              ]
+            }
+          },
+          "pricing": {
+            "cache_read": 40000,
+            "in": 2000000,
+            "out": 8000000
+          },
+          "schedule": {
+            "timezone": "Asia/Shanghai",
+            "periods": [
+              {
+                "label": "空闲时段",
+                "days": [
+                  "mon",
+                  "tue",
+                  "wed",
+                  "thu",
+                  "fri"
+                ],
+                "hours": [
+                  [
+                    "00:00",
+                    "09:00"
+                  ],
+                  [
+                    "12:00",
+                    "14:00"
+                  ],
+                  [
+                    "18:00",
+                    "24:00"
+                  ]
+                ],
+                "pricing": {
+                  "cache_read": 20000,
+                  "in": 1000000,
+                  "out": 4000000
+                }
+              },
+              {
+                "label": "空闲时段",
+                "days": [
+                  "sat",
+                  "sun"
+                ],
+                "hours": [
+                  [
+                    "00:00",
+                    "24:00"
+                  ]
+                ],
+                "pricing": {
+                  "cache_read": 20000,
+                  "in": 1000000,
+                  "out": 4000000
+                }
+              }
+            ]
+          },
+          "source": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/",
+          "checked_at": "2026-09-16",
+          "origin": "deepseek/api-cn/deepseek-flash"
+        },
+        {
+          "name": "deepseek-v4-pro",
+          "kind": "text",
+          "note": "DeepSeek-V4-Pro-0813",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses",
+            "anthropic_messages"
+          ],
+          "capabilities": {
+            "input_modalities": [
+              "text"
+            ],
+            "responses_chat": {
+              "profile": "reasoning_replay_v1",
+              "replay_reasoning_content": true,
+              "thinking_type": "enabled",
+              "drop_tool_choice": true,
+              "effort_map": {
+                "high": "high",
+                "low": "high",
+                "max": "max",
+                "medium": "high",
+                "minimal": "high",
+                "ultra": "max",
+                "xhigh": "max"
+              }
+            },
+            "codex": {
+              "default_reasoning_level": "high",
+              "supported_reasoning_levels": [
+                {
+                  "effort": "high",
+                  "description": "Deep reasoning"
+                },
+                {
+                  "effort": "xhigh",
+                  "description": "Maximum reasoning"
+                }
+              ]
+            }
+          },
+          "pricing": {
+            "cache_read": 300000,
+            "in": 9000000,
+            "out": 27000000
+          },
+          "schedule": {
+            "timezone": "Asia/Shanghai",
+            "periods": [
+              {
+                "label": "空闲时段",
+                "days": [
+                  "mon",
+                  "tue",
+                  "wed",
+                  "thu",
+                  "fri"
+                ],
+                "hours": [
+                  [
+                    "00:00",
+                    "09:00"
+                  ],
+                  [
+                    "12:00",
+                    "14:00"
+                  ],
+                  [
+                    "18:00",
+                    "24:00"
+                  ]
+                ],
+                "pricing": {
+                  "cache_read": 150000,
+                  "in": 4500000,
+                  "out": 13500000
+                }
+              },
+              {
+                "label": "空闲时段",
+                "days": [
+                  "sat",
+                  "sun"
+                ],
+                "hours": [
+                  [
+                    "00:00",
+                    "24:00"
+                  ]
+                ],
+                "pricing": {
+                  "cache_read": 150000,
+                  "in": 4500000,
+                  "out": 13500000
+                }
+              }
+            ]
+          },
+          "source": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/",
+          "checked_at": "2026-09-16",
+          "origin": "deepseek/api-cn/deepseek-v4-pro"
+        },
+        {
+          "name": "deepseek-v4-flash",
+          "kind": "text",
+          "note": "DeepSeek Flash（旧请求名）；别名，同 deepseek-flash",
+          "upstream_protocols": [
+            "openai_chat"
+          ],
+          "capabilities": {
+            "input_modalities": [
+              "text",
+              "image"
+            ],
+            "responses_chat": {
+              "profile": "reasoning_replay_v1",
+              "replay_reasoning_content": true,
+              "thinking_type": "enabled",
+              "drop_tool_choice": true,
+              "effort_map": {
+                "high": "high",
+                "low": "high",
+                "max": "max",
+                "medium": "high",
+                "minimal": "high",
+                "ultra": "max",
+                "xhigh": "max"
+              }
+            },
+            "codex": {
+              "default_reasoning_level": "high",
+              "supported_reasoning_levels": [
+                {
+                  "effort": "high",
+                  "description": "Deep reasoning"
+                },
+                {
+                  "effort": "xhigh",
+                  "description": "Maximum reasoning"
+                }
+              ]
+            }
+          },
+          "pricing": {
+            "cache_read": 40000,
+            "in": 2000000,
+            "out": 8000000
+          },
+          "schedule": {
+            "timezone": "Asia/Shanghai",
+            "periods": [
+              {
+                "label": "空闲时段",
+                "days": [
+                  "mon",
+                  "tue",
+                  "wed",
+                  "thu",
+                  "fri"
+                ],
+                "hours": [
+                  [
+                    "00:00",
+                    "09:00"
+                  ],
+                  [
+                    "12:00",
+                    "14:00"
+                  ],
+                  [
+                    "18:00",
+                    "24:00"
+                  ]
+                ],
+                "pricing": {
+                  "cache_read": 20000,
+                  "in": 1000000,
+                  "out": 4000000
+                }
+              },
+              {
+                "label": "空闲时段",
+                "days": [
+                  "sat",
+                  "sun"
+                ],
+                "hours": [
+                  [
+                    "00:00",
+                    "24:00"
+                  ]
+                ],
+                "pricing": {
+                  "cache_read": 20000,
+                  "in": 1000000,
+                  "out": 4000000
+                }
+              }
+            ]
+          },
+          "source": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/",
+          "checked_at": "2026-09-16",
+          "origin": "deepseek/api-cn/deepseek-v4-flash"
+        },
+        {
+          "name": "deepseek-v4-flash-vision-exp",
+          "kind": "text",
+          "note": "DeepSeek Flash Vision（旧请求名）；别名，同 deepseek-flash",
+          "upstream_protocols": [
+            "openai_chat"
+          ],
+          "capabilities": {
+            "input_modalities": [
+              "text",
+              "image"
+            ],
+            "responses_chat": {
+              "profile": "reasoning_replay_v1",
+              "replay_reasoning_content": true,
+              "thinking_type": "enabled",
+              "drop_tool_choice": true,
+              "effort_map": {
+                "high": "high",
+                "low": "high",
+                "max": "max",
+                "medium": "high",
+                "minimal": "high",
+                "ultra": "max",
+                "xhigh": "max"
+              }
+            },
+            "codex": {
+              "default_reasoning_level": "high",
+              "supported_reasoning_levels": [
+                {
+                  "effort": "high",
+                  "description": "Deep reasoning"
+                },
+                {
+                  "effort": "xhigh",
+                  "description": "Maximum reasoning"
+                }
+              ]
+            }
+          },
+          "pricing": {
+            "cache_read": 40000,
+            "in": 2000000,
+            "out": 8000000
+          },
+          "schedule": {
+            "timezone": "Asia/Shanghai",
+            "periods": [
+              {
+                "label": "空闲时段",
+                "days": [
+                  "mon",
+                  "tue",
+                  "wed",
+                  "thu",
+                  "fri"
+                ],
+                "hours": [
+                  [
+                    "00:00",
+                    "09:00"
+                  ],
+                  [
+                    "12:00",
+                    "14:00"
+                  ],
+                  [
+                    "18:00",
+                    "24:00"
+                  ]
+                ],
+                "pricing": {
+                  "cache_read": 20000,
+                  "in": 1000000,
+                  "out": 4000000
+                }
+              },
+              {
+                "label": "空闲时段",
+                "days": [
+                  "sat",
+                  "sun"
+                ],
+                "hours": [
+                  [
+                    "00:00",
+                    "24:00"
+                  ]
+                ],
+                "pricing": {
+                  "cache_read": 20000,
+                  "in": 1000000,
+                  "out": 4000000
+                }
+              }
+            ]
+          },
+          "source": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/",
+          "checked_at": "2026-09-16",
+          "origin": "deepseek/api-cn/deepseek-v4-flash-vision-exp"
+        }
+      ]
+    },
+    {
+      "id": "ark",
+      "type": "ark",
+      "vendor": "火山方舟",
+      "billing_mode": "usage",
+      "suggested_name": "ark",
+      "entries": "OpenAI 兼容单入口；另可挂给视频与图像模型",
+      "ability": "平台余额需要火山引擎 AK/SK 签名，设备不查询。",
+      "source": "https://www.volcengine.com/docs/82379/1330310",
+      "checked_at": "2026-09-17",
+      "note": "方舟同时托管豆包自有模型与 DeepSeek 等第三方模型；型号按方舟官方 Model ID 收录，实际可开通的型号以方舟控制台为准。",
+      "origin": [
+        "ark/api-cn"
+      ],
+      "models": [
+        {
+          "name": "doubao-seed-evolving",
+          "kind": "text",
+          "note": "Doubao Seed Evolving",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses",
+            "anthropic_messages"
+          ],
+          "pricing": {
+            "cache_read": 1200000,
+            "in": 6000000,
+            "out": 30000000
+          },
+          "source": "https://www.volcengine.com/docs/82379/1330310",
+          "checked_at": "2026-09-16",
+          "origin": "ark/api-cn/doubao-seed-evolving"
+        },
+        {
+          "name": "doubao-seed-2-1-pro-260628",
+          "kind": "text",
+          "note": "Doubao Seed 2.1 Pro (260628)",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses",
+            "anthropic_messages"
+          ],
+          "pricing": {
+            "cache_read": 1200000,
+            "in": 6000000,
+            "out": 30000000
+          },
+          "source": "https://www.volcengine.com/docs/82379/1330310",
+          "checked_at": "2026-09-16",
+          "origin": "ark/api-cn/doubao-seed-2-1-pro-260628"
+        },
+        {
+          "name": "doubao-seed-2-1-turbo-260628",
+          "kind": "text",
+          "note": "Doubao Seed 2.1 Turbo (260628)",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses",
+            "anthropic_messages"
+          ],
+          "pricing": {
+            "cache_read": 600000,
+            "in": 3000000,
+            "out": 15000000
+          },
+          "source": "https://www.volcengine.com/docs/82379/1330310",
+          "checked_at": "2026-09-16",
+          "origin": "ark/api-cn/doubao-seed-2-1-turbo-260628"
+        },
+        {
+          "name": "doubao-seed-2-0-lite-260428",
+          "kind": "text",
+          "note": "Doubao Seed 2.0 Lite (260428)",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses",
+            "anthropic_messages"
+          ],
+          "pricing": {
+            "cache_read": 120000,
+            "in": 600000,
+            "out": 3600000
+          },
+          "source": "https://www.volcengine.com/docs/82379/1330310",
+          "checked_at": "2026-09-16",
+          "origin": "ark/api-cn/doubao-seed-2-0-lite-260428"
+        },
+        {
+          "name": "doubao-seed-2-0-mini-260428",
+          "kind": "text",
+          "note": "Doubao Seed 2.0 Mini (260428)",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses",
+            "anthropic_messages"
+          ],
+          "pricing": {
+            "cache_read": 40000,
+            "in": 200000,
+            "out": 2000000
+          },
+          "source": "https://www.volcengine.com/docs/82379/1330310",
+          "checked_at": "2026-09-16",
+          "origin": "ark/api-cn/doubao-seed-2-0-mini-260428"
+        },
+        {
+          "name": "doubao-seed-2-0-pro-260215",
+          "kind": "text",
+          "note": "Doubao Seed 2.0 Pro (260215)",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses",
+            "anthropic_messages"
+          ],
+          "pricing": {
+            "cache_read": 640000,
+            "in": 3200000,
+            "out": 16000000
+          },
+          "source": "https://www.volcengine.com/docs/82379/1330310",
+          "checked_at": "2026-09-16",
+          "origin": "ark/api-cn/doubao-seed-2-0-pro-260215"
+        },
+        {
+          "name": "doubao-seed-2-0-lite-260215",
+          "kind": "text",
+          "note": "Doubao Seed 2.0 Lite (260215)",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses",
+            "anthropic_messages"
+          ],
+          "pricing": {
+            "cache_read": 120000,
+            "in": 600000,
+            "out": 3600000
+          },
+          "source": "https://www.volcengine.com/docs/82379/1330310",
+          "checked_at": "2026-09-16",
+          "origin": "ark/api-cn/doubao-seed-2-0-lite-260215"
+        },
+        {
+          "name": "doubao-seed-2-0-mini-260215",
+          "kind": "text",
+          "note": "Doubao Seed 2.0 Mini (260215)",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses",
+            "anthropic_messages"
+          ],
+          "pricing": {
+            "cache_read": 40000,
+            "in": 200000,
+            "out": 2000000
+          },
+          "source": "https://www.volcengine.com/docs/82379/1330310",
+          "checked_at": "2026-09-16",
+          "origin": "ark/api-cn/doubao-seed-2-0-mini-260215"
+        },
+        {
+          "name": "doubao-seed-2-0-code-preview-260215",
+          "kind": "text",
+          "note": "Doubao Seed 2.0 Code Preview (260215)",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses",
+            "anthropic_messages"
+          ],
+          "pricing": {
+            "cache_read": 640000,
+            "in": 3200000,
+            "out": 16000000
+          },
+          "source": "https://www.volcengine.com/docs/82379/1330310",
+          "checked_at": "2026-09-16",
+          "origin": "ark/api-cn/doubao-seed-2-0-code-preview-260215"
+        },
+        {
+          "name": "doubao-seed-character-260628",
+          "kind": "text",
+          "note": "Doubao Seed Character (260628)",
+          "upstream_protocols": [
+            "openai_chat"
+          ],
+          "pricing": {
+            "cache_read": 160000,
+            "in": 800000,
+            "out": 2000000
+          },
+          "source": "https://www.volcengine.com/docs/82379/1330310",
+          "checked_at": "2026-09-16",
+          "origin": "ark/api-cn/doubao-seed-character-260628"
+        },
+        {
+          "name": "glm-5-2-260617",
+          "kind": "text",
+          "note": "GLM-5.2 (260617)",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses",
+            "anthropic_messages"
+          ],
+          "pricing": {
+            "cache_read": 2000000,
+            "in": 8000000,
+            "out": 28000000
+          },
+          "source": "https://www.volcengine.com/docs/82379/1330310",
+          "checked_at": "2026-09-16",
+          "origin": "ark/api-cn/glm-5-2-260617"
+        },
+        {
+          "name": "deepseek-v4-pro-ga-260813",
+          "kind": "text",
+          "note": "DeepSeek V4 Pro GA (260813)",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses",
+            "anthropic_messages"
+          ],
+          "capabilities": {
+            "responses_chat": {
+              "profile": "reasoning_replay_v1",
+              "replay_reasoning_content": true,
+              "thinking_type": "enabled",
+              "drop_tool_choice": true,
+              "effort_map": {
+                "high": "high",
+                "low": "high",
+                "max": "max",
+                "medium": "high",
+                "minimal": "high",
+                "ultra": "max",
+                "xhigh": "max"
+              }
+            },
+            "codex": {
+              "default_reasoning_level": "high",
+              "supported_reasoning_levels": [
+                {
+                  "effort": "high",
+                  "description": "Deep reasoning"
+                },
+                {
+                  "effort": "xhigh",
+                  "description": "Maximum reasoning"
+                }
+              ]
+            }
+          },
+          "pricing": {
+            "cache_read": 300000,
+            "in": 9000000,
+            "out": 27000000
+          },
+          "source": "https://www.volcengine.com/docs/82379/1330310",
+          "checked_at": "2026-09-16",
+          "origin": "ark/api-cn/deepseek-v4-pro-ga-260813"
+        },
+        {
+          "name": "deepseek-v4-flash-ga-260731",
+          "kind": "text",
+          "note": "DeepSeek V4 Flash GA (260731)",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses",
+            "anthropic_messages"
+          ],
+          "capabilities": {
+            "responses_chat": {
+              "profile": "reasoning_replay_v1",
+              "replay_reasoning_content": true,
+              "thinking_type": "enabled",
+              "drop_tool_choice": true,
+              "effort_map": {
+                "high": "high",
+                "low": "high",
+                "max": "max",
+                "medium": "high",
+                "minimal": "high",
+                "ultra": "max",
+                "xhigh": "max"
+              }
+            },
+            "codex": {
+              "default_reasoning_level": "high",
+              "supported_reasoning_levels": [
+                {
+                  "effort": "high",
+                  "description": "Deep reasoning"
+                },
+                {
+                  "effort": "xhigh",
+                  "description": "Maximum reasoning"
+                }
+              ]
+            }
+          },
+          "pricing": {
+            "cache_read": 100000,
+            "in": 3000000,
+            "out": 9000000
+          },
+          "source": "https://www.volcengine.com/docs/82379/1330310",
+          "checked_at": "2026-09-16",
+          "origin": "ark/api-cn/deepseek-v4-flash-ga-260731"
+        },
+        {
+          "name": "deepseek-v4-pro-260425",
+          "kind": "text",
+          "note": "DeepSeek V4 Pro (260425)",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses",
+            "anthropic_messages"
+          ],
+          "capabilities": {
+            "responses_chat": {
+              "profile": "reasoning_replay_v1",
+              "replay_reasoning_content": true,
+              "thinking_type": "enabled",
+              "drop_tool_choice": true,
+              "effort_map": {
+                "high": "high",
+                "low": "high",
+                "max": "max",
+                "medium": "high",
+                "minimal": "high",
+                "ultra": "max",
+                "xhigh": "max"
+              }
+            },
+            "codex": {
+              "default_reasoning_level": "high",
+              "supported_reasoning_levels": [
+                {
+                  "effort": "high",
+                  "description": "Deep reasoning"
+                },
+                {
+                  "effort": "xhigh",
+                  "description": "Maximum reasoning"
+                }
+              ]
+            }
+          },
+          "pricing": {
+            "cache_read": 300000,
+            "in": 9000000,
+            "out": 27000000
+          },
+          "source": "https://www.volcengine.com/docs/82379/1330310",
+          "checked_at": "2026-09-16",
+          "origin": "ark/api-cn/deepseek-v4-pro-260425"
+        },
+        {
+          "name": "deepseek-v4-flash-260425",
+          "kind": "text",
+          "note": "DeepSeek V4 Flash (260425)",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses",
+            "anthropic_messages"
+          ],
+          "capabilities": {
+            "responses_chat": {
+              "profile": "reasoning_replay_v1",
+              "replay_reasoning_content": true,
+              "thinking_type": "enabled",
+              "drop_tool_choice": true,
+              "effort_map": {
+                "high": "high",
+                "low": "high",
+                "max": "max",
+                "medium": "high",
+                "minimal": "high",
+                "ultra": "max",
+                "xhigh": "max"
+              }
+            },
+            "codex": {
+              "default_reasoning_level": "high",
+              "supported_reasoning_levels": [
+                {
+                  "effort": "high",
+                  "description": "Deep reasoning"
+                },
+                {
+                  "effort": "xhigh",
+                  "description": "Maximum reasoning"
+                }
+              ]
+            }
+          },
+          "pricing": {
+            "cache_read": 100000,
+            "in": 3000000,
+            "out": 9000000
+          },
+          "source": "https://www.volcengine.com/docs/82379/1330310",
+          "checked_at": "2026-09-16",
+          "origin": "ark/api-cn/deepseek-v4-flash-260425"
+        },
+        {
+          "name": "doubao-seed-character-251128",
+          "kind": "text",
+          "note": "Doubao Seed Character (251128)",
+          "upstream_protocols": [
+            "openai_chat"
+          ],
+          "pricing": {
+            "cache_read": 160000,
+            "in": 800000,
+            "out": 2000000
+          },
+          "source": "https://www.volcengine.com/docs/82379/1330310",
+          "checked_at": "2026-09-16",
+          "origin": "ark/api-cn/doubao-seed-character-251128"
+        },
+        {
+          "name": "doubao-seed-translation-250915",
+          "kind": "text",
+          "note": "Doubao Seed Translation (250915)",
+          "upstream_protocols": [
+            "openai_chat"
+          ],
+          "pricing": {
+            "in": 1200000,
+            "out": 3600000
+          },
+          "source": "https://www.volcengine.com/docs/82379/1330310",
+          "checked_at": "2026-09-16",
+          "origin": "ark/api-cn/doubao-seed-translation-250915"
+        },
+        {
+          "name": "doubao-seedream-5-0-pro-260628",
+          "kind": "image",
+          "family": "ark_image",
+          "note": "Doubao Seedream 5.0 Pro (260628)",
+          "pricing": {
+            "ark_image_each": 300000
+          },
+          "source": "https://www.volcengine.com/docs/82379/1330310",
+          "checked_at": "2026-09-16",
+          "origin": "ark/api-cn/doubao-seedream-5-0-pro-260628"
+        },
+        {
+          "name": "doubao-seedream-5-0-260128",
+          "kind": "image",
+          "family": "ark_image",
+          "note": "Doubao Seedream 5.0 Lite (260128)",
+          "pricing": {
+            "ark_image_each": 220000
+          },
+          "source": "https://www.volcengine.com/docs/82379/1330310",
+          "checked_at": "2026-09-16",
+          "origin": "ark/api-cn/doubao-seedream-5-0-260128"
+        },
+        {
+          "name": "doubao-seedance-2-5-260628",
+          "kind": "video",
+          "family": "ark_video",
+          "note": "Doubao Seedance 2.5 (260628)",
+          "pricing": {
+            "ark_video_token": 70000000,
+            "ark_video_token_ref": 70000000
+          },
+          "source": "https://www.volcengine.com/docs/82379/1330310",
+          "checked_at": "2026-09-17",
+          "origin": "ark/api-cn/doubao-seedance-2-5-260628"
+        },
+        {
+          "name": "doubao-seedance-2-0-260128",
+          "kind": "video",
+          "family": "ark_video",
+          "note": "Doubao Seedance 2.0 (260128)",
+          "pricing": {
+            "ark_video_token": 46000000,
+            "ark_video_token_ref": 46000000
+          },
+          "source": "https://www.volcengine.com/docs/82379/1330310",
+          "checked_at": "2026-09-17",
+          "origin": "ark/api-cn/doubao-seedance-2-0-260128"
+        },
+        {
+          "name": "doubao-seedance-2-0-mini-260615",
+          "kind": "video",
+          "family": "ark_video",
+          "note": "Doubao Seedance 2.0 Mini (260615)",
+          "pricing": {
+            "ark_video_token": 23000000,
+            "ark_video_token_ref": 23000000
+          },
+          "source": "https://www.volcengine.com/docs/82379/1330310",
+          "checked_at": "2026-09-17",
+          "origin": "ark/api-cn/doubao-seedance-2-0-mini-260615"
+        },
+        {
+          "name": "doubao-seedance-2.5",
+          "kind": "video",
+          "family": "ark_video",
+          "note": "Doubao Seedance 2.5",
+          "pricing": {
+            "ark_video_token": 70000000,
+            "ark_video_token_ref": 70000000
+          },
+          "source": "https://www.volcengine.com/docs/82379/1330310",
+          "checked_at": "2026-09-17",
+          "origin": "ark/api-cn/doubao-seedance-2-5"
+        },
+        {
+          "name": "doubao-seedance-2.0",
+          "kind": "video",
+          "family": "ark_video",
+          "note": "Doubao Seedance 2.0",
+          "pricing": {
+            "ark_video_token": 46000000,
+            "ark_video_token_ref": 46000000
+          },
+          "source": "https://www.volcengine.com/docs/82379/1330310",
+          "checked_at": "2026-09-17",
+          "origin": "ark/api-cn/doubao-seedance-2-0"
+        },
+        {
+          "name": "doubao-seedance-2.0-fast",
+          "kind": "video",
+          "family": "ark_video",
+          "note": "Doubao Seedance 2.0 Fast",
+          "pricing": {
+            "ark_video_token": 37000000,
+            "ark_video_token_ref": 37000000
+          },
+          "source": "https://www.volcengine.com/docs/82379/1330310",
+          "checked_at": "2026-09-17",
+          "origin": "ark/api-cn/doubao-seedance-2-0-fast"
+        },
+        {
+          "name": "doubao-seedance-2-0-fast-260128",
+          "kind": "video",
+          "family": "ark_video",
+          "note": "Doubao Seedance 2.0 Fast (260128)",
+          "pricing": {
+            "ark_video_token": 37000000,
+            "ark_video_token_ref": 37000000
+          },
+          "source": "https://www.volcengine.com/docs/82379/1330310",
+          "checked_at": "2026-09-17",
+          "origin": "ark/api-cn/doubao-seedance-2-0-fast-260128"
+        }
+      ]
+    },
+    {
+      "id": "minimax",
+      "type": "minimax",
+      "vendor": "MiniMax",
+      "billing_mode": "usage",
+      "suggested_name": "minimax",
+      "entries": "视频模型入口",
+      "ability": "国内站与国际站的账号和 Key 相互独立。",
+      "source": "https://platform.minimaxi.com/docs/guides/models-intro",
+      "checked_at": "2026-09-16",
+      "note": "MiniMax 上游只服务 MiniMax 视频协议面（无文本对话入口）；文本对话入口见 MiniMax 开放平台（中国）。",
+      "origin": [
+        "minimax/api-cn"
+      ],
+      "models": [
+        {
+          "name": "MiniMax-H3",
+          "kind": "video",
+          "family": "minimax_video",
+          "note": "MiniMax H3（海螺 03）",
+          "pricing": {
+            "minimax_video_image_extra": 200000,
+            "minimax_video_sec_768p": 500000
+          },
+          "source": "https://platform.minimaxi.com/docs/guides/pricing-paygo",
+          "checked_at": "2026-09-16",
+          "origin": "minimax/api-cn/minimax-h3"
+        }
+      ]
+    },
+    {
+      "id": "kimi_cn",
+      "type": "openai_compat",
+      "vendor": "Kimi 开放平台",
+      "base_url": "https://api.moonshot.cn/v1",
+      "billing_mode": "usage",
+      "suggested_name": "kimi-cn",
+      "entries": "OpenAI 兼容文本入口",
+      "ability": "平台余额在 Kimi 开放平台控制台查看。",
+      "source": "https://platform.kimi.com/docs/models",
+      "checked_at": "2026-09-16",
+      "note": "月之暗面国内 API；目录只提供文本对话型号。",
+      "origin": [
+        "moonshot/api-cn"
+      ],
+      "models": [
+        {
+          "name": "kimi-k3",
+          "kind": "text",
+          "note": "Kimi K3",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses"
+          ],
+          "capabilities": {
+            "input_modalities": [
+              "text",
+              "image",
+              "video"
+            ],
+            "responses_chat": {
+              "profile": "",
+              "replay_reasoning_content": false,
+              "thinking_type": "",
+              "drop_tool_choice": false,
+              "effort_map": null
+            },
+            "codex": {
+              "default_reasoning_level": "",
+              "supported_reasoning_levels": null
+            }
+          },
+          "pricing": {
+            "cache_read": 2000000,
+            "in": 20000000,
+            "out": 100000000
+          },
+          "source": "https://platform.kimi.com/docs/models.md",
+          "checked_at": "2026-09-16",
+          "origin": "moonshot/api-cn/kimi-k3"
+        },
+        {
+          "name": "kimi-k2.7-code",
+          "kind": "text",
+          "note": "Kimi K2.7 Code",
+          "upstream_protocols": [
+            "openai_chat"
+          ],
+          "capabilities": {
+            "input_modalities": [
+              "text",
+              "image",
+              "video"
+            ],
+            "responses_chat": {
+              "profile": "",
+              "replay_reasoning_content": false,
+              "thinking_type": "",
+              "drop_tool_choice": false,
+              "effort_map": null
+            },
+            "codex": {
+              "default_reasoning_level": "",
+              "supported_reasoning_levels": null
+            }
+          },
+          "pricing": {
+            "cache_read": 1300000,
+            "in": 6500000,
+            "out": 27000000
+          },
+          "source": "https://platform.kimi.com/docs/models.md",
+          "checked_at": "2026-09-16",
+          "origin": "moonshot/api-cn/kimi-k2-7-code"
+        },
+        {
+          "name": "kimi-k2.7-code-highspeed",
+          "kind": "text",
+          "note": "Kimi K2.7 Code HighSpeed",
+          "upstream_protocols": [
+            "openai_chat"
+          ],
+          "capabilities": {
+            "input_modalities": [
+              "text",
+              "image",
+              "video"
+            ],
+            "responses_chat": {
+              "profile": "",
+              "replay_reasoning_content": false,
+              "thinking_type": "",
+              "drop_tool_choice": false,
+              "effort_map": null
+            },
+            "codex": {
+              "default_reasoning_level": "",
+              "supported_reasoning_levels": null
+            }
+          },
+          "pricing": {
+            "cache_read": 2600000,
+            "in": 13000000,
+            "out": 54000000
+          },
+          "source": "https://platform.kimi.com/docs/models.md",
+          "checked_at": "2026-09-16",
+          "origin": "moonshot/api-cn/kimi-k2-7-code-highspeed"
+        },
+        {
+          "name": "kimi-k2.6",
+          "kind": "text",
+          "note": "Kimi K2.6",
+          "upstream_protocols": [
+            "openai_chat"
+          ],
+          "capabilities": {
+            "input_modalities": [
+              "text",
+              "image",
+              "video"
+            ],
+            "responses_chat": {
+              "profile": "",
+              "replay_reasoning_content": false,
+              "thinking_type": "",
+              "drop_tool_choice": false,
+              "effort_map": null
+            },
+            "codex": {
+              "default_reasoning_level": "",
+              "supported_reasoning_levels": null
+            }
+          },
+          "pricing": {
+            "cache_read": 1100000,
+            "in": 6500000,
+            "out": 27000000
+          },
+          "source": "https://platform.kimi.com/docs/models.md",
+          "checked_at": "2026-09-16",
+          "origin": "moonshot/api-cn/kimi-k2-6"
+        }
+      ]
+    },
+    {
+      "id": "zhipu_cn",
+      "type": "openai_compat",
+      "vendor": "智谱 AI 开放平台",
+      "base_url": "https://open.bigmodel.cn/api/paas/v4",
+      "billing_mode": "usage",
+      "suggested_name": "zhipu-cn",
+      "entries": "OpenAI 兼容文本入口",
+      "ability": "平台余额在智谱 AI 开放平台控制台查看。",
+      "source": "https://open.bigmodel.cn/pricing",
+      "checked_at": "2026-09-16",
+      "note": "智谱国内按量 API（Chat 端点 /api/paas/v4）。官方另有 Anthropic Messages 端点 https://open.bigmodel.cn/api/anthropic，可用通用 Anthropic 兼容适配录入。",
+      "origin": [
+        "zhipu/api-cn"
+      ],
+      "models": [
+        {
+          "name": "glm-5.3",
+          "kind": "text",
+          "note": "GLM-5.3",
+          "upstream_protocols": [
+            "openai_chat"
+          ],
+          "pricing": {
+            "cache_read": 2000000,
+            "in": 8000000,
+            "out": 28000000
+          },
+          "source": "https://docs.bigmodel.cn/cn/guide/start/model-overview.md",
+          "checked_at": "2026-09-16",
+          "origin": "zhipu/api-cn/glm-5-3"
+        },
+        {
+          "name": "glm-5.3-flash",
+          "kind": "text",
+          "note": "GLM-5.3-Flash",
+          "upstream_protocols": [
+            "openai_chat"
+          ],
+          "pricing": {
+            "cache_read": 230000,
+            "in": 800000,
+            "out": 2800000
+          },
+          "source": "https://docs.bigmodel.cn/cn/guide/start/model-overview.md",
+          "checked_at": "2026-09-16",
+          "origin": "zhipu/api-cn/glm-5-3-flash"
+        },
+        {
+          "name": "glm-5.2",
+          "kind": "text",
+          "note": "GLM-5.2",
+          "upstream_protocols": [
+            "openai_chat"
+          ],
+          "pricing": {
+            "cache_read": 2000000,
+            "in": 8000000,
+            "out": 28000000
+          },
+          "source": "https://docs.bigmodel.cn/cn/guide/start/model-overview.md",
+          "checked_at": "2026-09-16",
+          "origin": "zhipu/api-cn/glm-5-2"
+        },
+        {
+          "name": "glm-5.1",
+          "kind": "text",
+          "note": "GLM-5.1",
+          "upstream_protocols": [
+            "openai_chat"
+          ],
+          "pricing": {
+            "cache_read": 1300000,
+            "in": 6000000,
+            "out": 24000000
+          },
+          "source": "https://docs.bigmodel.cn/cn/guide/start/model-overview.md",
+          "checked_at": "2026-09-16",
+          "origin": "zhipu/api-cn/glm-5-1"
+        },
+        {
+          "name": "glm-5",
+          "kind": "text",
+          "note": "GLM-5",
+          "upstream_protocols": [
+            "openai_chat"
+          ],
+          "pricing": {
+            "cache_read": 1000000,
+            "in": 4000000,
+            "out": 18000000
+          },
+          "source": "https://docs.bigmodel.cn/cn/guide/start/model-overview.md",
+          "checked_at": "2026-09-16",
+          "origin": "zhipu/api-cn/glm-5"
+        },
+        {
+          "name": "glm-5-turbo",
+          "kind": "text",
+          "note": "GLM-5-Turbo",
+          "upstream_protocols": [
+            "openai_chat"
+          ],
+          "pricing": {
+            "cache_read": 1200000,
+            "in": 5000000,
+            "out": 22000000
+          },
+          "source": "https://docs.bigmodel.cn/cn/guide/start/model-overview.md",
+          "checked_at": "2026-09-16",
+          "origin": "zhipu/api-cn/glm-5-turbo"
+        },
+        {
+          "name": "glm-4.7",
+          "kind": "text",
+          "note": "GLM-4.7",
+          "upstream_protocols": [
+            "openai_chat"
+          ],
+          "pricing": {
+            "cache_read": 600000,
+            "in": 3000000,
+            "out": 14000000
+          },
+          "source": "https://docs.bigmodel.cn/cn/guide/start/model-overview.md",
+          "checked_at": "2026-09-16",
+          "origin": "zhipu/api-cn/glm-4-7"
+        },
+        {
+          "name": "glm-4.7-flashx",
+          "kind": "text",
+          "note": "GLM-4.7-FlashX",
+          "upstream_protocols": [
+            "openai_chat"
+          ],
+          "pricing": {
+            "cache_read": 100000,
+            "in": 500000,
+            "out": 3000000
+          },
+          "source": "https://docs.bigmodel.cn/cn/guide/start/model-overview.md",
+          "checked_at": "2026-09-16",
+          "origin": "zhipu/api-cn/glm-4-7-flashx"
+        },
+        {
+          "name": "glm-4.7-flash",
+          "kind": "text",
+          "note": "GLM-4.7-Flash",
+          "upstream_protocols": [
+            "openai_chat"
+          ],
+          "pricing": {
+            "cache_read": 0,
+            "in": 0,
+            "out": 0
+          },
+          "source": "https://docs.bigmodel.cn/cn/guide/start/model-overview.md",
+          "checked_at": "2026-09-16",
+          "origin": "zhipu/api-cn/glm-4-7-flash"
+        },
+        {
+          "name": "glm-4.5-air",
+          "kind": "text",
+          "note": "GLM-4.5-Air",
+          "upstream_protocols": [
+            "openai_chat"
+          ],
+          "pricing": {
+            "cache_read": 160000,
+            "in": 800000,
+            "out": 6000000
+          },
+          "source": "https://docs.bigmodel.cn/cn/guide/start/model-overview.md",
+          "checked_at": "2026-09-16",
+          "origin": "zhipu/api-cn/glm-4-5-air"
+        },
+        {
+          "name": "glm-5v-turbo",
+          "kind": "text",
+          "note": "GLM-5V-Turbo",
+          "upstream_protocols": [
+            "openai_chat"
+          ],
+          "pricing": {
+            "cache_read": 1200000,
+            "in": 5000000,
+            "out": 22000000
+          },
+          "source": "https://docs.bigmodel.cn/cn/guide/start/model-overview.md",
+          "checked_at": "2026-09-16",
+          "origin": "zhipu/api-cn/glm-5v-turbo"
+        },
+        {
+          "name": "glm-4.6v",
+          "kind": "text",
+          "note": "GLM-4.6V",
+          "upstream_protocols": [
+            "openai_chat"
+          ],
+          "pricing": {
+            "cache_read": 200000,
+            "in": 1000000,
+            "out": 3000000
+          },
+          "source": "https://docs.bigmodel.cn/cn/guide/start/model-overview.md",
+          "checked_at": "2026-09-16",
+          "origin": "zhipu/api-cn/glm-4-6v"
+        },
+        {
+          "name": "glm-4.6v-flash",
+          "kind": "text",
+          "note": "GLM-4.6V-Flash",
+          "upstream_protocols": [
+            "openai_chat"
+          ],
+          "pricing": {
+            "cache_read": 0,
+            "in": 0,
+            "out": 0
+          },
+          "source": "https://docs.bigmodel.cn/cn/guide/start/model-overview.md",
+          "checked_at": "2026-09-16",
+          "origin": "zhipu/api-cn/glm-4-6v-flash"
+        }
+      ]
+    },
+    {
+      "id": "bailian_cn",
+      "type": "openai_compat",
+      "vendor": "阿里云百炼（中国）",
+      "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "billing_mode": "usage",
+      "suggested_name": "bailian-cn",
+      "entries": "OpenAI 兼容文本入口",
+      "ability": "按量付费 API Key；余额与账单在阿里云控制台查看。",
+      "source": "https://help.aliyun.com/zh/model-studio/text-generation-model/",
+      "checked_at": "2026-09-16",
+      "note": "百炼华北 2（北京）公共兼容端点；业务空间专属端点仍可通过通用兼容入口录入。",
+      "origin": [
+        "bailian/api-cn"
+      ],
+      "models": [
+        {
+          "name": "qwen3.8-max",
+          "kind": "text",
+          "note": "Qwen3.8-Max",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses"
+          ],
+          "pricing": {
+            "in": 12000000,
+            "out": 36000000
+          },
+          "source": "https://help.aliyun.com/zh/model-studio/model-pricing",
+          "checked_at": "2026-09-16",
+          "origin": "bailian/api-cn/qwen3-8-max"
+        },
+        {
+          "name": "qwen3.8-max-prime",
+          "kind": "text",
+          "note": "Qwen3.8-Max 优速（Prime）",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses"
+          ],
+          "pricing": {
+            "in": 24000000,
+            "out": 72000000
+          },
+          "source": "https://help.aliyun.com/zh/model-studio/model-pricing",
+          "checked_at": "2026-09-16",
+          "origin": "bailian/api-cn/qwen3-8-max-prime"
+        },
+        {
+          "name": "qwen3.7-plus",
+          "kind": "text",
+          "note": "Qwen3.7-Plus",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses"
+          ],
+          "pricing": {
+            "in": 2000000,
+            "out": 8000000
+          },
+          "source": "https://help.aliyun.com/zh/model-studio/model-pricing",
+          "checked_at": "2026-09-16",
+          "origin": "bailian/api-cn/qwen3-7-plus"
+        },
+        {
+          "name": "qwen3.8-flash",
+          "kind": "text",
+          "note": "Qwen3.8-Flash",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses"
+          ],
+          "pricing": {
+            "in": 800000,
+            "out": 2700000
+          },
+          "source": "https://help.aliyun.com/zh/model-studio/model-pricing",
+          "checked_at": "2026-09-16",
+          "origin": "bailian/api-cn/qwen3-8-flash"
+        },
+        {
+          "name": "qwen3.7-flash",
+          "kind": "text",
+          "note": "Qwen3.7-Flash",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses"
+          ],
+          "pricing": {
+            "in": 200000,
+            "out": 800000
+          },
+          "source": "https://help.aliyun.com/zh/model-studio/model-pricing",
+          "checked_at": "2026-09-16",
+          "origin": "bailian/api-cn/qwen3-7-flash"
+        },
+        {
+          "name": "qwen3-coder-plus",
+          "kind": "text",
+          "note": "Qwen3-Coder-Plus",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses"
+          ],
+          "pricing": {
+            "in": 4000000,
+            "out": 16000000
+          },
+          "source": "https://help.aliyun.com/zh/model-studio/model-pricing",
+          "checked_at": "2026-09-16",
+          "origin": "bailian/api-cn/qwen3-coder-plus"
+        },
+        {
+          "name": "qwen3-vl-plus",
+          "kind": "text",
+          "note": "Qwen3-VL-Plus",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses"
+          ],
+          "pricing": {
+            "in": 1000000,
+            "out": 10000000
+          },
+          "source": "https://help.aliyun.com/zh/model-studio/model-pricing",
+          "checked_at": "2026-09-16",
+          "origin": "bailian/api-cn/qwen3-vl-plus"
+        },
+        {
+          "name": "qwen3-vl-flash",
+          "kind": "text",
+          "note": "Qwen3-VL-Flash",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses"
+          ],
+          "pricing": {
+            "in": 150000,
+            "out": 1500000
+          },
+          "source": "https://help.aliyun.com/zh/model-studio/model-pricing",
+          "checked_at": "2026-09-16",
+          "origin": "bailian/api-cn/qwen3-vl-flash"
+        },
+        {
+          "name": "qwen3.8-2.4t-a95b",
+          "kind": "text",
+          "note": "Qwen3.8-2.4T-A95B（开源权重）",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses"
+          ],
+          "pricing": {
+            "in": 12000000,
+            "out": 36000000
+          },
+          "source": "https://help.aliyun.com/zh/model-studio/model-pricing",
+          "checked_at": "2026-09-16",
+          "origin": "bailian/api-cn/qwen3-8-2-4t-a95b"
+        },
+        {
+          "name": "qwen3.8-27b",
+          "kind": "text",
+          "note": "Qwen3.8-27B（开源权重）",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses"
+          ],
+          "pricing": {
+            "in": 3000000,
+            "out": 12000000
+          },
+          "source": "https://help.aliyun.com/zh/model-studio/model-pricing",
+          "checked_at": "2026-09-16",
+          "origin": "bailian/api-cn/qwen3-8-27b"
+        },
+        {
+          "name": "MiniMax/MiniMax-M3",
+          "kind": "text",
+          "note": "MiniMax-M3（百炼托管）",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses"
+          ],
+          "pricing": {
+            "in": 4200000,
+            "out": 16800000
+          },
+          "source": "https://help.aliyun.com/zh/model-studio/model-pricing",
+          "checked_at": "2026-09-16",
+          "origin": "bailian/api-cn/minimax-minimax-m3"
+        },
+        {
+          "name": "xiaomi/mimo-v2.5-pro",
+          "kind": "text",
+          "note": "MiMo v2.5 Pro（百炼托管）",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses"
+          ],
+          "pricing": {
+            "in": 7000000,
+            "out": 21000000
+          },
+          "source": "https://help.aliyun.com/zh/model-studio/model-pricing",
+          "checked_at": "2026-09-16",
+          "origin": "bailian/api-cn/xiaomi-mimo-v2-5-pro"
+        },
+        {
+          "name": "stepfun/step-3.7-flash",
+          "kind": "text",
+          "note": "Step 3.7 Flash（百炼托管）",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses"
+          ],
+          "pricing": {
+            "in": 1350000,
+            "out": 8100000
+          },
+          "source": "https://help.aliyun.com/zh/model-studio/model-pricing",
+          "checked_at": "2026-09-16",
+          "origin": "bailian/api-cn/stepfun-step-3-7-flash"
+        }
+      ]
+    },
+    {
+      "id": "minimax_text_cn",
+      "type": "openai_compat",
+      "vendor": "MiniMax 开放平台（中国）",
+      "base_url": "https://api.minimaxi.com/v1",
+      "billing_mode": "usage",
+      "suggested_name": "minimax-text-cn",
+      "entries": "OpenAI 兼容文本入口",
+      "ability": "国内站与国际站的账号和 Key 相互独立。",
+      "source": "https://platform.minimaxi.com/docs/guides/models-intro",
+      "checked_at": "2026-09-16",
+      "note": "MiniMax 国内站文本对话入口；与 MiniMax 视频平台档案分开。",
+      "origin": [
+        "minimax/api-cn"
+      ],
+      "models": [
+        {
+          "name": "MiniMax-M3",
+          "kind": "text",
+          "note": "MiniMax M3",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses"
+          ],
+          "pricing": {
+            "cache_read": 420000,
+            "in": 2100000,
+            "out": 8400000
+          },
+          "source": "https://platform.minimaxi.com/docs/guides/pricing-paygo",
+          "checked_at": "2026-09-16",
+          "origin": "minimax/api-cn/minimax-m3"
+        },
+        {
+          "name": "MiniMax-M2.7",
+          "kind": "text",
+          "note": "MiniMax M2.7",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses"
+          ],
+          "pricing": {
+            "cache_read": 420000,
+            "in": 2100000,
+            "out": 8400000
+          },
+          "source": "https://platform.minimaxi.com/docs/guides/pricing-paygo",
+          "checked_at": "2026-09-16",
+          "origin": "minimax/api-cn/minimax-m2-7"
+        },
+        {
+          "name": "MiniMax-M2.7-highspeed",
+          "kind": "text",
+          "note": "MiniMax M2.7 highspeed",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses"
+          ],
+          "pricing": {
+            "cache_read": 420000,
+            "in": 4200000,
+            "out": 16800000
+          },
+          "source": "https://platform.minimaxi.com/docs/guides/pricing-paygo",
+          "checked_at": "2026-09-16",
+          "origin": "minimax/api-cn/minimax-m2-7-highspeed"
+        }
+      ]
+    },
+    {
+      "id": "qianfan_cn",
+      "type": "openai_compat",
+      "vendor": "百度千帆",
+      "base_url": "https://qianfan.baidubce.com/v2",
+      "billing_mode": "usage",
+      "suggested_name": "qianfan-cn",
+      "entries": "OpenAI 兼容文本入口",
+      "ability": "平台余额与账单在百度智能云控制台查看。",
+      "source": "https://cloud.baidu.com/doc/qianfan/s/rmh4stp0j",
+      "checked_at": "2026-09-16",
+      "note": "千帆 v2 文本生成和深度思考共用 OpenAI 兼容对话入口。",
+      "origin": [
+        "qianfan/api-cn"
+      ],
+      "models": [
+        {
+          "name": "ernie-5.1",
+          "kind": "text",
+          "note": "ERNIE 5.1",
+          "upstream_protocols": [
+            "openai_chat"
+          ],
+          "pricing": {
+            "in": 4000000,
+            "out": 18000000
+          },
+          "source": "https://cloud.baidu.com/doc/qianfan/s/rmh4stp0j",
+          "checked_at": "2026-09-16",
+          "origin": "qianfan/api-cn/ernie-5-1"
+        },
+        {
+          "name": "ernie-5.0",
+          "kind": "text",
+          "note": "ERNIE 5.0",
+          "upstream_protocols": [
+            "openai_chat"
+          ],
+          "pricing": {
+            "in": 6000000,
+            "out": 24000000
+          },
+          "source": "https://cloud.baidu.com/doc/qianfan/s/rmh4stp0j",
+          "checked_at": "2026-09-16",
+          "origin": "qianfan/api-cn/ernie-5-0"
+        },
+        {
+          "name": "ernie-4.5-turbo-128k",
+          "kind": "text",
+          "note": "ERNIE 4.5 Turbo 128k",
+          "upstream_protocols": [
+            "openai_chat"
+          ],
+          "pricing": {
+            "cache_read": 200000,
+            "in": 800000,
+            "out": 3200000
+          },
+          "source": "https://cloud.baidu.com/doc/qianfan/s/rmh4stp0j",
+          "checked_at": "2026-09-16",
+          "origin": "qianfan/api-cn/ernie-4-5-turbo-128k"
+        },
+        {
+          "name": "ernie-4.5-turbo-vl-32k",
+          "kind": "text",
+          "note": "ERNIE 4.5 Turbo VL 32k",
+          "upstream_protocols": [
+            "openai_chat"
+          ],
+          "pricing": {
+            "cache_read": 750000,
+            "in": 3000000,
+            "out": 9000000
+          },
+          "source": "https://cloud.baidu.com/doc/qianfan/s/rmh4stp0j",
+          "checked_at": "2026-09-16",
+          "origin": "qianfan/api-cn/ernie-4-5-turbo-vl-32k"
+        },
+        {
+          "name": "deepseek-v4-pro",
+          "kind": "text",
+          "note": "DeepSeek V4 Pro（千帆）",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses"
+          ],
+          "pricing": {
+            "cache_read": 300000,
+            "in": 9000000,
+            "out": 27000000
+          },
+          "source": "https://cloud.baidu.com/doc/qianfan/s/rmh4stp0j",
+          "checked_at": "2026-09-16",
+          "origin": "qianfan/api-cn/deepseek-v4-pro"
+        },
+        {
+          "name": "deepseek-v4-flash",
+          "kind": "text",
+          "note": "DeepSeek V4 Flash（千帆）",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses"
+          ],
+          "pricing": {
+            "cache_read": 100000,
+            "in": 3000000,
+            "out": 9000000
+          },
+          "source": "https://cloud.baidu.com/doc/qianfan/s/rmh4stp0j",
+          "checked_at": "2026-09-16",
+          "origin": "qianfan/api-cn/deepseek-v4-flash"
+        },
+        {
+          "name": "glm-5.3",
+          "kind": "text",
+          "note": "GLM-5.3（千帆）",
+          "upstream_protocols": [
+            "openai_chat"
+          ],
+          "pricing": {
+            "cache_read": 2000000,
+            "in": 8000000,
+            "out": 28000000
+          },
+          "source": "https://cloud.baidu.com/doc/qianfan/s/rmh4stp0j",
+          "checked_at": "2026-09-16",
+          "origin": "qianfan/api-cn/glm-5-3"
+        },
+        {
+          "name": "ernie-4.5-turbo-20260402",
+          "kind": "text",
+          "upstream_protocols": [
+            "openai_chat"
+          ],
+          "pricing": {
+            "cache_read": 200000,
+            "in": 800000,
+            "out": 3200000
+          },
+          "source": "https://cloud.baidu.com/doc/qianfan/s/rmh4stp0j",
+          "checked_at": "2026-09-16",
+          "origin": "qianfan/api-cn/ernie-4-5-turbo-20260402"
+        },
+        {
+          "name": "glm-5.1",
+          "kind": "text",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses"
+          ],
+          "pricing": {
+            "cache_read": 1300000,
+            "in": 6000000,
+            "out": 24000000
+          },
+          "source": "https://cloud.baidu.com/doc/qianfan/s/rmh4stp0j",
+          "checked_at": "2026-09-16",
+          "origin": "qianfan/api-cn/glm-5-1"
+        }
+      ]
+    },
+    {
+      "id": "tencent_tokenhub",
+      "type": "openai_compat",
+      "vendor": "腾讯云 TokenHub",
+      "base_url": "https://tokenhub.tencentmaas.com/v1",
+      "billing_mode": "usage",
+      "suggested_name": "tencent-tokenhub",
+      "entries": "OpenAI 兼容文本入口",
+      "ability": "聚合平台；可用型号与账户权限以 TokenHub 模型列表为准。",
+      "source": "https://cloud.tencent.com/document/product/1823/130051",
+      "checked_at": "2026-09-16",
+      "note": "TokenHub 广州站按量入口；不混用 Token Plan 的订阅 Key 和 /plan/v3 端点。",
+      "origin": [
+        "hunyuan/api-cn"
+      ],
+      "models": [
+        {
+          "name": "hy4-preview",
+          "kind": "text",
+          "note": "混元 HY4 preview",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses"
+          ],
+          "pricing": {
+            "cache_read": 300000,
+            "in": 6000000,
+            "out": 18000000
+          },
+          "source": "https://cloud.tencent.com/document/product/1823/130055",
+          "checked_at": "2026-09-16",
+          "origin": "hunyuan/api-cn/hy4-preview"
+        },
+        {
+          "name": "hy3",
+          "kind": "text",
+          "note": "混元 HY3",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses"
+          ],
+          "pricing": {
+            "cache_read": 250000,
+            "in": 1000000,
+            "out": 4000000
+          },
+          "source": "https://cloud.tencent.com/document/product/1823/130055",
+          "checked_at": "2026-09-16",
+          "origin": "hunyuan/api-cn/hy3"
+        },
+        {
+          "name": "hy-mt2-pro",
+          "kind": "text",
+          "note": "混元翻译 MT2 Pro",
+          "upstream_protocols": [
+            "openai_chat"
+          ],
+          "pricing": {
+            "in": 500000,
+            "out": 2000000
+          },
+          "source": "https://cloud.tencent.com/document/product/1823/130055",
+          "checked_at": "2026-09-16",
+          "origin": "hunyuan/api-cn/hy-mt2-pro"
+        },
+        {
+          "name": "hy-vision-2.0-instruct",
+          "kind": "text",
+          "note": "混元 Vision 2.0 Instruct",
+          "upstream_protocols": [
+            "openai_chat"
+          ],
+          "pricing": {
+            "in": 7500000,
+            "out": 17500000
+          },
+          "source": "https://cloud.tencent.com/document/product/1823/130055",
+          "checked_at": "2026-09-16",
+          "origin": "hunyuan/api-cn/hy-vision-2-0-instruct"
+        },
+        {
+          "name": "deepseek-v4-pro-0813",
+          "kind": "text",
+          "note": "DeepSeek V4 Pro 0813（TokenHub）",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses"
+          ],
+          "pricing": {
+            "cache_read": 300000,
+            "in": 9000000,
+            "out": 27000000
+          },
+          "source": "https://cloud.tencent.com/document/product/1823/130055",
+          "checked_at": "2026-09-16",
+          "origin": "hunyuan/api-cn/deepseek-v4-pro-0813"
+        },
+        {
+          "name": "deepseek-v4-flash-0731",
+          "kind": "text",
+          "note": "DeepSeek V4 Flash 0731（TokenHub）",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses"
+          ],
+          "pricing": {
+            "cache_read": 100000,
+            "in": 3000000,
+            "out": 9000000
+          },
+          "source": "https://cloud.tencent.com/document/product/1823/130055",
+          "checked_at": "2026-09-16",
+          "origin": "hunyuan/api-cn/deepseek-v4-flash-0731"
+        },
+        {
+          "name": "glm-5.3",
+          "kind": "text",
+          "note": "GLM-5.3（TokenHub）",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses"
+          ],
+          "pricing": {
+            "cache_read": 2000000,
+            "in": 8000000,
+            "out": 28000000
+          },
+          "source": "https://cloud.tencent.com/document/product/1823/130055",
+          "checked_at": "2026-09-16",
+          "origin": "hunyuan/api-cn/glm-5-3"
+        },
+        {
+          "name": "kimi-k3",
+          "kind": "text",
+          "note": "Kimi K3（TokenHub）",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses"
+          ],
+          "pricing": {
+            "cache_read": 2000000,
+            "in": 20000000,
+            "out": 100000000
+          },
+          "source": "https://cloud.tencent.com/document/product/1823/130055",
+          "checked_at": "2026-09-16",
+          "origin": "hunyuan/api-cn/kimi-k3"
+        },
+        {
+          "name": "minimax-m3",
+          "kind": "text",
+          "note": "MiniMax M3（TokenHub）",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses"
+          ],
+          "pricing": {
+            "cache_read": 420000,
+            "in": 2100000,
+            "out": 8400000
+          },
+          "source": "https://cloud.tencent.com/document/product/1823/130055",
+          "checked_at": "2026-09-16",
+          "origin": "hunyuan/api-cn/minimax-m3"
+        }
+      ]
+    },
+    {
+      "id": "chenyu",
+      "type": "openai_compat",
+      "vendor": "晨羽AI",
+      "base_url": "https://api.chenyu.pro/v1",
+      "billing_mode": "usage",
+      "suggested_name": "chenyu",
+      "entries": "OpenAI 兼容文本入口",
+      "ability": "聚合平台；余额、费用与实际可用型号在晨羽控制台查看。",
+      "source": "https://chenyu.pro/api-docs/docs/models/",
+      "checked_at": "2026-09-17",
+      "note": "本条只收固件可承载的 OpenAI 兼容文本入口；图片、视频与语音按晨羽官方厂商协议面，不进入本条。同域名同 Key 的 Anthropic Messages 面另见 chenyu_anthropic。",
+      "origin": [
+        "chenyu-ai/api"
+      ],
+      "models": [
+        {
+          "name": "deepseek-flash",
+          "kind": "text",
+          "note": "DeepSeek-V4.1-Flash",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses"
+          ],
+          "pricing": {
+            "cache_read": 40000,
+            "in": 2000000,
+            "out": 8000000
+          },
+          "source": "https://chenyu.pro/api/v1/public/models",
+          "checked_at": "2026-09-17",
+          "origin": "chenyu-ai/api/deepseek-flash"
+        },
+        {
+          "name": "deepseek-v4-pro",
+          "kind": "text",
+          "note": "DeepSeek V4 Pro",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses"
+          ],
+          "pricing": {
+            "cache_read": 300000,
+            "in": 9000000,
+            "out": 27000000
+          },
+          "source": "https://chenyu.pro/api/v1/public/models",
+          "checked_at": "2026-09-17",
+          "origin": "chenyu-ai/api/deepseek-v4-pro"
+        },
+        {
+          "name": "deepseek-v4-flash",
+          "kind": "text",
+          "note": "DeepSeek V4 Flash",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses"
+          ],
+          "pricing": {
+            "cache_read": 40000,
+            "in": 2000000,
+            "out": 8000000
+          },
+          "source": "https://chenyu.pro/api/v1/public/models",
+          "checked_at": "2026-09-17",
+          "origin": "chenyu-ai/api/deepseek-v4-flash"
+        },
+        {
+          "name": "deepseek-v4-flash-vision-exp",
+          "kind": "text",
+          "note": "DeepSeek V4 Flash Vision (实验)",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses"
+          ],
+          "pricing": {
+            "cache_read": 40000,
+            "in": 2000000,
+            "out": 8000000
+          },
+          "source": "https://chenyu.pro/api/v1/public/models",
+          "checked_at": "2026-09-17",
+          "origin": "chenyu-ai/api/deepseek-v4-flash-vision-exp"
+        },
+        {
+          "name": "doubao-seed-2-1-pro-260628",
+          "kind": "text",
+          "note": "Doubao Seed 2.1 Pro (260628)",
+          "upstream_protocols": [
+            "openai_responses"
+          ],
+          "pricing": {
+            "cache_read": 1200000,
+            "in": 6000000,
+            "out": 30000000
+          },
+          "source": "https://chenyu.pro/api/v1/public/models",
+          "checked_at": "2026-09-17",
+          "origin": "chenyu-ai/api/doubao-seed-2-1-pro-260628"
+        },
+        {
+          "name": "doubao-seed-2-1-turbo-260628",
+          "kind": "text",
+          "note": "Doubao Seed 2.1 Turbo (260628)",
+          "upstream_protocols": [
+            "openai_responses"
+          ],
+          "pricing": {
+            "cache_read": 600000,
+            "in": 3000000,
+            "out": 15000000
+          },
+          "source": "https://chenyu.pro/api/v1/public/models",
+          "checked_at": "2026-09-17",
+          "origin": "chenyu-ai/api/doubao-seed-2-1-turbo-260628"
+        },
+        {
+          "name": "doubao-seed-2-0-lite-260428",
+          "kind": "text",
+          "note": "Doubao Seed 2.0 Lite (260428)",
+          "upstream_protocols": [
+            "openai_responses"
+          ],
+          "pricing": {
+            "cache_read": 120000,
+            "in": 600000,
+            "out": 3600000
+          },
+          "source": "https://chenyu.pro/api/v1/public/models",
+          "checked_at": "2026-09-17",
+          "origin": "chenyu-ai/api/doubao-seed-2-0-lite-260428"
+        },
+        {
+          "name": "doubao-seed-2-0-mini-260428",
+          "kind": "text",
+          "note": "Doubao Seed 2.0 Mini (260428)",
+          "upstream_protocols": [
+            "openai_responses"
+          ],
+          "pricing": {
+            "cache_read": 40000,
+            "in": 200000,
+            "out": 2000000
+          },
+          "source": "https://chenyu.pro/api/v1/public/models",
+          "checked_at": "2026-09-17",
+          "origin": "chenyu-ai/api/doubao-seed-2-0-mini-260428"
+        },
+        {
+          "name": "doubao-seed-2-0-pro-260215",
+          "kind": "text",
+          "note": "Doubao Seed 2.0 Pro (260215)",
+          "upstream_protocols": [
+            "openai_responses"
+          ],
+          "pricing": {
+            "cache_read": 640000,
+            "in": 3200000,
+            "out": 16000000
+          },
+          "source": "https://chenyu.pro/api/v1/public/models",
+          "checked_at": "2026-09-17",
+          "origin": "chenyu-ai/api/doubao-seed-2-0-pro-260215"
+        },
+        {
+          "name": "qwen3.8-max",
+          "kind": "text",
+          "note": "Qwen3.8-Max",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses"
+          ],
+          "pricing": {
+            "in": 12000000,
+            "out": 36000000
+          },
+          "source": "https://chenyu.pro/api/v1/public/models",
+          "checked_at": "2026-09-17",
+          "origin": "chenyu-ai/api/qwen3-8-max"
+        },
+        {
+          "name": "qwen3.7-plus",
+          "kind": "text",
+          "note": "Qwen3.7-Plus",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses"
+          ],
+          "pricing": {
+            "in": 2000000,
+            "out": 8000000
+          },
+          "source": "https://chenyu.pro/api/v1/public/models",
+          "checked_at": "2026-09-17",
+          "origin": "chenyu-ai/api/qwen3-7-plus"
+        },
+        {
+          "name": "qwen3.8-flash",
+          "kind": "text",
+          "note": "Qwen3.8-Flash",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses"
+          ],
+          "pricing": {
+            "in": 800000,
+            "out": 2700000
+          },
+          "source": "https://chenyu.pro/api/v1/public/models",
+          "checked_at": "2026-09-17",
+          "origin": "chenyu-ai/api/qwen3-8-flash"
+        },
+        {
+          "name": "qwen3.7-flash",
+          "kind": "text",
+          "note": "Qwen3.7-Flash",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses"
+          ],
+          "pricing": {
+            "in": 200000,
+            "out": 800000
+          },
+          "source": "https://chenyu.pro/api/v1/public/models",
+          "checked_at": "2026-09-17",
+          "origin": "chenyu-ai/api/qwen3-7-flash"
+        },
+        {
+          "name": "qwen3.8-27b",
+          "kind": "text",
+          "note": "Qwen3.8-27B（开源权重）",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses"
+          ],
+          "pricing": {
+            "in": 3000000,
+            "out": 12000000
+          },
+          "source": "https://chenyu.pro/api/v1/public/models",
+          "checked_at": "2026-09-17",
+          "origin": "chenyu-ai/api/qwen3-8-27b"
+        },
+        {
+          "name": "MiniMax-M3",
+          "kind": "text",
+          "note": "MiniMax M3",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses"
+          ],
+          "pricing": {
+            "cache_read": 420000,
+            "in": 2100000,
+            "out": 8400000
+          },
+          "source": "https://chenyu.pro/api/v1/public/models",
+          "checked_at": "2026-09-17",
+          "origin": "chenyu-ai/api/minimax-m3"
+        },
+        {
+          "name": "glm-5.3",
+          "kind": "text",
+          "note": "GLM-5.3",
+          "upstream_protocols": [
+            "openai_chat"
+          ],
+          "pricing": {
+            "cache_read": 2000000,
+            "in": 8000000,
+            "out": 28000000
+          },
+          "source": "https://chenyu.pro/api/v1/public/models",
+          "checked_at": "2026-09-17",
+          "origin": "chenyu-ai/api/glm-5-3"
+        },
+        {
+          "name": "glm-5.3-flash",
+          "kind": "text",
+          "note": "GLM-5.3-Flash",
+          "upstream_protocols": [
+            "openai_chat"
+          ],
+          "pricing": {
+            "cache_read": 230000,
+            "in": 800000,
+            "out": 2800000
+          },
+          "source": "https://chenyu.pro/api/v1/public/models",
+          "checked_at": "2026-09-17",
+          "origin": "chenyu-ai/api/glm-5-3-flash"
+        },
+        {
+          "name": "kimi-k3",
+          "kind": "text",
+          "note": "Kimi K3",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses"
+          ],
+          "pricing": {
+            "cache_read": 2000000,
+            "in": 20000000,
+            "out": 100000000
+          },
+          "source": "https://chenyu.pro/api/v1/public/models",
+          "checked_at": "2026-09-17",
+          "origin": "chenyu-ai/api/kimi-k3"
+        },
+        {
+          "name": "Qwen/Qwen3.8-27B-FP8",
+          "kind": "text",
+          "note": "Qwen3.8-27B-FP8（晨羽内网）",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses"
+          ],
+          "pricing": {
+            "cache_read": 600000,
+            "in": 3000000,
+            "out": 12000000
+          },
+          "source": "https://chenyu.pro/api/v1/public/models",
+          "checked_at": "2026-09-17",
+          "origin": "chenyu-ai/api/qwen-qwen3-8-27b-fp8"
+        },
+        {
+          "name": "nvidia/Qwen3.6-35B-A3B-NVFP4",
+          "kind": "text",
+          "note": "Qwen3.6-35B-A3B-NVFP4（晨羽内网）",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses"
+          ],
+          "pricing": {
+            "in": 1800000,
+            "out": 10800000
+          },
+          "source": "https://chenyu.pro/api/v1/public/models",
+          "checked_at": "2026-09-17",
+          "origin": "chenyu-ai/api/nvidia-qwen3-6-35b-a3b-nvfp4"
+        }
+      ]
+    },
+    {
+      "id": "chenyu_anthropic",
+      "type": "anthropic_compat",
+      "vendor": "晨羽AI",
+      "base_url": "https://api.chenyu.pro/v1",
+      "billing_mode": "usage",
+      "suggested_name": "chenyu-anthropic",
+      "entries": "Anthropic Messages 文本入口",
+      "ability": "聚合平台；与 OpenAI 兼容面同一把 Key、同一份余额，费用在晨羽控制台查看。",
+      "source": "https://chenyu.pro/api-docs/docs/models/",
+      "checked_at": "2026-09-17",
+      "note": "与 chenyu 同域名、同一把平台 API Key，只换协议（设备在 /v1 后拼 /messages）；只参与 /v1/messages 选路。",
+      "origin": [
+        "chenyu-ai/api"
+      ],
+      "models": [
+        {
+          "name": "deepseek-flash",
+          "kind": "text",
+          "note": "DeepSeek-V4.1-Flash",
+          "upstream_protocols": [
+            "anthropic_messages"
+          ],
+          "pricing": {
+            "cache_read": 40000,
+            "in": 2000000,
+            "out": 8000000
+          },
+          "source": "https://chenyu.pro/api/v1/public/models",
+          "checked_at": "2026-09-17",
+          "origin": "chenyu-ai/api/deepseek-flash"
+        },
+        {
+          "name": "deepseek-v4-pro",
+          "kind": "text",
+          "note": "DeepSeek V4 Pro",
+          "upstream_protocols": [
+            "anthropic_messages"
+          ],
+          "pricing": {
+            "cache_read": 300000,
+            "in": 9000000,
+            "out": 27000000
+          },
+          "source": "https://chenyu.pro/api/v1/public/models",
+          "checked_at": "2026-09-17",
+          "origin": "chenyu-ai/api/deepseek-v4-pro"
+        },
+        {
+          "name": "deepseek-v4-flash",
+          "kind": "text",
+          "note": "DeepSeek V4 Flash",
+          "upstream_protocols": [
+            "anthropic_messages"
+          ],
+          "pricing": {
+            "cache_read": 40000,
+            "in": 2000000,
+            "out": 8000000
+          },
+          "source": "https://chenyu.pro/api/v1/public/models",
+          "checked_at": "2026-09-17",
+          "origin": "chenyu-ai/api/deepseek-v4-flash"
+        },
+        {
+          "name": "deepseek-v4-flash-vision-exp",
+          "kind": "text",
+          "note": "DeepSeek V4 Flash Vision (实验)",
+          "upstream_protocols": [
+            "anthropic_messages"
+          ],
+          "pricing": {
+            "cache_read": 40000,
+            "in": 2000000,
+            "out": 8000000
+          },
+          "source": "https://chenyu.pro/api/v1/public/models",
+          "checked_at": "2026-09-17",
+          "origin": "chenyu-ai/api/deepseek-v4-flash-vision-exp"
+        },
+        {
+          "name": "doubao-seed-2-1-pro-260628",
+          "kind": "text",
+          "note": "Doubao Seed 2.1 Pro (260628)",
+          "upstream_protocols": [
+            "anthropic_messages"
+          ],
+          "pricing": {
+            "cache_read": 1200000,
+            "in": 6000000,
+            "out": 30000000
+          },
+          "source": "https://chenyu.pro/api/v1/public/models",
+          "checked_at": "2026-09-17",
+          "origin": "chenyu-ai/api/doubao-seed-2-1-pro-260628"
+        },
+        {
+          "name": "doubao-seed-2-1-turbo-260628",
+          "kind": "text",
+          "note": "Doubao Seed 2.1 Turbo (260628)",
+          "upstream_protocols": [
+            "anthropic_messages"
+          ],
+          "pricing": {
+            "cache_read": 600000,
+            "in": 3000000,
+            "out": 15000000
+          },
+          "source": "https://chenyu.pro/api/v1/public/models",
+          "checked_at": "2026-09-17",
+          "origin": "chenyu-ai/api/doubao-seed-2-1-turbo-260628"
+        },
+        {
+          "name": "doubao-seed-2-0-lite-260428",
+          "kind": "text",
+          "note": "Doubao Seed 2.0 Lite (260428)",
+          "upstream_protocols": [
+            "anthropic_messages"
+          ],
+          "pricing": {
+            "cache_read": 120000,
+            "in": 600000,
+            "out": 3600000
+          },
+          "source": "https://chenyu.pro/api/v1/public/models",
+          "checked_at": "2026-09-17",
+          "origin": "chenyu-ai/api/doubao-seed-2-0-lite-260428"
+        },
+        {
+          "name": "doubao-seed-2-0-mini-260428",
+          "kind": "text",
+          "note": "Doubao Seed 2.0 Mini (260428)",
+          "upstream_protocols": [
+            "anthropic_messages"
+          ],
+          "pricing": {
+            "cache_read": 40000,
+            "in": 200000,
+            "out": 2000000
+          },
+          "source": "https://chenyu.pro/api/v1/public/models",
+          "checked_at": "2026-09-17",
+          "origin": "chenyu-ai/api/doubao-seed-2-0-mini-260428"
+        },
+        {
+          "name": "doubao-seed-2-0-pro-260215",
+          "kind": "text",
+          "note": "Doubao Seed 2.0 Pro (260215)",
+          "upstream_protocols": [
+            "anthropic_messages"
+          ],
+          "pricing": {
+            "cache_read": 640000,
+            "in": 3200000,
+            "out": 16000000
+          },
+          "source": "https://chenyu.pro/api/v1/public/models",
+          "checked_at": "2026-09-17",
+          "origin": "chenyu-ai/api/doubao-seed-2-0-pro-260215"
+        },
+        {
+          "name": "qwen3.8-max",
+          "kind": "text",
+          "note": "Qwen3.8-Max",
+          "upstream_protocols": [
+            "anthropic_messages"
+          ],
+          "pricing": {
+            "in": 12000000,
+            "out": 36000000
+          },
+          "source": "https://chenyu.pro/api/v1/public/models",
+          "checked_at": "2026-09-17",
+          "origin": "chenyu-ai/api/qwen3-8-max"
+        },
+        {
+          "name": "qwen3.7-plus",
+          "kind": "text",
+          "note": "Qwen3.7-Plus",
+          "upstream_protocols": [
+            "anthropic_messages"
+          ],
+          "pricing": {
+            "in": 2000000,
+            "out": 8000000
+          },
+          "source": "https://chenyu.pro/api/v1/public/models",
+          "checked_at": "2026-09-17",
+          "origin": "chenyu-ai/api/qwen3-7-plus"
+        },
+        {
+          "name": "qwen3.8-flash",
+          "kind": "text",
+          "note": "Qwen3.8-Flash",
+          "upstream_protocols": [
+            "anthropic_messages"
+          ],
+          "pricing": {
+            "in": 800000,
+            "out": 2700000
+          },
+          "source": "https://chenyu.pro/api/v1/public/models",
+          "checked_at": "2026-09-17",
+          "origin": "chenyu-ai/api/qwen3-8-flash"
+        },
+        {
+          "name": "qwen3.7-flash",
+          "kind": "text",
+          "note": "Qwen3.7-Flash",
+          "upstream_protocols": [
+            "anthropic_messages"
+          ],
+          "pricing": {
+            "in": 200000,
+            "out": 800000
+          },
+          "source": "https://chenyu.pro/api/v1/public/models",
+          "checked_at": "2026-09-17",
+          "origin": "chenyu-ai/api/qwen3-7-flash"
+        },
+        {
+          "name": "qwen3.8-27b",
+          "kind": "text",
+          "note": "Qwen3.8-27B（开源权重）",
+          "upstream_protocols": [
+            "anthropic_messages"
+          ],
+          "pricing": {
+            "in": 3000000,
+            "out": 12000000
+          },
+          "source": "https://chenyu.pro/api/v1/public/models",
+          "checked_at": "2026-09-17",
+          "origin": "chenyu-ai/api/qwen3-8-27b"
+        },
+        {
+          "name": "MiniMax-M3",
+          "kind": "text",
+          "note": "MiniMax M3",
+          "upstream_protocols": [
+            "anthropic_messages"
+          ],
+          "pricing": {
+            "cache_read": 420000,
+            "in": 2100000,
+            "out": 8400000
+          },
+          "source": "https://chenyu.pro/api/v1/public/models",
+          "checked_at": "2026-09-17",
+          "origin": "chenyu-ai/api/minimax-m3"
+        },
+        {
+          "name": "glm-5.3",
+          "kind": "text",
+          "note": "GLM-5.3",
+          "upstream_protocols": [
+            "anthropic_messages"
+          ],
+          "pricing": {
+            "cache_read": 2000000,
+            "in": 8000000,
+            "out": 28000000
+          },
+          "source": "https://chenyu.pro/api/v1/public/models",
+          "checked_at": "2026-09-17",
+          "origin": "chenyu-ai/api/glm-5-3"
+        },
+        {
+          "name": "glm-5.3-flash",
+          "kind": "text",
+          "note": "GLM-5.3-Flash",
+          "upstream_protocols": [
+            "anthropic_messages"
+          ],
+          "pricing": {
+            "cache_read": 230000,
+            "in": 800000,
+            "out": 2800000
+          },
+          "source": "https://chenyu.pro/api/v1/public/models",
+          "checked_at": "2026-09-17",
+          "origin": "chenyu-ai/api/glm-5-3-flash"
+        },
+        {
+          "name": "kimi-k3",
+          "kind": "text",
+          "note": "Kimi K3",
+          "upstream_protocols": [
+            "anthropic_messages"
+          ],
+          "pricing": {
+            "cache_read": 2000000,
+            "in": 20000000,
+            "out": 100000000
+          },
+          "source": "https://chenyu.pro/api/v1/public/models",
+          "checked_at": "2026-09-17",
+          "origin": "chenyu-ai/api/kimi-k3"
+        },
+        {
+          "name": "Qwen/Qwen3.8-27B-FP8",
+          "kind": "text",
+          "note": "Qwen3.8-27B-FP8（晨羽内网）",
+          "upstream_protocols": [
+            "anthropic_messages"
+          ],
+          "pricing": {
+            "cache_read": 600000,
+            "in": 3000000,
+            "out": 12000000
+          },
+          "source": "https://chenyu.pro/api/v1/public/models",
+          "checked_at": "2026-09-17",
+          "origin": "chenyu-ai/api/qwen-qwen3-8-27b-fp8"
+        },
+        {
+          "name": "nvidia/Qwen3.6-35B-A3B-NVFP4",
+          "kind": "text",
+          "note": "Qwen3.6-35B-A3B-NVFP4（晨羽内网）",
+          "upstream_protocols": [
+            "anthropic_messages"
+          ],
+          "pricing": {
+            "in": 1800000,
+            "out": 10800000
+          },
+          "source": "https://chenyu.pro/api/v1/public/models",
+          "checked_at": "2026-09-17",
+          "origin": "chenyu-ai/api/nvidia-qwen3-6-35b-a3b-nvfp4"
+        }
+      ]
+    },
+    {
+      "id": "openai",
+      "type": "openai_compat",
+      "vendor": "OpenAI",
+      "base_url": "https://api.openai.com/v1",
+      "billing_mode": "usage",
+      "suggested_name": "openai",
+      "entries": "OpenAI 兼容文本入口",
+      "ability": "API 用量和账单在 OpenAI Platform 查看。",
+      "source": "https://platform.openai.com/docs/api-reference/chat",
+      "checked_at": "2026-09-16",
+      "note": "通过 Chat Completions 调用 GPT 文本模型；设备的 /v1/responses 仍使用固件内置的无状态转换子集。",
+      "origin": [
+        "openai/api-global"
+      ],
+      "models": [
+        {
+          "name": "gpt-5.2",
+          "kind": "text",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses"
+          ],
+          "capabilities": {
+            "input_modalities": [
+              "text",
+              "image"
+            ],
+            "responses_chat": {
+              "profile": "",
+              "replay_reasoning_content": false,
+              "thinking_type": "",
+              "drop_tool_choice": false,
+              "effort_map": null
+            },
+            "codex": {
+              "default_reasoning_level": "",
+              "supported_reasoning_levels": null
+            }
+          },
+          "pricing": {
+            "cache_read": 1181250,
+            "in": 11812500,
+            "out": 94500000
+          },
+          "source": "https://developers.openai.com/api/docs/models/gpt-5.2.md",
+          "checked_at": "2026-09-16",
+          "origin": "openai/api-global/gpt-5-2"
+        }
+      ]
+    },
+    {
+      "id": "anthropic",
+      "type": "anthropic_compat",
+      "vendor": "Anthropic",
+      "base_url": "https://api.anthropic.com/v1",
+      "billing_mode": "usage",
+      "suggested_name": "anthropic",
+      "entries": "Anthropic Messages 文本入口",
+      "ability": "使用 x-api-key 鉴权；API 用量和账单在 Claude Console 查看。",
+      "source": "https://docs.anthropic.com/en/api/messages",
+      "checked_at": "2026-09-23",
+      "note": "Anthropic 官方 Messages API；只提供文本输出模型。",
+      "origin": [
+        "anthropic/api-global"
+      ],
+      "models": [
+        {
+          "name": "claude-opus-5",
+          "kind": "text",
+          "upstream_protocols": [
+            "anthropic_messages"
+          ],
+          "capabilities": {
+            "input_modalities": [
+              "text",
+              "image"
+            ],
+            "responses_chat": {
+              "profile": "",
+              "replay_reasoning_content": false,
+              "thinking_type": "",
+              "drop_tool_choice": false,
+              "effort_map": null
+            },
+            "codex": {
+              "default_reasoning_level": "",
+              "supported_reasoning_levels": null
+            }
+          },
+          "pricing": {
+            "cache_read": 3375000,
+            "cache_write": 42187500,
+            "in": 33750000,
+            "out": 168750000
+          },
+          "source": "https://platform.claude.com/docs/en/models/overview",
+          "checked_at": "2026-09-16",
+          "origin": "anthropic/api-global/claude-opus-5"
+        },
+        {
+          "name": "claude-sonnet-5",
+          "kind": "text",
+          "upstream_protocols": [
+            "anthropic_messages"
+          ],
+          "capabilities": {
+            "input_modalities": [
+              "text",
+              "image"
+            ],
+            "responses_chat": {
+              "profile": "",
+              "replay_reasoning_content": false,
+              "thinking_type": "",
+              "drop_tool_choice": false,
+              "effort_map": null
+            },
+            "codex": {
+              "default_reasoning_level": "",
+              "supported_reasoning_levels": null
+            }
+          },
+          "pricing": {
+            "cache_read": 1350000,
+            "cache_write": 16875000,
+            "in": 13500000,
+            "out": 67500000
+          },
+          "source": "https://platform.claude.com/docs/en/models/overview",
+          "checked_at": "2026-09-16",
+          "origin": "anthropic/api-global/claude-sonnet-5"
+        },
+        {
+          "name": "claude-opus-5-5",
+          "kind": "text",
+          "note": "Claude Opus 5.5",
+          "upstream_protocols": [
+            "anthropic_messages"
+          ],
+          "capabilities": {
+            "input_modalities": [
+              "text",
+              "image"
+            ],
+            "responses_chat": {
+              "profile": "",
+              "replay_reasoning_content": false,
+              "thinking_type": "",
+              "drop_tool_choice": false,
+              "effort_map": null
+            },
+            "codex": {
+              "default_reasoning_level": "",
+              "supported_reasoning_levels": null
+            }
+          },
+          "pricing": {
+            "cache_read": 1350000,
+            "cache_write": 33750000,
+            "in": 27000000,
+            "out": 135000000
+          },
+          "source": "https://platform.claude.com/docs/en/models/opus-5-5/overview",
+          "checked_at": "2026-09-23",
+          "origin": "anthropic/api-global/claude-opus-5-5"
+        },
+        {
+          "name": "claude-haiku-4-5",
+          "kind": "text",
+          "upstream_protocols": [
+            "anthropic_messages"
+          ],
+          "capabilities": {
+            "input_modalities": [
+              "text",
+              "image"
+            ],
+            "responses_chat": {
+              "profile": "",
+              "replay_reasoning_content": false,
+              "thinking_type": "",
+              "drop_tool_choice": false,
+              "effort_map": null
+            },
+            "codex": {
+              "default_reasoning_level": "",
+              "supported_reasoning_levels": null
+            }
+          },
+          "pricing": {
+            "cache_read": 675000,
+            "cache_write": 8437500,
+            "in": 6750000,
+            "out": 33750000
+          },
+          "source": "https://platform.claude.com/docs/en/models/overview",
+          "checked_at": "2026-09-16",
+          "origin": "anthropic/api-global/claude-haiku-4-5"
+        },
+        {
+          "name": "claude-fable-5-1",
+          "kind": "text",
+          "note": "Claude Fable 5.1",
+          "upstream_protocols": [
+            "anthropic_messages"
+          ],
+          "capabilities": {
+            "input_modalities": [
+              "text",
+              "image"
+            ],
+            "responses_chat": {
+              "profile": "",
+              "replay_reasoning_content": false,
+              "thinking_type": "",
+              "drop_tool_choice": false,
+              "effort_map": null
+            },
+            "codex": {
+              "default_reasoning_level": "",
+              "supported_reasoning_levels": null
+            }
+          },
+          "pricing": {
+            "cache_read": 1687500,
+            "cache_write": 84375000,
+            "in": 67500000,
+            "out": 337500000
+          },
+          "source": "https://platform.claude.com/docs/en/models/fable-5-1/overview",
+          "checked_at": "2026-09-17",
+          "origin": "anthropic/api-global/claude-fable-5-1"
+        },
+        {
+          "name": "claude-fable-5",
+          "kind": "text",
+          "note": "Claude Fable 5",
+          "upstream_protocols": [
+            "anthropic_messages"
+          ],
+          "capabilities": {
+            "input_modalities": [
+              "text",
+              "image"
+            ],
+            "responses_chat": {
+              "profile": "",
+              "replay_reasoning_content": false,
+              "thinking_type": "",
+              "drop_tool_choice": false,
+              "effort_map": null
+            },
+            "codex": {
+              "default_reasoning_level": "",
+              "supported_reasoning_levels": null
+            }
+          },
+          "pricing": {
+            "cache_read": 6750000,
+            "cache_write": 84375000,
+            "in": 67500000,
+            "out": 337500000
+          },
+          "source": "https://platform.claude.com/docs/en/models/fable-5/overview",
+          "checked_at": "2026-09-17",
+          "origin": "anthropic/api-global/claude-fable-5"
+        }
+      ]
+    },
+    {
+      "id": "gemini",
+      "type": "openai_compat",
+      "vendor": "Google Gemini API",
+      "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+      "billing_mode": "usage",
+      "suggested_name": "gemini",
+      "entries": "OpenAI 兼容文本入口",
+      "ability": "使用 Gemini API Key；配额和账单在 Google AI Studio / Cloud Console 查看。",
+      "source": "https://ai.google.dev/gemini-api/docs/openai",
+      "checked_at": "2026-09-16",
+      "note": "使用 Google 官方 OpenAI 兼容层；目录只收文本型号。",
+      "origin": [
+        "gemini/api-global"
+      ],
+      "models": [
+        {
+          "name": "gemini-3.7-flash",
+          "kind": "text",
+          "upstream_protocols": [
+            "openai_chat"
+          ],
+          "capabilities": {
+            "input_modalities": [
+              "text",
+              "image",
+              "video",
+              "audio"
+            ],
+            "responses_chat": {
+              "profile": "",
+              "replay_reasoning_content": false,
+              "thinking_type": "",
+              "drop_tool_choice": false,
+              "effort_map": null
+            },
+            "codex": {
+              "default_reasoning_level": "",
+              "supported_reasoning_levels": null
+            }
+          },
+          "pricing": {
+            "cache_read": 506250,
+            "in": 5062500,
+            "out": 25312500
+          },
+          "source": "https://ai.google.dev/gemini-api/docs/models/gemini-3.7-flash",
+          "checked_at": "2026-09-16",
+          "origin": "gemini/api-global/gemini-3-7-flash"
+        }
+      ]
+    },
+    {
+      "id": "xai",
+      "type": "openai_compat",
+      "vendor": "xAI",
+      "base_url": "https://api.x.ai/v1",
+      "billing_mode": "usage",
+      "suggested_name": "xai",
+      "entries": "OpenAI 兼容文本入口",
+      "ability": "API 用量和账单在 xAI Console 查看。",
+      "source": "https://docs.x.ai/developers/quickstart",
+      "checked_at": "2026-09-22",
+      "note": "只接入 Grok 文本对话型号；Imagine 和 Voice API 不进入本目录。",
+      "origin": [
+        "xai/api-global"
+      ],
+      "models": [
+        {
+          "name": "grok-4.7",
+          "kind": "text",
+          "note": "Grok 4.7",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses"
+          ],
+          "capabilities": {
+            "input_modalities": [
+              "text",
+              "image"
+            ],
+            "responses_chat": {
+              "profile": "",
+              "replay_reasoning_content": false,
+              "thinking_type": "",
+              "drop_tool_choice": false,
+              "effort_map": null
+            },
+            "codex": {
+              "default_reasoning_level": "",
+              "supported_reasoning_levels": null
+            }
+          },
+          "pricing": {
+            "cache_read": 3375000,
+            "in": 13500000,
+            "out": 40500000
+          },
+          "source": "https://docs.x.ai/developers/models/grok-4.7.md",
+          "checked_at": "2026-09-22",
+          "origin": "xai/api-global/grok-4-7"
+        },
+        {
+          "name": "grok-4.6",
+          "kind": "text",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses"
+          ],
+          "capabilities": {
+            "input_modalities": [
+              "text",
+              "image"
+            ],
+            "responses_chat": {
+              "profile": "",
+              "replay_reasoning_content": false,
+              "thinking_type": "",
+              "drop_tool_choice": false,
+              "effort_map": null
+            },
+            "codex": {
+              "default_reasoning_level": "",
+              "supported_reasoning_levels": null
+            }
+          },
+          "pricing": {
+            "cache_read": 3375000,
+            "in": 13500000,
+            "out": 40500000
+          },
+          "source": "https://docs.x.ai/developers/models/grok-4.6.md",
+          "checked_at": "2026-09-22",
+          "origin": "xai/api-global/grok-4-6"
+        },
+        {
+          "name": "grok-4.5",
+          "kind": "text",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses"
+          ],
+          "capabilities": {
+            "input_modalities": [
+              "text",
+              "image"
+            ],
+            "responses_chat": {
+              "profile": "",
+              "replay_reasoning_content": false,
+              "thinking_type": "",
+              "drop_tool_choice": false,
+              "effort_map": null
+            },
+            "codex": {
+              "default_reasoning_level": "",
+              "supported_reasoning_levels": null
+            }
+          },
+          "pricing": {
+            "cache_read": 2025000,
+            "in": 13500000,
+            "out": 40500000
+          },
+          "source": "https://docs.x.ai/developers/models/grok-4.5.md",
+          "checked_at": "2026-09-22",
+          "origin": "xai/api-global/grok-4-5"
+        }
+      ]
+    },
+    {
+      "id": "openrouter",
+      "type": "openai_compat",
+      "vendor": "OpenRouter",
+      "base_url": "https://openrouter.ai/api/v1",
+      "billing_mode": "usage",
+      "suggested_name": "openrouter",
+      "entries": "OpenAI 兼容文本入口",
+      "ability": "聚合平台；余额、路由和实际可用型号在 OpenRouter 控制台查看。",
+      "source": "https://openrouter.ai/docs/quickstart",
+      "checked_at": "2026-09-16",
+      "note": "目录只提供数据仓库收录的路由别名；具体供应商型号可通过「自定义」按 OpenRouter Models API 的 ID 录入。",
+      "origin": [
+        "openrouter/api-global"
+      ],
+      "models": [
+        {
+          "name": "~anthropic/claude-sonnet-latest",
+          "kind": "text",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses"
+          ],
+          "capabilities": {
+            "input_modalities": [
+              "text",
+              "image",
+              "file"
+            ],
+            "responses_chat": {
+              "profile": "",
+              "replay_reasoning_content": false,
+              "thinking_type": "",
+              "drop_tool_choice": false,
+              "effort_map": null
+            },
+            "codex": {
+              "default_reasoning_level": "",
+              "supported_reasoning_levels": null
+            }
+          },
+          "pricing": {
+            "cache_read": 1350000,
+            "in": 13500000,
+            "out": 67500000
+          },
+          "source": "https://openrouter.ai/api/v1/models",
+          "checked_at": "2026-09-16",
+          "origin": "openrouter/api-global/anthropic-claude-sonnet-latest"
+        }
+      ]
+    },
+    {
+      "id": "groq",
+      "type": "openai_compat",
+      "vendor": "GroqCloud",
+      "base_url": "https://api.groq.com/openai/v1",
+      "billing_mode": "usage",
+      "suggested_name": "groq",
+      "entries": "OpenAI 兼容文本入口",
+      "ability": "可用型号和速率限制以 GroqCloud Models API 为准。",
+      "source": "https://console.groq.com/docs/openai",
+      "checked_at": "2026-09-16",
+      "note": "只收录 GroqCloud 的文本生成型号。",
+      "origin": [
+        "groq/api-global"
+      ],
+      "models": [
+        {
+          "name": "openai/gpt-oss-120b",
+          "kind": "text",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses"
+          ],
+          "capabilities": {
+            "input_modalities": [
+              "text"
+            ],
+            "responses_chat": {
+              "profile": "",
+              "replay_reasoning_content": false,
+              "thinking_type": "",
+              "drop_tool_choice": false,
+              "effort_map": null
+            },
+            "codex": {
+              "default_reasoning_level": "",
+              "supported_reasoning_levels": null
+            }
+          },
+          "pricing": {
+            "in": 1012500,
+            "out": 4050000
+          },
+          "source": "https://console.groq.com/docs/models",
+          "checked_at": "2026-09-16",
+          "origin": "groq/api-global/openai-gpt-oss-120b"
+        },
+        {
+          "name": "openai/gpt-oss-20b",
+          "kind": "text",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses"
+          ],
+          "capabilities": {
+            "input_modalities": [
+              "text"
+            ],
+            "responses_chat": {
+              "profile": "",
+              "replay_reasoning_content": false,
+              "thinking_type": "",
+              "drop_tool_choice": false,
+              "effort_map": null
+            },
+            "codex": {
+              "default_reasoning_level": "",
+              "supported_reasoning_levels": null
+            }
+          },
+          "pricing": {
+            "in": 506250,
+            "out": 2025000
+          },
+          "source": "https://console.groq.com/docs/models",
+          "checked_at": "2026-09-16",
+          "origin": "groq/api-global/openai-gpt-oss-20b"
+        }
+      ]
+    },
+    {
+      "id": "mistral",
+      "type": "openai_compat",
+      "vendor": "Mistral AI",
+      "base_url": "https://api.mistral.ai/v1",
+      "billing_mode": "usage",
+      "suggested_name": "mistral",
+      "entries": "OpenAI 兼容文本入口",
+      "ability": "API 用量和账单在 Mistral Studio 查看。",
+      "source": "https://docs.mistral.ai/api/endpoint/chat",
+      "checked_at": "2026-09-16",
+      "note": "使用无状态 Chat Completions 文本入口。",
+      "origin": [
+        "mistral/api-global"
+      ],
+      "models": [
+        {
+          "name": "mistral-large-latest",
+          "kind": "text",
+          "upstream_protocols": [
+            "openai_chat"
+          ],
+          "pricing": {
+            "cache_read": 337500,
+            "in": 3375000,
+            "out": 10125000
+          },
+          "source": "https://docs.mistral.ai/inference/pricing",
+          "checked_at": "2026-09-16",
+          "origin": "mistral/api-global/mistral-large-latest"
+        },
+        {
+          "name": "mistral-small-latest",
+          "kind": "text",
+          "upstream_protocols": [
+            "openai_chat"
+          ],
+          "pricing": {
+            "cache_read": 101250,
+            "in": 1012500,
+            "out": 4050000
+          },
+          "source": "https://docs.mistral.ai/inference/pricing",
+          "checked_at": "2026-09-16",
+          "origin": "mistral/api-global/mistral-small-latest"
+        }
+      ]
+    },
+    {
+      "id": "ark_plan",
+      "type": "ark_plan",
+      "vendor": "火山方舟",
+      "billing_mode": "subscription",
+      "suggested_name": "ark-plan",
+      "entries": "OpenAI 兼容 与 Anthropic 兼容双入口；视频与图像走订阅端点",
+      "ability": "套餐余量在火山方舟控制台查看。",
+      "source": "https://www.volcengine.com/docs/82379/1330310",
+      "checked_at": "2026-09-17",
+      "note": "方舟 Agent Plan 与 Coding Plan 订阅共用端点根 /api/plan/v3；选单是两份套餐清单的并集，套餐额度与实际可用型号以方舟控制台为准。",
+      "origin": [
+        "ark/agent-plan-cn",
+        "ark/coding-plan-cn"
+      ],
+      "models": [
+        {
+          "name": "deepseek-v4-pro",
+          "kind": "text",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses",
+            "anthropic_messages"
+          ],
+          "capabilities": {
+            "responses_chat": {
+              "profile": "reasoning_replay_v1",
+              "replay_reasoning_content": true,
+              "thinking_type": "enabled",
+              "drop_tool_choice": true,
+              "effort_map": {
+                "high": "high",
+                "low": "high",
+                "max": "max",
+                "medium": "high",
+                "minimal": "high",
+                "ultra": "max",
+                "xhigh": "max"
+              }
+            },
+            "codex": {
+              "default_reasoning_level": "high",
+              "supported_reasoning_levels": [
+                {
+                  "effort": "high",
+                  "description": "Deep reasoning"
+                },
+                {
+                  "effort": "xhigh",
+                  "description": "Maximum reasoning"
+                }
+              ]
+            }
+          },
+          "pricing": {
+            "cache_read": 300000,
+            "in": 9000000,
+            "out": 27000000
+          },
+          "source": "https://www.volcengine.com/docs/82379/2366394",
+          "checked_at": "2026-09-16",
+          "origin": "ark/agent-plan-cn/deepseek-v4-pro"
+        },
+        {
+          "name": "deepseek-v4-flash",
+          "kind": "text",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses",
+            "anthropic_messages"
+          ],
+          "capabilities": {
+            "responses_chat": {
+              "profile": "reasoning_replay_v1",
+              "replay_reasoning_content": true,
+              "thinking_type": "enabled",
+              "drop_tool_choice": true,
+              "effort_map": {
+                "high": "high",
+                "low": "high",
+                "max": "max",
+                "medium": "high",
+                "minimal": "high",
+                "ultra": "max",
+                "xhigh": "max"
+              }
+            },
+            "codex": {
+              "default_reasoning_level": "high",
+              "supported_reasoning_levels": [
+                {
+                  "effort": "high",
+                  "description": "Deep reasoning"
+                },
+                {
+                  "effort": "xhigh",
+                  "description": "Maximum reasoning"
+                }
+              ]
+            }
+          },
+          "pricing": {
+            "cache_read": 100000,
+            "in": 3000000,
+            "out": 9000000
+          },
+          "source": "https://www.volcengine.com/docs/82379/2366394",
+          "checked_at": "2026-09-16",
+          "origin": "ark/agent-plan-cn/deepseek-v4-flash"
+        },
+        {
+          "name": "doubao-seedance-2.5",
+          "kind": "video",
+          "family": "ark_video",
+          "pricing": {
+            "ark_video_token": 70000000,
+            "ark_video_token_ref": 70000000
+          },
+          "source": "https://www.volcengine.com/docs/82379/2366394",
+          "checked_at": "2026-09-17",
+          "origin": "ark/agent-plan-cn/doubao-seedance-2-5"
+        },
+        {
+          "name": "doubao-seedance-2.0",
+          "kind": "video",
+          "family": "ark_video",
+          "pricing": {
+            "ark_video_token": 46000000,
+            "ark_video_token_ref": 46000000
+          },
+          "source": "https://www.volcengine.com/docs/82379/2366394",
+          "checked_at": "2026-09-17",
+          "origin": "ark/agent-plan-cn/doubao-seedance-2-0"
+        },
+        {
+          "name": "doubao-seedance-2.0-fast",
+          "kind": "video",
+          "family": "ark_video",
+          "pricing": {
+            "ark_video_token": 37000000,
+            "ark_video_token_ref": 37000000
+          },
+          "source": "https://www.volcengine.com/docs/82379/2366394",
+          "checked_at": "2026-09-17",
+          "origin": "ark/agent-plan-cn/doubao-seedance-2-0-fast"
+        },
+        {
+          "name": "doubao-seedance-2.0-mini",
+          "kind": "video",
+          "family": "ark_video",
+          "pricing": {
+            "ark_video_token": 23000000,
+            "ark_video_token_ref": 23000000
+          },
+          "source": "https://www.volcengine.com/docs/82379/2366394",
+          "checked_at": "2026-09-17",
+          "origin": "ark/agent-plan-cn/doubao-seedance-2-0-mini"
+        },
+        {
+          "name": "doubao-seedream-5.0-lite",
+          "kind": "image",
+          "family": "ark_image",
+          "pricing": {
+            "ark_image_each": 220000
+          },
+          "source": "https://www.volcengine.com/docs/82379/2366394",
+          "checked_at": "2026-09-16",
+          "origin": "ark/agent-plan-cn/doubao-seedream-5-0-lite"
+        },
+        {
+          "name": "doubao-seed-evolving",
+          "kind": "text",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses",
+            "anthropic_messages"
+          ],
+          "pricing": {
+            "cache_read": 1200000,
+            "in": 6000000,
+            "out": 30000000
+          },
+          "source": "https://www.volcengine.com/docs/82379/1928261",
+          "checked_at": "2026-09-16",
+          "origin": "ark/coding-plan-cn/doubao-seed-evolving"
+        },
+        {
+          "name": "doubao-seed-2.1-turbo",
+          "kind": "text",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses",
+            "anthropic_messages"
+          ],
+          "pricing": {
+            "cache_read": 600000,
+            "in": 3000000,
+            "out": 15000000
+          },
+          "source": "https://www.volcengine.com/docs/82379/1928261",
+          "checked_at": "2026-09-16",
+          "origin": "ark/coding-plan-cn/doubao-seed-2-1-turbo"
+        },
+        {
+          "name": "doubao-seed-2.0-lite",
+          "kind": "text",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses",
+            "anthropic_messages"
+          ],
+          "pricing": {
+            "cache_read": 120000,
+            "in": 600000,
+            "out": 3600000
+          },
+          "source": "https://www.volcengine.com/docs/82379/1928261",
+          "checked_at": "2026-09-16",
+          "origin": "ark/coding-plan-cn/doubao-seed-2-0-lite"
+        },
+        {
+          "name": "minimax-m3",
+          "kind": "text",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses",
+            "anthropic_messages"
+          ],
+          "pricing": {
+            "cache_read": 420000,
+            "in": 2100000,
+            "out": 8400000
+          },
+          "source": "https://www.volcengine.com/docs/82379/1928261",
+          "checked_at": "2026-09-16",
+          "origin": "ark/coding-plan-cn/minimax-m3"
+        },
+        {
+          "name": "glm-5.3",
+          "kind": "text",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses",
+            "anthropic_messages"
+          ],
+          "capabilities": {
+            "responses_chat": {
+              "profile": "reasoning_replay_v1",
+              "replay_reasoning_content": false,
+              "thinking_type": "enabled",
+              "drop_tool_choice": false,
+              "effort_map": {
+                "high": "high",
+                "low": "low",
+                "max": "max",
+                "medium": "medium",
+                "minimal": "low",
+                "ultra": "max",
+                "xhigh": "xhigh"
+              }
+            },
+            "codex": {
+              "default_reasoning_level": "high",
+              "supported_reasoning_levels": [
+                {
+                  "effort": "low",
+                  "description": "Fast reasoning"
+                },
+                {
+                  "effort": "medium",
+                  "description": "Balanced reasoning"
+                },
+                {
+                  "effort": "high",
+                  "description": "Deep reasoning"
+                },
+                {
+                  "effort": "xhigh",
+                  "description": "Very deep reasoning"
+                },
+                {
+                  "effort": "max",
+                  "description": "Maximum reasoning"
+                }
+              ]
+            }
+          },
+          "pricing": {
+            "cache_read": 2000000,
+            "in": 8000000,
+            "out": 28000000
+          },
+          "source": "https://www.volcengine.com/docs/82379/1928261",
+          "checked_at": "2026-09-16",
+          "origin": "ark/coding-plan-cn/glm-5-3"
+        },
+        {
+          "name": "glm-5.3-flash",
+          "kind": "text",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses",
+            "anthropic_messages"
+          ],
+          "pricing": {
+            "cache_read": 230000,
+            "in": 800000,
+            "out": 2800000
+          },
+          "source": "https://www.volcengine.com/docs/82379/1928261",
+          "checked_at": "2026-09-16",
+          "origin": "ark/coding-plan-cn/glm-5-3-flash"
+        },
+        {
+          "name": "kimi-k2.7-code",
+          "kind": "text",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses",
+            "anthropic_messages"
+          ],
+          "pricing": {
+            "cache_read": 1300000,
+            "in": 6500000,
+            "out": 27000000
+          },
+          "source": "https://www.volcengine.com/docs/82379/1928261",
+          "checked_at": "2026-09-16",
+          "origin": "ark/coding-plan-cn/kimi-k2-7-code"
+        },
+        {
+          "name": "kimi-k3",
+          "kind": "text",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses",
+            "anthropic_messages"
+          ],
+          "capabilities": {
+            "responses_chat": {
+              "profile": "reasoning_replay_v1",
+              "replay_reasoning_content": false,
+              "thinking_type": "enabled",
+              "drop_tool_choice": false,
+              "effort_map": {
+                "high": "high",
+                "low": "low",
+                "max": "max",
+                "medium": "medium",
+                "minimal": "minimal",
+                "ultra": "max",
+                "xhigh": "xhigh"
+              }
+            },
+            "codex": {
+              "default_reasoning_level": "high",
+              "supported_reasoning_levels": [
+                {
+                  "effort": "minimal",
+                  "description": "Minimal reasoning"
+                },
+                {
+                  "effort": "low",
+                  "description": "Fast reasoning"
+                },
+                {
+                  "effort": "medium",
+                  "description": "Balanced reasoning"
+                },
+                {
+                  "effort": "high",
+                  "description": "Deep reasoning"
+                },
+                {
+                  "effort": "xhigh",
+                  "description": "Very deep reasoning"
+                },
+                {
+                  "effort": "max",
+                  "description": "Maximum reasoning"
+                }
+              ]
+            }
+          },
+          "pricing": {
+            "cache_read": 2000000,
+            "in": 20000000,
+            "out": 100000000
+          },
+          "source": "https://www.volcengine.com/docs/82379/1928261",
+          "checked_at": "2026-09-16",
+          "origin": "ark/coding-plan-cn/kimi-k3"
+        }
+      ]
+    },
+    {
+      "id": "qwen_plan",
+      "type": "qwen_plan",
+      "vendor": "阿里云百炼",
+      "billing_mode": "subscription",
+      "suggested_name": "qwen-plan",
+      "entries": "OpenAI 兼容 与 Anthropic 兼容双入口",
+      "ability": "Token Plan 套餐余量在阿里云百炼控制台查看。",
+      "source": "https://help.aliyun.com/zh/model-studio/text-generation-model/",
+      "checked_at": "2026-09-16",
+      "note": "通义千问 Token Plan 文本入口；只收录套餐清单里的文本模型。",
+      "origin": [
+        "bailian/token-plan-cn"
+      ],
+      "models": [
+        {
+          "name": "qwen3.8-max",
+          "kind": "text",
+          "upstream_protocols": [
+            "openai_chat",
+            "anthropic_messages"
+          ],
+          "pricing": {
+            "in": 12000000,
+            "out": 36000000
+          },
+          "source": "https://help.aliyun.com/zh/model-studio/token-plan-team-overview",
+          "checked_at": "2026-09-16",
+          "origin": "bailian/token-plan-cn/qwen3-8-max"
+        },
+        {
+          "name": "qwen3.8-flash",
+          "kind": "text",
+          "upstream_protocols": [
+            "openai_chat",
+            "anthropic_messages"
+          ],
+          "pricing": {
+            "in": 800000,
+            "out": 2700000
+          },
+          "source": "https://help.aliyun.com/zh/model-studio/token-plan-team-overview",
+          "checked_at": "2026-09-16",
+          "origin": "bailian/token-plan-cn/qwen3-8-flash"
+        },
+        {
+          "name": "qwen3.7-plus",
+          "kind": "text",
+          "upstream_protocols": [
+            "openai_chat",
+            "anthropic_messages"
+          ],
+          "pricing": {
+            "in": 2000000,
+            "out": 8000000
+          },
+          "source": "https://help.aliyun.com/zh/model-studio/token-plan-team-overview",
+          "checked_at": "2026-09-16",
+          "origin": "bailian/token-plan-cn/qwen3-7-plus"
+        },
+        {
+          "name": "deepseek-v4-pro",
+          "kind": "text",
+          "upstream_protocols": [
+            "openai_chat",
+            "anthropic_messages"
+          ],
+          "pricing": {
+            "in": 12000000,
+            "out": 24000000
+          },
+          "source": "https://help.aliyun.com/zh/model-studio/token-plan-team-overview",
+          "checked_at": "2026-09-16",
+          "origin": "bailian/token-plan-cn/deepseek-v4-pro"
+        },
+        {
+          "name": "deepseek-v4-flash",
+          "kind": "text",
+          "upstream_protocols": [
+            "openai_chat",
+            "anthropic_messages"
+          ],
+          "pricing": {
+            "in": 1000000,
+            "out": 2000000
+          },
+          "source": "https://help.aliyun.com/zh/model-studio/token-plan-team-overview",
+          "checked_at": "2026-09-16",
+          "origin": "bailian/token-plan-cn/deepseek-v4-flash"
+        },
+        {
+          "name": "kimi-k2.7-code",
+          "kind": "text",
+          "upstream_protocols": [
+            "openai_chat",
+            "anthropic_messages"
+          ],
+          "pricing": {
+            "in": 6500000,
+            "out": 27000000
+          },
+          "source": "https://help.aliyun.com/zh/model-studio/token-plan-team-overview",
+          "checked_at": "2026-09-16",
+          "origin": "bailian/token-plan-cn/kimi-k2-7-code"
+        },
+        {
+          "name": "kimi-k2.6",
+          "kind": "text",
+          "upstream_protocols": [
+            "openai_chat",
+            "anthropic_messages"
+          ],
+          "pricing": {
+            "in": 6500000,
+            "out": 27000000
+          },
+          "source": "https://help.aliyun.com/zh/model-studio/token-plan-team-overview",
+          "checked_at": "2026-09-16",
+          "origin": "bailian/token-plan-cn/kimi-k2-6"
+        },
+        {
+          "name": "glm-5.2",
+          "kind": "text",
+          "upstream_protocols": [
+            "openai_chat",
+            "anthropic_messages"
+          ],
+          "pricing": {
+            "in": 8000000,
+            "out": 28000000
+          },
+          "source": "https://help.aliyun.com/zh/model-studio/token-plan-team-overview",
+          "checked_at": "2026-09-16",
+          "origin": "bailian/token-plan-cn/glm-5-2"
+        },
+        {
+          "name": "glm-5.1",
+          "kind": "text",
+          "upstream_protocols": [
+            "openai_chat",
+            "anthropic_messages"
+          ],
+          "pricing": {
+            "in": 6000000,
+            "out": 24000000
+          },
+          "source": "https://help.aliyun.com/zh/model-studio/token-plan-team-overview",
+          "checked_at": "2026-09-16",
+          "origin": "bailian/token-plan-cn/glm-5-1"
+        },
+        {
+          "name": "glm-5",
+          "kind": "text",
+          "upstream_protocols": [
+            "openai_chat",
+            "anthropic_messages"
+          ],
+          "pricing": {
+            "in": 4000000,
+            "out": 18000000
+          },
+          "source": "https://help.aliyun.com/zh/model-studio/token-plan-team-overview",
+          "checked_at": "2026-09-16",
+          "origin": "bailian/token-plan-cn/glm-5"
+        }
+      ]
+    },
+    {
+      "id": "zhipu_coding_plan",
+      "type": "openai_compat",
+      "vendor": "智谱 GLM Coding Plan",
+      "base_url": "https://open.bigmodel.cn/api/coding/paas/v4",
+      "billing_mode": "subscription",
+      "suggested_name": "zhipu-coding-plan",
+      "entries": "OpenAI 兼容文本入口",
+      "ability": "套餐额度（5 小时周期 / 每周）在智谱 BigModel 控制台查看；额度用尽后等待周期恢复，不扣账户余额。",
+      "source": "https://open.bigmodel.cn/pricing",
+      "checked_at": "2026-09-16",
+      "note": "GLM Coding Plan 订阅专用端点，与按量端点 /api/paas/v4 不通用，Key 也不通用；官方限定在其支持的编程工具环境内使用。",
+      "origin": [
+        "zhipu/coding-plan-cn"
+      ],
+      "models": [
+        {
+          "name": "glm-5.3",
+          "kind": "text",
+          "note": "GLM-5.3",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses"
+          ],
+          "pricing": {
+            "cache_read": 2000000,
+            "in": 8000000,
+            "out": 28000000
+          },
+          "source": "https://docs.bigmodel.cn/cn/coding-plan/overview",
+          "checked_at": "2026-09-16",
+          "origin": "zhipu/coding-plan-cn/glm-5-3"
+        },
+        {
+          "name": "glm-5.3-flash",
+          "kind": "text",
+          "note": "GLM-5.3-Flash",
+          "upstream_protocols": [
+            "openai_chat",
+            "openai_responses"
+          ],
+          "pricing": {
+            "cache_read": 230000,
+            "in": 800000,
+            "out": 2800000
+          },
+          "source": "https://docs.bigmodel.cn/cn/coding-plan/overview",
+          "checked_at": "2026-09-16",
+          "origin": "zhipu/coding-plan-cn/glm-5-3-flash"
+        }
+      ]
+    },
+    {
+      "id": "kimi_code_plan",
+      "type": "openai_compat",
+      "vendor": "Kimi Code 会员",
+      "base_url": "https://api.kimi.com/coding/v1",
+      "billing_mode": "subscription",
+      "suggested_name": "kimi-code-plan",
+      "entries": "OpenAI 兼容文本入口",
+      "ability": "会员额度在 Kimi Code 控制台查看。",
+      "source": "https://platform.kimi.com/docs/models",
+      "checked_at": "2026-09-16",
+      "note": "Kimi Code 会员权益的 API 入口，Key 在 Kimi Code 控制台创建，与 Kimi 开放平台（api.moonshot.cn，按量）的 Key 和端点互不通用。",
+      "origin": [
+        "moonshot/kimi-code"
+      ],
+      "models": [
+        {
+          "name": "k3",
+          "kind": "text",
+          "upstream_protocols": [
+            "openai_chat"
+          ],
+          "pricing": {
+            "cache_read": 2000000,
+            "in": 20000000,
+            "out": 100000000
+          },
+          "source": "https://www.kimi.com/code/docs/en/kimi-code/models",
+          "checked_at": "2026-09-16",
+          "origin": "moonshot/kimi-code/k3"
+        },
+        {
+          "name": "k3-256k",
+          "kind": "text",
+          "upstream_protocols": [
+            "openai_chat"
+          ],
+          "pricing": {
+            "cache_read": 2000000,
+            "in": 20000000,
+            "out": 100000000
+          },
+          "source": "https://www.kimi.com/code/docs/en/kimi-code/models",
+          "checked_at": "2026-09-16",
+          "origin": "moonshot/kimi-code/k3-256k"
+        },
+        {
+          "name": "kimi-for-coding",
+          "kind": "text",
+          "upstream_protocols": [
+            "openai_chat"
+          ],
+          "pricing": {
+            "cache_read": 1300000,
+            "in": 6500000,
+            "out": 27000000
+          },
+          "source": "https://www.kimi.com/code/docs/en/kimi-code/models",
+          "checked_at": "2026-09-16",
+          "origin": "moonshot/kimi-code/kimi-for-coding"
+        },
+        {
+          "name": "kimi-for-coding-highspeed",
+          "kind": "text",
+          "upstream_protocols": [
+            "openai_chat"
+          ],
+          "pricing": {
+            "cache_read": 2600000,
+            "in": 13000000,
+            "out": 54000000
+          },
+          "source": "https://www.kimi.com/code/docs/en/kimi-code/models",
+          "checked_at": "2026-09-16",
+          "origin": "moonshot/kimi-code/kimi-for-coding-highspeed"
+        }
+      ]
+    },
+    {
+      "id": "kimi_code_plan_anthropic",
+      "type": "anthropic_compat",
+      "vendor": "Kimi Code 会员",
+      "base_url": "https://api.kimi.com/coding/v1",
+      "billing_mode": "subscription",
+      "suggested_name": "kimi-code-plan-anthropic",
+      "entries": "Anthropic Messages 文本入口",
+      "ability": "会员额度在 Kimi Code 控制台查看；使用 x-api-key 鉴权。",
+      "source": "https://platform.kimi.com/docs/models",
+      "checked_at": "2026-09-16",
+      "note": "同一份 Kimi Code 会员 Key 的 Anthropic 兼容入口（设备在 /v1 后拼 /messages）；只参与 /v1/messages 选路。",
+      "origin": [
+        "moonshot/kimi-code"
+      ],
+      "models": [
+        {
+          "name": "k3",
+          "kind": "text",
+          "upstream_protocols": [
+            "anthropic_messages"
+          ],
+          "pricing": {
+            "cache_read": 2000000,
+            "in": 20000000,
+            "out": 100000000
+          },
+          "source": "https://www.kimi.com/code/docs/en/kimi-code/models",
+          "checked_at": "2026-09-16",
+          "origin": "moonshot/kimi-code/k3"
+        },
+        {
+          "name": "k3-256k",
+          "kind": "text",
+          "upstream_protocols": [
+            "anthropic_messages"
+          ],
+          "pricing": {
+            "cache_read": 2000000,
+            "in": 20000000,
+            "out": 100000000
+          },
+          "source": "https://www.kimi.com/code/docs/en/kimi-code/models",
+          "checked_at": "2026-09-16",
+          "origin": "moonshot/kimi-code/k3-256k"
+        },
+        {
+          "name": "kimi-for-coding",
+          "kind": "text",
+          "upstream_protocols": [
+            "anthropic_messages"
+          ],
+          "pricing": {
+            "cache_read": 1300000,
+            "in": 6500000,
+            "out": 27000000
+          },
+          "source": "https://www.kimi.com/code/docs/en/kimi-code/models",
+          "checked_at": "2026-09-16",
+          "origin": "moonshot/kimi-code/kimi-for-coding"
+        },
+        {
+          "name": "kimi-for-coding-highspeed",
+          "kind": "text",
+          "upstream_protocols": [
+            "anthropic_messages"
+          ],
+          "pricing": {
+            "cache_read": 2600000,
+            "in": 13000000,
+            "out": 54000000
+          },
+          "source": "https://www.kimi.com/code/docs/en/kimi-code/models",
+          "checked_at": "2026-09-16",
+          "origin": "moonshot/kimi-code/kimi-for-coding-highspeed"
+        }
+      ]
+    },
+    {
+      "id": "opencode_go",
+      "type": "opencode_go",
+      "vendor": "OpenCode",
+      "billing_mode": "subscription",
+      "suggested_name": "opencode-go",
+      "entries": "各模型按上游协议提供 OpenAI Chat 或 Anthropic Messages",
+      "ability": "Go 套餐的 5 小时 / 周 / 月额度在 OpenCode Zen 控制台查看。",
+      "source": "https://opencode.ai/zen/go/v1/models",
+      "checked_at": "2026-09-23",
+      "note": "OpenCode Go 包月套餐：同一把 sk- Key，端点根 https://opencode.ai/zen/go/v1；各模型只接受 upstream_protocols 声明的上游协议，型号名以 GET /zen/go/v1/models 返回的裸名字为准。Zen 按量余额是另一套权益，不在本档案。",
+      "origin": [
+        "opencode/go"
+      ],
+      "models": [
+        {
+          "name": "kimi-k3",
+          "kind": "text",
+          "note": "Kimi K3",
+          "upstream_protocols": [
+            "openai_chat"
+          ],
+          "pricing": {
+            "cache_read": 2000000,
+            "in": 20000000,
+            "out": 100000000
+          },
+          "source": "https://opencode.ai/docs/go/",
+          "checked_at": "2026-09-23",
+          "origin": "opencode/go/kimi-k3"
+        },
+        {
+          "name": "kimi-k2.7-code",
+          "kind": "text",
+          "note": "Kimi K2.7 Code",
+          "upstream_protocols": [
+            "openai_chat"
+          ],
+          "pricing": {
+            "cache_read": 1300000,
+            "in": 6500000,
+            "out": 27000000
+          },
+          "source": "https://opencode.ai/docs/go/",
+          "checked_at": "2026-09-23",
+          "origin": "opencode/go/kimi-k2-7-code"
+        },
+        {
+          "name": "kimi-k2.6",
+          "kind": "text",
+          "note": "Kimi K2.6",
+          "upstream_protocols": [
+            "openai_chat"
+          ],
+          "pricing": {
+            "cache_read": 1100000,
+            "in": 6500000,
+            "out": 27000000
+          },
+          "source": "https://opencode.ai/docs/go/",
+          "checked_at": "2026-09-23",
+          "origin": "opencode/go/kimi-k2-6"
+        },
+        {
+          "name": "glm-5.3",
+          "kind": "text",
+          "note": "GLM-5.3",
+          "upstream_protocols": [
+            "openai_chat"
+          ],
+          "pricing": {
+            "cache_read": 2000000,
+            "in": 8000000,
+            "out": 28000000
+          },
+          "source": "https://opencode.ai/docs/go/",
+          "checked_at": "2026-09-23",
+          "origin": "opencode/go/glm-5-3"
+        },
+        {
+          "name": "glm-5.3-flash",
+          "kind": "text",
+          "note": "GLM-5.3-Flash",
+          "upstream_protocols": [
+            "openai_chat"
+          ],
+          "pricing": {
+            "cache_read": 230000,
+            "in": 800000,
+            "out": 2800000
+          },
+          "source": "https://opencode.ai/docs/go/",
+          "checked_at": "2026-09-23",
+          "origin": "opencode/go/glm-5-3-flash"
+        },
+        {
+          "name": "glm-5.2",
+          "kind": "text",
+          "note": "GLM-5.2",
+          "upstream_protocols": [
+            "openai_chat"
+          ],
+          "pricing": {
+            "cache_read": 2000000,
+            "in": 8000000,
+            "out": 28000000
+          },
+          "source": "https://opencode.ai/docs/go/",
+          "checked_at": "2026-09-23",
+          "origin": "opencode/go/glm-5-2"
+        },
+        {
+          "name": "glm-5.1",
+          "kind": "text",
+          "note": "GLM-5.1",
+          "upstream_protocols": [
+            "openai_chat"
+          ],
+          "pricing": {
+            "cache_read": 1300000,
+            "in": 6000000,
+            "out": 24000000
+          },
+          "source": "https://opencode.ai/docs/go/",
+          "checked_at": "2026-09-23",
+          "origin": "opencode/go/glm-5-1"
+        },
+        {
+          "name": "deepseek-v4.1-flash",
+          "kind": "text",
+          "note": "DeepSeek V4.1 Flash",
+          "upstream_protocols": [
+            "openai_chat"
+          ],
+          "pricing": {
+            "cache_read": 40000,
+            "in": 2000000,
+            "out": 8000000
+          },
+          "schedule": {
+            "timezone": "Asia/Shanghai",
+            "periods": [
+              {
+                "label": "空闲时段",
+                "days": [
+                  "mon",
+                  "tue",
+                  "wed",
+                  "thu",
+                  "fri"
+                ],
+                "hours": [
+                  [
+                    "00:00",
+                    "09:00"
+                  ],
+                  [
+                    "12:00",
+                    "14:00"
+                  ],
+                  [
+                    "18:00",
+                    "24:00"
+                  ]
+                ],
+                "pricing": {
+                  "cache_read": 20000,
+                  "in": 1000000,
+                  "out": 4000000
+                }
+              },
+              {
+                "label": "空闲时段",
+                "days": [
+                  "sat",
+                  "sun"
+                ],
+                "hours": [
+                  [
+                    "00:00",
+                    "24:00"
+                  ]
+                ],
+                "pricing": {
+                  "cache_read": 20000,
+                  "in": 1000000,
+                  "out": 4000000
+                }
+              }
+            ]
+          },
+          "source": "https://opencode.ai/docs/go/",
+          "checked_at": "2026-09-23",
+          "origin": "opencode/go/deepseek-v4-1-flash"
+        },
+        {
+          "name": "deepseek-v4-pro",
+          "kind": "text",
+          "note": "DeepSeek V4 Pro",
+          "upstream_protocols": [
+            "openai_chat"
+          ],
+          "pricing": {
+            "cache_read": 300000,
+            "in": 9000000,
+            "out": 27000000
+          },
+          "schedule": {
+            "timezone": "Asia/Shanghai",
+            "periods": [
+              {
+                "label": "空闲时段",
+                "days": [
+                  "mon",
+                  "tue",
+                  "wed",
+                  "thu",
+                  "fri"
+                ],
+                "hours": [
+                  [
+                    "00:00",
+                    "09:00"
+                  ],
+                  [
+                    "12:00",
+                    "14:00"
+                  ],
+                  [
+                    "18:00",
+                    "24:00"
+                  ]
+                ],
+                "pricing": {
+                  "cache_read": 150000,
+                  "in": 4500000,
+                  "out": 13500000
+                }
+              },
+              {
+                "label": "空闲时段",
+                "days": [
+                  "sat",
+                  "sun"
+                ],
+                "hours": [
+                  [
+                    "00:00",
+                    "24:00"
+                  ]
+                ],
+                "pricing": {
+                  "cache_read": 150000,
+                  "in": 4500000,
+                  "out": 13500000
+                }
+              }
+            ]
+          },
+          "source": "https://opencode.ai/docs/go/",
+          "checked_at": "2026-09-23",
+          "origin": "opencode/go/deepseek-v4-pro"
+        },
+        {
+          "name": "deepseek-v4-flash",
+          "kind": "text",
+          "note": "DeepSeek V4 Flash",
+          "upstream_protocols": [
+            "openai_chat"
+          ],
+          "pricing": {
+            "cache_read": 40000,
+            "in": 2000000,
+            "out": 8000000
+          },
+          "schedule": {
+            "timezone": "Asia/Shanghai",
+            "periods": [
+              {
+                "label": "空闲时段",
+                "days": [
+                  "mon",
+                  "tue",
+                  "wed",
+                  "thu",
+                  "fri"
+                ],
+                "hours": [
+                  [
+                    "00:00",
+                    "09:00"
+                  ],
+                  [
+                    "12:00",
+                    "14:00"
+                  ],
+                  [
+                    "18:00",
+                    "24:00"
+                  ]
+                ],
+                "pricing": {
+                  "cache_read": 20000,
+                  "in": 1000000,
+                  "out": 4000000
+                }
+              },
+              {
+                "label": "空闲时段",
+                "days": [
+                  "sat",
+                  "sun"
+                ],
+                "hours": [
+                  [
+                    "00:00",
+                    "24:00"
+                  ]
+                ],
+                "pricing": {
+                  "cache_read": 20000,
+                  "in": 1000000,
+                  "out": 4000000
+                }
+              }
+            ]
+          },
+          "source": "https://opencode.ai/docs/go/",
+          "checked_at": "2026-09-23",
+          "origin": "opencode/go/deepseek-v4-flash"
+        },
+        {
+          "name": "deepseek-v4-flash-vision-exp",
+          "kind": "text",
+          "note": "DeepSeek V4 Flash Vision Exp",
+          "upstream_protocols": [
+            "openai_chat"
+          ],
+          "capabilities": {
+            "input_modalities": [
+              "text",
+              "image"
+            ],
+            "responses_chat": {
+              "profile": "",
+              "replay_reasoning_content": false,
+              "thinking_type": "",
+              "drop_tool_choice": false,
+              "effort_map": null
+            },
+            "codex": {
+              "default_reasoning_level": "",
+              "supported_reasoning_levels": null
+            }
+          },
+          "pricing": {
+            "cache_read": 40000,
+            "in": 2000000,
+            "out": 8000000
+          },
+          "schedule": {
+            "timezone": "Asia/Shanghai",
+            "periods": [
+              {
+                "label": "空闲时段",
+                "days": [
+                  "mon",
+                  "tue",
+                  "wed",
+                  "thu",
+                  "fri"
+                ],
+                "hours": [
+                  [
+                    "00:00",
+                    "09:00"
+                  ],
+                  [
+                    "12:00",
+                    "14:00"
+                  ],
+                  [
+                    "18:00",
+                    "24:00"
+                  ]
+                ],
+                "pricing": {
+                  "cache_read": 20000,
+                  "in": 1000000,
+                  "out": 4000000
+                }
+              },
+              {
+                "label": "空闲时段",
+                "days": [
+                  "sat",
+                  "sun"
+                ],
+                "hours": [
+                  [
+                    "00:00",
+                    "24:00"
+                  ]
+                ],
+                "pricing": {
+                  "cache_read": 20000,
+                  "in": 1000000,
+                  "out": 4000000
+                }
+              }
+            ]
+          },
+          "source": "https://opencode.ai/docs/go/",
+          "checked_at": "2026-09-23",
+          "origin": "opencode/go/deepseek-v4-flash-vision-exp"
+        },
+        {
+          "name": "qwen3.8-max",
+          "kind": "text",
+          "note": "Qwen3.8 Max",
+          "upstream_protocols": [
+            "anthropic_messages"
+          ],
+          "pricing": {
+            "in": 12000000,
+            "out": 36000000
+          },
+          "source": "https://opencode.ai/docs/go/",
+          "checked_at": "2026-09-23",
+          "origin": "opencode/go/qwen3-8-max"
+        },
+        {
+          "name": "qwen3.8-flash",
+          "kind": "text",
+          "note": "Qwen3.8 Flash",
+          "upstream_protocols": [
+            "anthropic_messages"
+          ],
+          "pricing": {
+            "in": 800000,
+            "out": 2700000
+          },
+          "source": "https://opencode.ai/docs/go/",
+          "checked_at": "2026-09-23",
+          "origin": "opencode/go/qwen3-8-flash"
+        },
+        {
+          "name": "qwen3.7-max",
+          "kind": "text",
+          "note": "Qwen3.7 Max",
+          "upstream_protocols": [
+            "anthropic_messages"
+          ],
+          "pricing": {
+            "in": 12000000,
+            "out": 36000000
+          },
+          "source": "https://opencode.ai/docs/go/",
+          "checked_at": "2026-09-23",
+          "origin": "opencode/go/qwen3-7-max"
+        },
+        {
+          "name": "qwen3.7-plus",
+          "kind": "text",
+          "note": "Qwen3.7 Plus",
+          "upstream_protocols": [
+            "anthropic_messages"
+          ],
+          "pricing": {
+            "in": 2000000,
+            "out": 8000000
+          },
+          "source": "https://opencode.ai/docs/go/",
+          "checked_at": "2026-09-23",
+          "origin": "opencode/go/qwen3-7-plus"
+        },
+        {
+          "name": "qwen3.6-plus",
+          "kind": "text",
+          "note": "Qwen3.6 Plus",
+          "upstream_protocols": [
+            "anthropic_messages"
+          ],
+          "pricing": {
+            "in": 2000000,
+            "out": 12000000
+          },
+          "source": "https://opencode.ai/docs/go/",
+          "checked_at": "2026-09-23",
+          "origin": "opencode/go/qwen3-6-plus"
+        },
+        {
+          "name": "minimax-m3",
+          "kind": "text",
+          "note": "MiniMax M3",
+          "upstream_protocols": [
+            "anthropic_messages"
+          ],
+          "pricing": {
+            "cache_read": 420000,
+            "in": 2100000,
+            "out": 8400000
+          },
+          "source": "https://opencode.ai/docs/go/",
+          "checked_at": "2026-09-23",
+          "origin": "opencode/go/minimax-m3"
+        },
+        {
+          "name": "minimax-m2.7",
+          "kind": "text",
+          "note": "MiniMax M2.7",
+          "upstream_protocols": [
+            "anthropic_messages"
+          ],
+          "pricing": {
+            "cache_read": 420000,
+            "in": 2100000,
+            "out": 8400000
+          },
+          "source": "https://opencode.ai/docs/go/",
+          "checked_at": "2026-09-23",
+          "origin": "opencode/go/minimax-m2-7"
+        },
+        {
+          "name": "minimax-m2.5",
+          "kind": "text",
+          "note": "MiniMax M2.5",
+          "upstream_protocols": [
+            "anthropic_messages"
+          ],
+          "pricing": {
+            "cache_read": 210000,
+            "cache_write": 2625000,
+            "in": 2100000,
+            "out": 8400000
+          },
+          "source": "https://opencode.ai/docs/go/",
+          "checked_at": "2026-09-23",
+          "origin": "opencode/go/minimax-m2-5"
+        },
+        {
+          "name": "mimo-v2.6-pro",
+          "kind": "text",
+          "note": "MiMo-V2.6-Pro",
+          "upstream_protocols": [
+            "openai_chat"
+          ],
+          "pricing": {
+            "cache_read": 25000,
+            "in": 3000000,
+            "out": 6000000
+          },
+          "source": "https://opencode.ai/docs/go/",
+          "checked_at": "2026-09-23",
+          "origin": "opencode/go/mimo-v2-6-pro"
+        },
+        {
+          "name": "mimo-v2.6-flash",
+          "kind": "text",
+          "note": "MiMo-V2.6-Flash",
+          "upstream_protocols": [
+            "openai_chat"
+          ],
+          "pricing": {
+            "cache_read": 20000,
+            "in": 1000000,
+            "out": 2000000
+          },
+          "source": "https://opencode.ai/docs/go/",
+          "checked_at": "2026-09-23",
+          "origin": "opencode/go/mimo-v2-6-flash"
+        },
+        {
+          "name": "mimo-v2.5-pro",
+          "kind": "text",
+          "note": "MiMo-V2.5-Pro",
+          "upstream_protocols": [
+            "openai_chat"
+          ],
+          "pricing": {
+            "cache_read": 25000,
+            "in": 3000000,
+            "out": 6000000
+          },
+          "source": "https://opencode.ai/docs/go/",
+          "checked_at": "2026-09-23",
+          "origin": "opencode/go/mimo-v2-5-pro"
+        },
+        {
+          "name": "mimo-v2.5",
+          "kind": "text",
+          "note": "MiMo-V2.5",
+          "upstream_protocols": [
+            "openai_chat"
+          ],
+          "pricing": {
+            "cache_read": 20000,
+            "in": 1000000,
+            "out": 2000000
+          },
+          "source": "https://opencode.ai/docs/go/",
+          "checked_at": "2026-09-23",
+          "origin": "opencode/go/mimo-v2-5"
+        },
+        {
+          "name": "longcat-2.0",
+          "kind": "text",
+          "note": "LongCat-2.0",
+          "upstream_protocols": [
+            "openai_chat"
+          ],
+          "pricing": {
+            "cache_read": 100000,
+            "in": 5000000,
+            "out": 20000000
+          },
+          "source": "https://opencode.ai/docs/go/",
+          "checked_at": "2026-09-23",
+          "origin": "opencode/go/longcat-2-0"
+        },
+        {
+          "name": "hy4-preview",
+          "kind": "text",
+          "note": "Hy4 preview",
+          "upstream_protocols": [
+            "openai_chat"
+          ],
+          "pricing": {
+            "cache_read": 300000,
+            "in": 6000000,
+            "out": 18000000
+          },
+          "source": "https://opencode.ai/docs/go/",
+          "checked_at": "2026-09-23",
+          "origin": "opencode/go/hy4-preview"
+        },
+        {
+          "name": "hy3",
+          "kind": "text",
+          "note": "Hy3",
+          "upstream_protocols": [
+            "openai_chat"
+          ],
+          "pricing": {
+            "cache_read": 250000,
+            "in": 1000000,
+            "out": 4000000
+          },
+          "source": "https://opencode.ai/docs/go/",
+          "checked_at": "2026-09-23",
+          "origin": "opencode/go/hy3"
+        },
+        {
+          "name": "gpt-5.6-luna",
+          "kind": "text",
+          "note": "GPT 5.6 Luna",
+          "upstream_protocols": [
+            "openai_responses"
+          ],
+          "pricing": {
+            "cache_read": 135000,
+            "in": 1350000,
+            "out": 8100000
+          },
+          "source": "https://opencode.ai/docs/go/",
+          "checked_at": "2026-09-23",
+          "origin": "opencode/go/gpt-5-6-luna"
+        },
+        {
+          "name": "grok-4.7",
+          "kind": "text",
+          "note": "Grok 4.7",
+          "upstream_protocols": [
+            "openai_responses"
+          ],
+          "pricing": {
+            "cache_read": 3375000,
+            "in": 13500000,
+            "out": 40500000
+          },
+          "source": "https://opencode.ai/docs/go/",
+          "checked_at": "2026-09-23",
+          "origin": "opencode/go/grok-4-7"
+        },
+        {
+          "name": "grok-4.6",
+          "kind": "text",
+          "note": "Grok 4.6",
+          "upstream_protocols": [
+            "openai_responses"
+          ],
+          "pricing": {
+            "cache_read": 3375000,
+            "in": 13500000,
+            "out": 40500000
+          },
+          "source": "https://opencode.ai/docs/go/",
+          "checked_at": "2026-09-23",
+          "origin": "opencode/go/grok-4-6"
+        },
+        {
+          "name": "muse-spark-1.3-contributor",
+          "kind": "text",
+          "note": "Muse Spark 1.3 Contributor",
+          "upstream_protocols": [
+            "openai_responses"
+          ],
+          "pricing": {
+            "cache_read": 13500,
+            "in": 675000,
+            "out": 1350000
+          },
+          "source": "https://opencode.ai/docs/go/",
+          "checked_at": "2026-09-23",
+          "origin": "opencode/go/muse-spark-1-3-contributor"
+        },
+        {
+          "name": "muse-spark-1.2-contributor",
+          "kind": "text",
+          "note": "Muse Spark 1.2 Contributor",
+          "upstream_protocols": [
+            "openai_responses"
+          ],
+          "pricing": {
+            "cache_read": 13500,
+            "in": 675000,
+            "out": 1350000
+          },
+          "source": "https://opencode.ai/docs/go/",
+          "checked_at": "2026-09-23",
+          "origin": "opencode/go/muse-spark-1-2-contributor"
+        }
+      ]
+    },
+    {
+      "id": "openai_compat",
+      "type": "openai_compat",
+      "vendor": "通用适配",
+      "custom_base_url": true,
+      "billing_mode": "none",
+      "suggested_name": "openai-compat",
+      "entries": "OpenAI 兼容单入口",
+      "ability": "通用适配器；服务地址与 Key 由管理员一起录入。",
+      "source": "https://platform.openai.com/docs/api-reference/chat",
+      "checked_at": "2026-09-23",
+      "note": "通用 OpenAI 兼容适配：能接的模型完全取决于这条账号填的服务地址，型号一律走「自定义」。",
+      "models": []
+    },
+    {
+      "id": "anthropic_compat",
+      "type": "anthropic_compat",
+      "vendor": "Anthropic 兼容",
+      "custom_base_url": true,
+      "billing_mode": "none",
+      "suggested_name": "anthropic-compat",
+      "entries": "Anthropic Messages 兼容单入口",
+      "ability": "通用适配器；服务地址与 Key 由管理员一起录入。",
+      "source": "https://docs.anthropic.com/en/api/messages",
+      "checked_at": "2026-09-23",
+      "note": "适用于使用 x-api-key 鉴权并提供 Anthropic Messages 兼容接口的服务；模型用自定义方式录入。",
+      "models": []
+    }
+  ],
+  "agents": [
+    {
+      "provider": "codex",
+      "vendor": "OpenAI",
+      "source": "https://openai.com/api/pricing/",
+      "checked_at": "2026-09-23",
+      "note": "Codex 订阅经设备的 /agents/codex/v1/responses 接入面调用；名义金额按本段各型号的 pricing（官方 API 按量价）记，不折算订阅补贴。",
+      "origin": [
+        "openai/codex"
+      ],
+      "models": [
+        {
+          "name": "gpt-6-astra",
+          "kind": "text",
+          "source": "https://learn.chatgpt.com/docs/models.md",
+          "checked_at": "2026-09-23",
+          "pricing": {
+            "cache_read": 6750000,
+            "in": 67500000,
+            "out": 337500000
+          },
+          "origin": "openai/codex/gpt-6-astra"
+        },
+        {
+          "name": "gpt-6-sol",
+          "kind": "text",
+          "note": "GPT-6-Sol",
+          "source": "https://learn.chatgpt.com/docs/models.md",
+          "checked_at": "2026-09-23",
+          "pricing": {
+            "cache_read": 1350000,
+            "in": 13500000,
+            "out": 67500000
+          },
+          "origin": "openai/codex/gpt-6-sol"
+        },
+        {
+          "name": "gpt-6-luna",
+          "kind": "text",
+          "note": "GPT-6-Luna",
+          "source": "https://learn.chatgpt.com/docs/models.md",
+          "checked_at": "2026-09-23",
+          "pricing": {
+            "cache_read": 67500,
+            "in": 675000,
+            "out": 3375000
+          },
+          "origin": "openai/codex/gpt-6-luna"
+        },
+        {
+          "name": "gpt-5.6-sol",
+          "kind": "text",
+          "source": "https://learn.chatgpt.com/docs/models.md",
+          "checked_at": "2026-09-23",
+          "pricing": {
+            "cache_read": 2700000,
+            "in": 27000000,
+            "out": 135000000
+          },
+          "origin": "openai/codex/gpt-5-6-sol"
+        },
+        {
+          "name": "gpt-5.6-terra",
+          "kind": "text",
+          "source": "https://learn.chatgpt.com/docs/models.md",
+          "checked_at": "2026-09-23",
+          "pricing": {
+            "cache_read": 1350000,
+            "in": 13500000,
+            "out": 81000000
+          },
+          "origin": "openai/codex/gpt-5-6-terra"
+        },
+        {
+          "name": "gpt-5.6-luna",
+          "kind": "text",
+          "source": "https://learn.chatgpt.com/docs/models.md",
+          "checked_at": "2026-09-23",
+          "pricing": {
+            "cache_read": 135000,
+            "in": 1350000,
+            "out": 8100000
+          },
+          "origin": "openai/codex/gpt-5-6-luna"
+        },
+        {
+          "name": "gpt-5.5",
+          "kind": "text",
+          "note": "GPT-5.5",
+          "source": "https://learn.chatgpt.com/docs/models.md",
+          "checked_at": "2026-09-23",
+          "pricing": {
+            "cache_read": 3375000,
+            "in": 33750000,
+            "out": 202500000
+          },
+          "origin": "openai/codex/gpt-5-5"
+        },
+        {
+          "name": "gpt-5.3-codex-spark",
+          "kind": "text",
+          "note": "GPT-5.3-Codex-Spark",
+          "source": "https://learn.chatgpt.com/docs/models.md",
+          "checked_at": "2026-09-23",
+          "origin": "openai/codex/gpt-5-3-codex-spark"
+        }
+      ]
+    },
+    {
+      "provider": "grok",
+      "vendor": "xAI",
+      "source": "https://docs.x.ai/docs/models",
+      "checked_at": "2026-09-22",
+      "note": "Grok Build 订阅：文本经 /agents/grok/v1/responses 接入面调用，按本段 pricing 记名义金额。订阅自带的 Grok Imagine 图像/视频生成经同一接入面逐字节透传，按次记 0 元，这里不收录 Imagine 型号。",
+      "origin": [
+        "xai/grok-build"
+      ],
+      "models": [
+        {
+          "name": "grok-4.7",
+          "kind": "text",
+          "note": "Grok 4.7",
+          "source": "https://cli-chat-proxy.grok.com/v1/models",
+          "checked_at": "2026-09-22",
+          "pricing": {
+            "cache_read": 3375000,
+            "in": 13500000,
+            "out": 40500000
+          },
+          "origin": "xai/grok-build/grok-4-7"
+        },
+        {
+          "name": "grok-4.7-build-fast",
+          "kind": "text",
+          "note": "Grok 4.7 Fast",
+          "source": "https://cli-chat-proxy.grok.com/v1/models",
+          "checked_at": "2026-09-22",
+          "pricing": {
+            "cache_read": 6750000,
+            "in": 27000000,
+            "out": 81000000
+          },
+          "origin": "xai/grok-build/grok-4-7-fast"
+        },
+        {
+          "name": "grok-4.6",
+          "kind": "text",
+          "source": "https://cli-chat-proxy.grok.com/v1/models",
+          "checked_at": "2026-09-22",
+          "pricing": {
+            "cache_read": 3375000,
+            "in": 13500000,
+            "out": 40500000
+          },
+          "origin": "xai/grok-build/grok-4-6"
+        },
+        {
+          "name": "grok-4.5",
+          "kind": "text",
+          "source": "https://cli-chat-proxy.grok.com/v1/models",
+          "checked_at": "2026-09-22",
+          "pricing": {
+            "cache_read": 2025000,
+            "in": 13500000,
+            "out": 40500000
+          },
+          "origin": "xai/grok-build/grok-4-5"
+        }
+      ]
+    },
+    {
+      "provider": "claude",
+      "vendor": "Anthropic",
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "checked_at": "2026-09-23",
+      "note": "Claude Code 订阅：收录 Anthropic 官方在售的型号供设备建计价行，名义金额按本段 pricing 记。它是计价清单不是准入白名单：设备只透传 /v1/messages，成员发没收录的型号照常转发、那次记 0 元。",
+      "origin": [
+        "anthropic/claude-code"
+      ],
+      "models": [
+        {
+          "name": "claude-fable-5-1",
+          "kind": "text",
+          "note": "Claude Fable 5.1",
+          "source": "https://code.claude.com/docs/en/model-config",
+          "checked_at": "2026-09-23",
+          "pricing": {
+            "cache_read": 1687500,
+            "cache_write": 84375000,
+            "in": 67500000,
+            "out": 337500000
+          },
+          "origin": "anthropic/claude-code/claude-fable-5-1"
+        },
+        {
+          "name": "claude-fable-5",
+          "kind": "text",
+          "source": "https://code.claude.com/docs/en/model-config",
+          "checked_at": "2026-09-23",
+          "pricing": {
+            "cache_read": 6750000,
+            "cache_write": 84375000,
+            "in": 67500000,
+            "out": 337500000
+          },
+          "origin": "anthropic/claude-code/claude-fable-5"
+        },
+        {
+          "name": "claude-opus-5-5",
+          "kind": "text",
+          "note": "Claude Opus 5.5",
+          "source": "https://code.claude.com/docs/en/model-config",
+          "checked_at": "2026-09-23",
+          "pricing": {
+            "cache_read": 1350000,
+            "cache_write": 33750000,
+            "in": 27000000,
+            "out": 135000000
+          },
+          "origin": "anthropic/claude-code/claude-opus-5-5"
+        },
+        {
+          "name": "claude-opus-5",
+          "kind": "text",
+          "source": "https://code.claude.com/docs/en/model-config",
+          "checked_at": "2026-09-23",
+          "pricing": {
+            "cache_read": 3375000,
+            "cache_write": 42187500,
+            "in": 33750000,
+            "out": 168750000
+          },
+          "origin": "anthropic/claude-code/claude-opus-5"
+        },
+        {
+          "name": "claude-sonnet-5",
+          "kind": "text",
+          "source": "https://code.claude.com/docs/en/model-config",
+          "checked_at": "2026-09-23",
+          "pricing": {
+            "cache_read": 1350000,
+            "cache_write": 16875000,
+            "in": 13500000,
+            "out": 67500000
+          },
+          "origin": "anthropic/claude-code/claude-sonnet-5"
+        },
+        {
+          "name": "claude-haiku-4-5",
+          "kind": "text",
+          "source": "https://code.claude.com/docs/en/model-config",
+          "checked_at": "2026-09-23",
+          "pricing": {
+            "cache_read": 675000,
+            "cache_write": 8437500,
+            "in": 6750000,
+            "out": 33750000
+          },
+          "origin": "anthropic/claude-code/claude-haiku-4-5"
+        },
+        {
+          "name": "claude-haiku-4-5-20251001",
+          "kind": "text",
+          "source": "https://code.claude.com/docs/en/model-config",
+          "checked_at": "2026-09-23",
+          "pricing": {
+            "cache_read": 675000,
+            "cache_write": 8437500,
+            "in": 6750000,
+            "out": 33750000
+          },
+          "origin": "anthropic/claude-code/claude-haiku-4-5-20251001"
+        }
+      ]
+    },
+    {
+      "provider": "cursor",
+      "vendor": "Cursor",
+      "source": "https://cursor.com/docs/models-and-pricing",
+      "checked_at": "2026-09-23",
+      "note": "Cursor 订阅文本计价清单；按 Cursor 官方标准模型价格记名义金额，只读且随数据升级更新，不创建共享 API 模型、不改变 CLI 的模型发现与选择。未收录的请求 ID 照常转发并标为未定价。",
+      "origin": [
+        "cursor/individual"
+      ],
+      "models": [
+        {
+          "name": "cursor-auto",
+          "kind": "text",
+          "note": "Auto 本地统计名：default / auto 请求统一归此；官方按实际路由模型收费、无统一单价，名义价格采用 composer-2.5 标准价，不代表上游实际账单。",
+          "source": "https://cursor.com/help/models-and-usage/usage-limits",
+          "checked_at": "2026-09-16",
+          "pricing": {
+            "cache_read": 1350000,
+            "in": 3375000,
+            "out": 16875000
+          },
+          "origin": "cursor/individual/composer-2-5"
+        },
+        {
+          "name": "composer-2.5",
+          "kind": "text",
+          "note": "Composer 2.5",
+          "source": "https://cursor.com/docs/models/cursor-composer-2-5",
+          "checked_at": "2026-09-16",
+          "pricing": {
+            "cache_read": 1350000,
+            "in": 3375000,
+            "out": 16875000
+          },
+          "origin": "cursor/individual/composer-2-5"
+        },
+        {
+          "name": "composer-2.5-fast",
+          "kind": "text",
+          "note": "Composer 2.5 (Fast)",
+          "source": "https://cursor.com/install",
+          "checked_at": "2026-09-23",
+          "pricing": {
+            "cache_read": 3375000,
+            "in": 20250000,
+            "out": 101250000
+          },
+          "origin": "cursor/individual/composer-2-5-fast"
+        },
+        {
+          "name": "grok-4.7",
+          "kind": "text",
+          "note": "Grok 4.7",
+          "source": "https://cursor.com/docs/models/grok-4-7",
+          "checked_at": "2026-09-23",
+          "pricing": {
+            "cache_read": 3375000,
+            "in": 13500000,
+            "out": 40500000
+          },
+          "origin": "cursor/individual/grok-4-7"
+        },
+        {
+          "name": "grok-4.6",
+          "kind": "text",
+          "note": "Grok 4.6",
+          "source": "https://cursor.com/docs/models/grok-4-6",
+          "checked_at": "2026-09-16",
+          "pricing": {
+            "cache_read": 3375000,
+            "in": 13500000,
+            "out": 40500000
+          },
+          "origin": "cursor/individual/grok-4-6"
+        },
+        {
+          "name": "grok-4.5",
+          "kind": "text",
+          "note": "Grok 4.5",
+          "source": "https://cursor.com/docs/models/grok-4-5",
+          "checked_at": "2026-09-16",
+          "pricing": {
+            "cache_read": 3375000,
+            "in": 13500000,
+            "out": 40500000
+          },
+          "origin": "cursor/individual/grok-4-5"
+        },
+        {
+          "name": "claude-fable-5-1",
+          "kind": "text",
+          "note": "Claude Fable 5.1",
+          "source": "https://cursor.com/docs/models/claude-fable-5-1",
+          "checked_at": "2026-09-16",
+          "pricing": {
+            "cache_read": 1687500,
+            "in": 67500000,
+            "out": 337500000
+          },
+          "origin": "cursor/individual/claude-fable-5-1"
+        },
+        {
+          "name": "claude-opus-5-5",
+          "kind": "text",
+          "note": "Claude Opus 5.5",
+          "source": "https://cursor.com/docs/models/claude-opus-5-5",
+          "checked_at": "2026-09-23",
+          "pricing": {
+            "cache_read": 1350000,
+            "cache_write": 33750000,
+            "in": 27000000,
+            "out": 135000000
+          },
+          "origin": "cursor/individual/claude-opus-5-5"
+        },
+        {
+          "name": "claude-opus-5-5-fast",
+          "kind": "text",
+          "note": "Claude Opus 5.5 (Fast Mode)",
+          "source": "https://cursor.com/docs/models/claude-opus-5-5",
+          "checked_at": "2026-09-23",
+          "pricing": {
+            "cache_read": 2700000,
+            "cache_write": 67500000,
+            "in": 54000000,
+            "out": 270000000
+          },
+          "origin": "cursor/individual/claude-opus-5-5-fast"
+        },
+        {
+          "name": "claude-opus-5",
+          "kind": "text",
+          "note": "Claude Opus 5",
+          "source": "https://cursor.com/docs/models-and-pricing",
+          "checked_at": "2026-09-23",
+          "pricing": {
+            "cache_read": 3375000,
+            "in": 33750000,
+            "out": 168750000
+          },
+          "origin": "cursor/individual/claude-opus-5"
+        },
+        {
+          "name": "claude-sonnet-5",
+          "kind": "text",
+          "note": "Claude Sonnet 5",
+          "source": "https://cursor.com/docs/models/claude-sonnet-5",
+          "checked_at": "2026-09-16",
+          "pricing": {
+            "cache_read": 1350000,
+            "in": 13500000,
+            "out": 67500000
+          },
+          "origin": "cursor/individual/claude-sonnet-5"
+        },
+        {
+          "name": "gemini-3.1-pro",
+          "kind": "text",
+          "note": "Gemini 3.1 Pro",
+          "source": "https://cursor.com/docs/models/gemini-3-1-pro",
+          "checked_at": "2026-09-16",
+          "pricing": {
+            "cache_read": 1350000,
+            "in": 13500000,
+            "out": 81000000
+          },
+          "origin": "cursor/individual/gemini-3-1-pro"
+        },
+        {
+          "name": "gemini-3.8-flash",
+          "kind": "text",
+          "note": "Gemini 3.8 Flash",
+          "source": "https://cursor.com/docs/models/gemini-3-8-flash",
+          "checked_at": "2026-09-16",
+          "pricing": {
+            "cache_read": 506250,
+            "in": 5062500,
+            "out": 23625000
+          },
+          "origin": "cursor/individual/gemini-3-8-flash"
+        },
+        {
+          "name": "gpt-5.6-luna",
+          "kind": "text",
+          "note": "GPT-5.6 Luna",
+          "source": "https://cursor.com/docs/models/gpt-5-6-luna",
+          "checked_at": "2026-09-16",
+          "pricing": {
+            "cache_read": 135000,
+            "in": 1350000,
+            "out": 8100000
+          },
+          "origin": "cursor/individual/gpt-5-6-luna"
+        },
+        {
+          "name": "gpt-5.6-luna-fast",
+          "kind": "text",
+          "note": "GPT-5.6 Luna (Fast Mode)",
+          "source": "https://cursor.com/docs/models/gpt-5-6-luna",
+          "checked_at": "2026-09-23",
+          "pricing": {
+            "cache_read": 270000,
+            "in": 2700000,
+            "out": 16200000
+          },
+          "origin": "cursor/individual/gpt-5-6-luna-fast"
+        },
+        {
+          "name": "gpt-5.6-sol",
+          "kind": "text",
+          "note": "GPT-5.6 Sol",
+          "source": "https://cursor.com/docs/models/gpt-5-6-sol",
+          "checked_at": "2026-09-16",
+          "pricing": {
+            "cache_read": 2700000,
+            "in": 27000000,
+            "out": 135000000
+          },
+          "origin": "cursor/individual/gpt-5-6-sol"
+        },
+        {
+          "name": "gpt-5.6-sol-fast",
+          "kind": "text",
+          "note": "GPT-5.6 Sol (Fast Mode)",
+          "source": "https://cursor.com/docs/models/gpt-5-6-sol",
+          "checked_at": "2026-09-23",
+          "pricing": {
+            "cache_read": 5400000,
+            "in": 54000000,
+            "out": 270000000
+          },
+          "origin": "cursor/individual/gpt-5-6-sol-fast"
+        },
+        {
+          "name": "gpt-5.6-terra",
+          "kind": "text",
+          "note": "GPT-5.6 Terra",
+          "source": "https://cursor.com/docs/models/gpt-5-6-terra",
+          "checked_at": "2026-09-16",
+          "pricing": {
+            "cache_read": 1350000,
+            "in": 13500000,
+            "out": 81000000
+          },
+          "origin": "cursor/individual/gpt-5-6-terra"
+        },
+        {
+          "name": "gpt-5.6-terra-fast",
+          "kind": "text",
+          "note": "GPT-5.6 Terra (Fast Mode)",
+          "source": "https://cursor.com/docs/models/gpt-5-6-terra",
+          "checked_at": "2026-09-23",
+          "pricing": {
+            "cache_read": 2700000,
+            "in": 27000000,
+            "out": 162000000
+          },
+          "origin": "cursor/individual/gpt-5-6-terra-fast"
+        },
+        {
+          "name": "muse-spark-1.3",
+          "kind": "text",
+          "note": "Muse Spark 1.3",
+          "source": "https://cursor.com/docs/models/muse-spark-1-3",
+          "checked_at": "2026-09-16",
+          "pricing": {
+            "cache_read": 1012500,
+            "in": 8437500,
+            "out": 28687500
+          },
+          "origin": "cursor/individual/muse-spark-1-3"
+        }
+      ]
+    }
+  ]
+}

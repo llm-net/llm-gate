@@ -89,15 +89,11 @@ func connectCursorCredential(t *testing.T, e *routeEnv, apiKey string) int64 {
 	if err != nil {
 		t.Fatal(err)
 	}
-	acct, err := e.st.UpsertAgentAccount(t.Context(), store.NewAgentAccount{
+	return connectAgent(t, e.st, store.NewAgentAccount{
 		Provider: store.AgentProviderCursor,
 		Label:    "Cursor 测试订阅",
 		AuthJSON: blob,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return acct.ID
+	}).ID
 }
 
 // decodeConnectError 断言响应是 Connect 统一错误形 {"code","message"} 且不带
@@ -179,12 +175,10 @@ func TestCursorExchangeIssuesLocalJWTAndIsPolicyGated(t *testing.T) {
 		}
 	})
 
-	t.Run("勾选但订阅缺失或停用或已失效都是 failed_precondition", func(t *testing.T) {
+	t.Run("未钉账号是 permission_denied，钉了但停用或已失效是 failed_precondition", func(t *testing.T) {
 		w := serveClaude(e, http.MethodPost, cursorExchangePath, cursorHeaders(), "{}", false)
-		code, msg := decodeConnectError(t, w)
-		if w.Code != http.StatusConflict || code != "failed_precondition" ||
-			!strings.Contains(msg, "not currently available") {
-			t.Fatalf("未连接响应 = %d %s", w.Code, w.Body.String())
+		if code, _ := decodeConnectError(t, w); w.Code != http.StatusForbidden || code != "permission_denied" {
+			t.Fatalf("未钉账号响应 = %d %s", w.Code, w.Body.String())
 		}
 		id := connectCursorCredential(t, e, cursorAPIKeyFake)
 		for _, status := range []string{store.AgentStatusDisabled, store.AgentStatusAuthExpired} {
@@ -192,7 +186,9 @@ func TestCursorExchangeIssuesLocalJWTAndIsPolicyGated(t *testing.T) {
 				t.Fatal(err)
 			}
 			w = serveClaude(e, http.MethodPost, cursorExchangePath, cursorHeaders(), "{}", false)
-			if code, _ := decodeConnectError(t, w); w.Code != http.StatusConflict || code != "failed_precondition" {
+			code, msg := decodeConnectError(t, w)
+			if w.Code != http.StatusConflict || code != "failed_precondition" ||
+				!strings.Contains(msg, "not currently available") {
 				t.Fatalf("%s 响应 = %d %s", status, w.Code, w.Body.String())
 			}
 		}
@@ -767,7 +763,7 @@ func TestCursorRefreshAgentSelfCheck(t *testing.T) {
 			t.Fatalf("初始 LastRefreshAt 应为零值: %v (err=%v)", before, err)
 		}
 
-		if err := e.srv.RefreshAgent(t.Context(), store.AgentProviderCursor); err != nil {
+		if err := e.srv.RefreshAgent(t.Context(), id); err != nil {
 			t.Fatalf("RefreshAgent: %v", err)
 		}
 		after, err := e.st.GetAgentAccount(t.Context(), id)
@@ -775,7 +771,7 @@ func TestCursorRefreshAgentSelfCheck(t *testing.T) {
 			t.Fatalf("自检成功后 = %v (err=%v)", after, err)
 		}
 		// 自检是强制往返：即使已有缓存 token 也要真打一次 exchange。
-		if err := e.srv.RefreshAgent(t.Context(), store.AgentProviderCursor); err != nil {
+		if err := e.srv.RefreshAgent(t.Context(), id); err != nil {
 			t.Fatalf("第二次 RefreshAgent: %v", err)
 		}
 		if exchangeHits.Load() != 2 {
@@ -792,7 +788,7 @@ func TestCursorRefreshAgentSelfCheck(t *testing.T) {
 		e.srv.SetCursorEndpoints(srv.URL)
 		id := connectCursorCredential(t, e, cursorAPIKeyFake)
 
-		err := e.srv.RefreshAgent(t.Context(), store.AgentProviderCursor)
+		err := e.srv.RefreshAgent(t.Context(), id)
 		// 判据与管理面 refreshResult 相同：errors.Is(err, agentauth.ErrAuthExpired)。
 		if err == nil || !errors.Is(err, agentauth.ErrAuthExpired) {
 			t.Fatalf("自检被拒应报登录失效: %v", err)

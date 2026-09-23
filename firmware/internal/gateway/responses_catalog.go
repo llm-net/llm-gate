@@ -1,25 +1,7 @@
-// responses_catalog.go 实现 POST /v1/responses——标准 Responses 目录面
-// （2026-08-13 按 2026-08-12 裁决挂载，触发条件②：官方 codex 只有
-// wire_api="responses" 一种形态，而用户要它够到模型目录里的按量模型。
-// 契约整节见 docs/firmware-gateway.md「Responses 目录面」）。
-//
-// 它与 /agents/{codex,grok}/v1/responses（订阅代理，responses.go）是两回事：那边解析订阅
-// 账号、不选路、0 元记账；这边只认客户端 API 密钥与模型目录——选路、准入、
-// 计量、故障切换全套复用 chat 的既有机制（resolveRoute + forward），差异收在
-// 两端的**形态转换**：
-//
-//	请求侧  Responses → chat（responsesToChatPayload）：无状态子集校验
-//	        （store:true / previous_response_id 明确 400）、input items 折成
-//	        messages、工具与标量映射；无 chat 等价物的旋钮按契约丢弃。
-//	响应侧  chat → Responses：非流式折成单个 response 对象（chatToResponse），
-//	        SSE 按 Responses 事件序合成（responsesSynth：response.created →
-//	        output_item/content_part/delta… → response.completed，无 [DONE]）。
-//
-// 字节保真契约对本入口**不适用**（这是转换面），唯一例外是上游 4xx/5xx
-// 错误体——OpenAI 错误信封两面同形，原样透传（复用 commitResponse）。
-//
-// §15.1：本文件绝不把请求/响应 body 传入 logger；转换中的文本只在内存里活到
-// 重编码结束，计量只取数字与 rune 计数（chatObserver 的既有纪律）。
+// responses_catalog.go forwards native Responses for explicit generic endpoints and
+// converts Responses to Chat for catalog adapters. Routing, admission, failover and
+// usage metering are shared. Native-only request fields exclude Chat candidates.
+// Request/response content stays in memory and must never be logged (§15.1).
 package gateway
 
 import (
@@ -40,6 +22,7 @@ import (
 
 // handleResponsesCatalog 是 POST /v1/responses 的入口（已过认证中间件）。
 func (s *Server) handleResponsesCatalog(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, agentsResponsesBodyLimit)
 	payload, model, ok := decodeEntryPayload(w, r, openAIErrorStyle)
 	if !ok {
 		return
@@ -59,15 +42,24 @@ func (s *Server) handleResponsesCatalogPayload(w http.ResponseWriter, r *http.Re
 	if !s.admit(w, r, openAIErrorStyle) {
 		return
 	}
-	// 形态转换 + 无状态子集校验：准入之后（契约不合的请求也是一次真实的调用
-	// 尝试，照样入账占 RPM）、选路之前（不该为注定 400 的请求消耗三表点查）。
+	// 预备 Chat 转换；无法转换的请求仅允许交给原生 Responses 来源。
 	chatPayload, convErr := responsesToChatPayload(payload)
-	if convErr != nil {
-		writeOpenAIError(w, http.StatusBadRequest, "invalid_request_error", convErr.code, convErr.message)
-		return
-	}
-	// Responses 独立检查模型协议面开关；候选来源使用 Chat 上游承载转换。
+
+	// Responses 独立检查模型协议面开关，并按账号选择上游协议。
 	cands, status := s.resolveRoute(r.Context(), model, store.ModelKindText, config.ProtocolOpenAIResponses)
+	if convErr != nil {
+		native := cands[:0]
+		for _, c := range cands {
+			if c.account.Type == config.UpstreamGeneric {
+				native = append(native, c)
+			}
+		}
+		cands = native
+		if len(cands) == 0 {
+			writeOpenAIError(w, 400, "invalid_request_error", convErr.code, convErr.message)
+			return
+		}
+	}
 	switch status {
 	case routeModelNotFound:
 		writeOpenAIError(w, http.StatusNotFound, "invalid_request_error", "model_not_found",
@@ -82,12 +74,12 @@ func (s *Server) handleResponsesCatalogPayload(w http.ResponseWriter, r *http.Re
 			internalErrorMessage)
 		return
 	}
-	clientStream, _ := chatPayload["stream"].(bool)
-	if clientStream {
+	clientStream, _ := payload["stream"].(bool)
+	if clientStream && chatPayload != nil {
 		injectIncludeUsage(chatPayload)
 	}
 	capabilityDoc := s.effectivePlatformModels(r.Context())
-	s.forward(w, r, cands, forwardSpec{
+	legacy := forwardSpec{
 		protocol: config.ProtocolOpenAIChat,
 		path:     "/chat/completions",
 		model:    model,
@@ -106,14 +98,133 @@ func (s *Server) handleResponsesCatalogPayload(w http.ResponseWriter, r *http.Re
 			return encodeJSON(attemptPayload)
 		},
 		errStyle: openAIErrorStyle,
-		commit:   s.commitResponsesCatalog(info, model, clientStream),
-	})
+		commit:   s.commitResponsesCatalog(info, model, clientStream, toolNamespacesOf(payload)),
+	}
+	s.forward(w, r, cands, forwardSpec{model: model, errStyle: openAIErrorStyle, forCandidate: func(c candidate) forwardSpec {
+		if c.account.Type != config.UpstreamGeneric {
+			return legacy
+		}
+		return forwardSpec{
+			model: model, protocol: config.ProtocolOpenAIResponses, path: "/responses", errStyle: openAIErrorStyle,
+			body: func(id string) ([]byte, error) { payload["model"] = id; return encodeJSON(payload) },
+			commit: func(w http.ResponseWriter, r *http.Request, resp *http.Response) {
+				s.commitResponse(w, r, resp, respRewrite{model: model, expectSSE: clientStream, rewrite: rewriteResponsesModel, observe: s.responsesObserver(info)}, openAIErrorStyle)
+			},
+		}
+	}})
 }
 
 // ---- 请求侧：Responses → chat ----
 
 // convError 是转换面的契约拒绝：code 是机读原因，message 给客户端。
 type convError struct{ code, message string }
+
+// toolNamespaces 是一次请求里 namespace 工具的平铺表：chat 侧函数名 → 原
+// namespace 与内层函数名。
+//
+// codex 把 MCP 工具按服务器分组成 `{"type":"namespace","name":"mcp__host","tools":[…]}`
+// 交给模型，chat 面没有这种形态。真 codex 0.154 实测：模型必须以
+// `{"type":"function_call","namespace":"mcp__host","name":"exec"}` 发起调用才会被派发，
+// 平铺名（`mcp__host__exec`）或裸内层名（`exec`）一律答 "unsupported call"。所以目录
+// 面两头一起做：请求侧把内层函数以 `<namespace>__<name>` 平铺成普通函数工具，模型
+// 看得见、叫得出；响应侧凭本表把模型叫出的平铺名折回 namespace + 内层名；历史里
+// codex 自己带 namespace 的 function_call item 也按同一规则平铺，模型前后看到的名字
+// 一致。单独丢弃 namespace 而不折回的后果是主机智能体在目录模型上没有任何主机工具。
+type toolNamespaces map[string]namespacedTool
+
+type namespacedTool struct{ namespace, name string }
+
+func namespacedToolName(namespace, name string) string { return namespace + "__" + name }
+
+// validChatFunctionName 是各家 chat 上游共同接受的函数名形态（字母数字、下划线、
+// 连字符，至多 64 字节）；拼出来不合规的平铺名不上桌。
+func validChatFunctionName(name string) bool {
+	if name == "" || len(name) > 64 {
+		return false
+	}
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c == '-') {
+			return false
+		}
+	}
+	return true
+}
+
+// toolNamespacesOf 从请求的 tools 收集平铺表；没有 namespace 工具时为 nil。
+func toolNamespacesOf(p map[string]any) toolNamespaces {
+	var out toolNamespaces
+	rawTools, _ := p["tools"].([]any)
+	for _, rt := range rawTools {
+		tool, ok := rt.(map[string]any)
+		if !ok || tool["type"] != "namespace" {
+			continue
+		}
+		for flat, nt := range flattenNamespace(tool) {
+			if out == nil {
+				out = toolNamespaces{}
+			}
+			out[flat] = nt
+		}
+	}
+	return out
+}
+
+// flattenNamespace 列出一个 namespace 工具里可平铺的内层函数：平铺名 → 归属。
+// 非 function 的内层项、缺名的与拼不出合规平铺名的跳过。
+func flattenNamespace(tool map[string]any) map[string]namespacedTool {
+	ns, _ := tool["name"].(string)
+	if ns == "" {
+		return nil
+	}
+	out := map[string]namespacedTool{}
+	for _, ri := range jsonArray(tool["tools"]) {
+		inner, ok := ri.(map[string]any)
+		if !ok || inner["type"] != "function" {
+			continue
+		}
+		name, _ := inner["name"].(string)
+		flat := namespacedToolName(ns, name)
+		if name == "" || !validChatFunctionName(flat) {
+			continue
+		}
+		out[flat] = namespacedTool{namespace: ns, name: name}
+	}
+	return out
+}
+
+// apply 给合成的 function_call item 折回 namespace：模型叫的是平铺名时，item 带上
+// namespace、name 换回内层名；其余名字原样。
+func (t toolNamespaces) apply(item map[string]any, name string) {
+	if nt, ok := t[name]; ok {
+		item["namespace"] = nt.namespace
+		item["name"] = nt.name
+	}
+}
+
+// chatFunctionTool 把一个 Responses 函数工具（或 namespace 的内层函数）折成 chat
+// 的嵌套形。strict 有意丢弃：严格 schema 执行在各家目录上游上支持不一，带上反而
+// 让部分上游 400。
+func chatFunctionTool(name any, tool map[string]any) map[string]any {
+	fn := map[string]any{"name": name}
+	if d, ok := tool["description"]; ok && d != nil {
+		fn["description"] = d
+	}
+	if params, ok := tool["parameters"]; ok && params != nil {
+		fn["parameters"] = params
+	}
+	return map[string]any{"type": "function", "function": fn}
+}
+
+// inputFunctionCallName 是历史 function_call item 在 chat 侧的函数名：带 namespace
+// 的（codex 记录的 MCP 调用）按平铺规则拼名，与请求侧平铺出的工具名一致。
+func inputFunctionCallName(item map[string]any) string {
+	name := jsonString(item["name"])
+	if ns := jsonString(item["namespace"]); ns != "" && name != "" {
+		return namespacedToolName(ns, name)
+	}
+	return name
+}
 
 // responsesChatCompat 只收会改变上游请求语义的有界能力。普通目录模型保持
 // Responses 无状态子集的通用转换；声明 profile 的具体平台模型才启用扩展。
@@ -169,28 +280,35 @@ func responsesToChatPayloadWithCompat(p map[string]any, compat responsesChatComp
 				return nil, &convError{"responses_tool_unsupported", "Each tool must be a JSON object."}
 			}
 			typ, _ := tool["type"].(string)
-			if typ != "function" {
-				// **丢弃而不是 400**（2026-08-13 真 codex 实测改判）：codex 0.147
-				// 缺省工具清单就带 namespace（multi_agent_v1 分组）与 web_search
-				// 两种非 function 类型，硬拒等于拒掉整个客户端。丢弃的语义是
-				// 「这条路上没有这个工具」——模型不会调用它，CLI 对「模型没用
-				// 某工具」本就容忍（多 agent、联网在目录模型路上如实不可用）。
-				// 决不能做的是改名平铺 namespace 内层函数：模型会照平铺名发起
-				// 调用，而 CLI 侧按什么名字派发未经实证，凭空造一个「模型会调、
-				// CLI 不认」的名字比没有更糟。tool_choice 强制指向被丢弃的工具
-				// 仍是 400（convertToolChoice）——强制要求满足不了就不假装。
+			if typ == "namespace" {
+				// namespace（codex 的 MCP 服务器分组、multi_agent 分组）：内层函数
+				// 以 `<namespace>__<name>` 平铺成普通函数工具，响应侧按 toolNamespaces
+				// 折回（真 codex 只认 namespace + 内层名的调用形，见该类型注释）。
+				// 平铺表与这里同源，同一请求两侧一致。
+				flat := flattenNamespace(tool)
+				for _, ri := range jsonArray(tool["tools"]) {
+					inner, ok := ri.(map[string]any)
+					if !ok {
+						continue
+					}
+					name, _ := inner["name"].(string)
+					if _, ok := flat[namespacedToolName(jsonString(tool["name"]), name)]; !ok {
+						continue
+					}
+					tools = append(tools, chatFunctionTool(namespacedToolName(jsonString(tool["name"]), name), inner))
+				}
 				continue
 			}
-			fn := map[string]any{"name": tool["name"]}
-			if d, ok := tool["description"]; ok && d != nil {
-				fn["description"] = d
+			if typ != "function" {
+				// **丢弃而不是 400**（真 codex 实测改判）：codex 缺省工具清单就带
+				// web_search 之类的非 function 类型，硬拒等于拒掉整个客户端。丢弃的
+				// 语义是「这条路上没有这个工具」——模型不会调用它，CLI 对「模型没用
+				// 某工具」本就容忍（联网在目录模型路上如实不可用）。tool_choice 强制
+				// 指向被丢弃的工具仍是 400（convertToolChoice）——强制要求满足不了
+				// 就不假装。
+				continue
 			}
-			if params, ok := tool["parameters"]; ok && params != nil {
-				fn["parameters"] = params
-			}
-			// strict 有意丢弃：严格 schema 执行在各家目录上游上支持不一，带上
-			// 反而让部分上游 400。
-			tools = append(tools, map[string]any{"type": "function", "function": fn})
+			tools = append(tools, chatFunctionTool(tool["name"], tool))
 		}
 		if len(tools) > 0 { // 全被丢弃时整个键不带：空 tools 数组会让部分上游 400
 			out["tools"] = tools
@@ -284,7 +402,7 @@ func convertInputItems(items []any, replayDeepSeekReasoning bool) ([]any, *convE
 			calls, _ := pendingAssistant["tool_calls"].([]any)
 			pendingAssistant["tool_calls"] = append(calls, map[string]any{
 				"id": callID, "type": "function",
-				"function": map[string]any{"name": jsonString(item["name"]), "arguments": jsonString(item["arguments"])},
+				"function": map[string]any{"name": inputFunctionCallName(item), "arguments": jsonString(item["arguments"])},
 			})
 		case "function_call_output":
 			flushAssistant()
@@ -360,7 +478,7 @@ func convertInputItem(item map[string]any) ([]any, *convError) {
 		if callID == "" {
 			callID, _ = item["id"].(string)
 		}
-		name, _ := item["name"].(string)
+		name := inputFunctionCallName(item)
 		args, _ := item["arguments"].(string)
 		// content 给空串而不是 null：null content 在部分自建推理服务上被拒，
 		// 空串各家都收。
@@ -517,7 +635,7 @@ func convertTextFormat(v any) any {
 // 四种形态组合都能走（客户端要不要流 × 上游答没答流）：常态是同构直转，
 // 错位的两种（上游没按 stream 答）经聚合/整体合成兜住——上游违约不该变成
 // 客户端侧的解析失败。
-func (s *Server) commitResponsesCatalog(info *reqInfo, model string, clientStream bool) func(http.ResponseWriter, *http.Request, *http.Response) {
+func (s *Server) commitResponsesCatalog(info *reqInfo, model string, clientStream bool, ns toolNamespaces) func(http.ResponseWriter, *http.Request, *http.Response) {
 	observe := s.chatObserver(info)
 	return func(w http.ResponseWriter, r *http.Request, resp *http.Response) {
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -552,12 +670,12 @@ func (s *Server) commitResponsesCatalog(info *reqInfo, model string, clientStrea
 			}
 			observe(chatObj)
 			if !clientStream {
-				writeJSONResponse(w, chatToResponse(chatObj, respID, model))
+				writeJSONResponse(w, chatToResponse(chatObj, respID, model, ns))
 				return
 			}
 			// 客户端要流而上游整体作答：按同一事件序把完整产出一次性放流。
 			beginSSE(w)
-			synth := newResponsesSynth(w, respID, model)
+			synth := newResponsesSynth(w, respID, model, ns)
 			synth.start()
 			synth.feedChatObject(chatObj)
 			synth.finish()
@@ -581,12 +699,12 @@ func (s *Server) commitResponsesCatalog(info *reqInfo, model string, clientStrea
 					"The gateway failed to read the upstream response.")
 				return
 			}
-			writeJSONResponse(w, chatToResponse(accum.result(), respID, model))
+			writeJSONResponse(w, chatToResponse(accum.result(), respID, model, ns))
 			return
 		}
 
 		beginSSE(w)
-		synth := newResponsesSynth(w, respID, model)
+		synth := newResponsesSynth(w, respID, model, ns)
 		synth.start()
 		err := scanChatSSE(resp.Body, func(m map[string]any) {
 			observe(m)
@@ -755,8 +873,9 @@ func (a *chatStreamAccum) result() map[string]any {
 	return out
 }
 
-// chatToResponse 把一个非流式 chat 对象折成 Responses 的 response 对象。
-func chatToResponse(chatObj map[string]any, respID, model string) map[string]any {
+// chatToResponse 把一个非流式 chat 对象折成 Responses 的 response 对象；ns 是本
+// 请求的 namespace 平铺表（function_call item 按它折回 namespace）。
+func chatToResponse(chatObj map[string]any, respID, model string, ns toolNamespaces) map[string]any {
 	var output []any
 	finish := ""
 	itemN := 0
@@ -781,8 +900,9 @@ func chatToResponse(chatObj map[string]any, respID, model string) map[string]any
 					if fn, ok := tc["function"].(map[string]any); ok {
 						name, args = jsonString(fn["name"]), jsonString(fn["arguments"])
 					}
-					output = append(output,
-						functionCallItem(itemID(respID, "fc", itemN), jsonString(tc["id"]), name, args, "completed"))
+					item := functionCallItem(itemID(respID, "fc", itemN), jsonString(tc["id"]), name, args, "completed")
+					ns.apply(item, name)
+					output = append(output, item)
 					itemN++
 				}
 			}
@@ -941,11 +1061,12 @@ type responsesSynth struct {
 
 	finishReason string
 	usage        map[string]any
-	output       []any // 已收口的 item（response.completed 的 output）
+	output       []any          // 已收口的 item（response.completed 的 output）
+	ns           toolNamespaces // 本请求的 namespace 平铺表（function_call 折回用）
 }
 
-func newResponsesSynth(w http.ResponseWriter, respID, model string) *responsesSynth {
-	return &responsesSynth{w: &flushWriter{w: w}, respID: respID, model: model, created: time.Now().Unix()}
+func newResponsesSynth(w http.ResponseWriter, respID, model string, ns toolNamespaces) *responsesSynth {
+	return &responsesSynth{w: &flushWriter{w: w}, respID: respID, model: model, created: time.Now().Unix(), ns: ns}
 }
 
 // emit 写出一个事件帧（event: 行 + data: 行）。写失败闩住后续输出。
@@ -1122,6 +1243,7 @@ func (y *responsesSynth) ensureItem(typ, fcKey, fcID, fcName string) {
 			"id": y.curItemID(), "type": "function_call", "status": "in_progress",
 			"call_id": y.fcCallID, "name": y.fcName, "arguments": "",
 		}
+		y.ns.apply(item, y.fcName)
 		y.emit("response.output_item.added", map[string]any{"output_index": y.itemIdx, "item": item})
 	}
 }
@@ -1175,6 +1297,7 @@ func (y *responsesSynth) closeItem() {
 			"item_id": id, "output_index": y.itemIdx, "arguments": text,
 		})
 		done := functionCallItem(id, y.fcCallID, y.fcName, text, "completed")
+		y.ns.apply(done, y.fcName)
 		y.emit("response.output_item.done", map[string]any{"output_index": y.itemIdx, "item": done})
 		y.output = append(y.output, done)
 	}

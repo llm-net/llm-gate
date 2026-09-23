@@ -3,30 +3,36 @@
 // 模型和价格由目录数据定义，连接订阅后自动显示。共享目录行由服务端收敛器维护，
 // Cursor 直接读取平台目录。整列只读，不提供添加、修改或删除价格的动作。
 //
-// 分组顺序与左列订阅卡同一份 PROVIDERS；组行右端是那份订阅此刻的状态灯（与左列同一个
-// 件）：型号能不能被成员调到，先看订阅本身通不通。默认模型 / 对成员可见的模型在行上
-// 打标，读数与左列卡片同源（account.default_model）。Cursor 的计价清单单独从
+// 分组顺序与左列订阅卡同一份 PROVIDERS；组行右端是该订阅每个账号此刻的状态灯（与左列
+// 同一个件，多账号时逐个列出并带名字）：型号能不能被成员调到，先看它钉的那个账号通
+// 不通。默认模型 / 对成员可见的模型在行上打标，读数与左列卡片同源
+// （account.default_model，多账号时标出是哪几个账号设的）。Cursor 的计价清单单独从
 // 平台目录读取并放进同一张表，可用模型仍由 cursor-agent 经订阅面自行发现。
 //
 // 状态徽章只标「需要操作者处理的状态」：已禁用、未定价。正常态不标。
+//
+// 整列可以收起：收起后只剩一根窄轨（大屏竖排、小屏一条横杠）写着「模型 · N」和展开
+// 入口，左列订阅卡吃掉整宽平铺。开合状态由页面持有，本列只画两种形态。
 
+import { PanelRightClose, PanelRightOpen } from "lucide-react";
 import { Fragment } from "react";
 
 import { AgentProviderIcon } from "@/components/brand-icon";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import * as api from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 
-import { PROVIDERS, StatusPill, visibleModelSemantics } from "./agent-status";
+import { accountName, PROVIDERS, StatusPill, visibleModelSemantics } from "./agent-status";
 import { agentPricingModel } from "./domain";
 
 type PricingModel = Pick<api.Model, "name" | "pricing" | "disabled">;
 
 interface Group {
   provider: api.AgentProvider;
-  account: api.AgentAccount | undefined;
+  accounts: api.AgentAccount[];
   models: PricingModel[];
 }
 
@@ -35,18 +41,20 @@ const headCell = "text-muted-foreground h-9 text-xs font-medium";
 function ModelLine({
   m,
   provider,
-  account,
+  accounts,
   fields,
 }: {
   m: PricingModel;
   provider: api.AgentProvider;
-  account: api.AgentAccount | undefined;
+  accounts: api.AgentAccount[];
   fields: api.PricingField[];
 }): React.ReactElement {
   const pricing = m.pricing ?? {};
   const priced = fields.some((f) => pricing[f.name] !== undefined);
-  // 与左列卡片上的「默认模型 / 可见模型」同一份读数；名字对得上才打标。
-  const marked = provider !== "cursor" && account !== undefined && account.default_model !== "" && account.default_model === m.name;
+  // 与左列卡片上的「默认模型 / 可见模型」同一份读数；名字对得上才打标，多账号时
+  // 标出是哪几个账号设的。
+  const markedBy = provider === "cursor" ? [] : accounts.filter((a) => a.default_model !== "" && a.default_model === m.name);
+  const markedNames = markedBy.map(accountName).join(" / ");
   return (
     <TableRow className={cn(m.disabled && "opacity-60")}>
       <TableCell className="pl-4">
@@ -54,16 +62,17 @@ function ModelLine({
           <code className="font-mono text-[13px] leading-5" title={m.name}>
             {m.name}
           </code>
-          {marked ? (
+          {markedBy.length > 0 ? (
             <Badge
               variant="secondary"
               title={
                 visibleModelSemantics(provider)
-                  ? t("对成员可见的模型：成员的 Claude Code 只看得到它")
-                  : t("写进成员 CLI 配置的默认模型")
+                  ? t("对成员可见的模型：钉着这些账号的成员，Claude Code 只看得到它 — {accounts}", { accounts: markedNames })
+                  : t("写进成员 CLI 配置的默认模型 — {accounts}", { accounts: markedNames })
               }
             >
               {visibleModelSemantics(provider) ? t("成员可见") : t("默认")}
+              {accounts.length > 1 ? ` · ${markedNames}` : ""}
             </Badge>
           ) : null}
           {m.disabled ? <Badge variant="secondary">{t("已禁用")}</Badge> : null}
@@ -101,22 +110,43 @@ export function AgentModelsColumn({
   all,
   accounts,
   cursorPrices,
+  open,
+  onToggle,
 }: {
   all: api.Model[];
   accounts: api.AgentAccount[];
   cursorPrices: api.CursorPricingView;
+  /** false = 收起成窄轨，只留标题、计数与展开入口。 */
+  open: boolean;
+  onToggle: () => void;
 }): React.ReactElement {
   const models = all.filter(agentPricingModel);
   // 目录只收文本模型，价目使用输入、输出与缓存读写四档；列头文案与录价表单同一份字段规格。
   const fields = api.pricingFieldsFor("text");
   const groups: Group[] = PROVIDERS.map((p) => ({
     provider: p,
-    account: accounts.find((a) => a.provider === p),
+    accounts: accounts.filter((a) => a.provider === p),
     models: p === "cursor"
       ? cursorPrices.models.map((m) => ({ ...m, disabled: false }))
       : models.filter((m) => m.agent === p),
   })).filter((g) => g.models.length > 0);
   const modelCount = groups.reduce((count, group) => count + group.models.length, 0);
+
+  if (!open) {
+    return (
+      <div className="max-lg:mt-3 lg:col-start-2 lg:row-start-1 lg:row-span-2">
+        <div className="bg-card flex items-center gap-2 rounded-xl border px-2 py-1.5 shadow-xs lg:sticky lg:top-4 lg:w-10 lg:flex-col lg:px-1 lg:py-2">
+          <Button size="icon-xs" variant="ghost" onClick={onToggle} aria-expanded={false} title={t("展开模型列")} aria-label={t("展开模型列")}>
+            <PanelRightOpen />
+          </Button>
+          <h2 className="text-sm font-semibold lg:[writing-mode:vertical-rl]">{t("模型")}</h2>
+          <Badge variant="secondary" title={t("共 {n} 个模型", { n: modelCount })}>
+            {modelCount}
+          </Badge>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <>
@@ -126,9 +156,13 @@ export function AgentModelsColumn({
           <Badge variant="secondary" title={t("共 {n} 个模型", { n: modelCount })}>
             {modelCount}
           </Badge>
+          <Button size="xs" variant="ghost" className="text-muted-foreground ml-auto" onClick={onToggle} aria-expanded={true}>
+            <PanelRightClose />
+            {t("收起")}
+          </Button>
         </div>
         <p className="text-muted-foreground text-xs">
-          {t("订阅文本按目录价格记名义金额，模型和价格自动同步且只读；图片/视频无按量费。")}
+          {t("订阅文本按目录价格记名义金额，模型和价格自动同步且只读；图像/视频无按量费。")}
         </p>
       </div>
       <div className="lg:col-start-2 lg:row-start-2">
@@ -165,16 +199,23 @@ export function AgentModelsColumn({
                           <span className="text-muted-foreground text-xs">
                             {t("{n} 个模型", { n: g.models.length })}
                           </span>
-                          {g.account === undefined ? null : (
-                            <span className="ml-auto">
-                              <StatusPill a={g.account} />
+                          {g.accounts.length === 0 ? null : (
+                            <span className="ml-auto flex flex-wrap items-center justify-end gap-1.5">
+                              {g.accounts.map((a) => (
+                                <span key={a.id} className="flex items-center gap-1" title={accountName(a)}>
+                                  {g.accounts.length > 1 ? (
+                                    <span className="text-muted-foreground max-w-32 truncate text-xs">{accountName(a)}</span>
+                                  ) : null}
+                                  <StatusPill a={a} />
+                                </span>
+                              ))}
                             </span>
                           )}
                         </div>
                       </TableCell>
                     </TableRow>
                     {g.models.map((m) => (
-                      <ModelLine key={m.name} m={m} provider={g.provider} account={g.account} fields={fields} />
+                      <ModelLine key={m.name} m={m} provider={g.provider} accounts={g.accounts} fields={fields} />
                     ))}
                   </Fragment>
                 ))}

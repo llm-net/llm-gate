@@ -487,7 +487,7 @@ func (m *Manager) Delete(ctx context.Context, removeComponent bool) error {
 
 // RemoveComponent 卸载 cloudflared 组件（A/B slot 整目录），本机 Tunnel 配置与密封 token
 // 保留。Tunnel 启用中拒绝：正在承载公网入口的 connector 不能被抽掉，卸载前先在「公网接入」
-// 停用——「第三方组件」页只管组件本身，从不替管理员停功能。
+// 停用——「组件管理」页只管组件本身，从不替管理员停功能。
 func (m *Manager) RemoveComponent(ctx context.Context) error {
 	enabled, err := m.Enabled(ctx)
 	if err != nil {

@@ -63,13 +63,7 @@ func newRouteEnv(t *testing.T) *routeEnv {
 	if err != nil || len(keys) != 1 {
 		t.Fatalf("ListAPIKeys: %v (%d)", err, len(keys))
 	}
-	if _, _, err := st.ReplaceDevToolConfig(t.Context(), store.DevToolConfig{
-		KeyID: keys[0].ID, AllowCodexSubscription: true,
-		AllowGrokSubscription: true, AllowClaudeSubscription: true,
-		AllowCursorSubscription: true,
-	}); err != nil {
-		t.Fatalf("ReplaceDevToolConfig: %v", err)
-	}
+	// 缺省空策略：订阅账号由各用例经 connectAgent 建好并钉给 keys[0]。
 	s.SetDevToolPolicy(&devtoolpolicy.Resolver{
 		Store:          st,
 		AgentModels:    s.AgentSubscriptionModels,
@@ -78,20 +72,50 @@ func newRouteEnv(t *testing.T) *routeEnv {
 	return &routeEnv{h: s.Handler(), srv: s, logBuf: &logBuf, st: st, dir: cfg.DataDir}
 }
 
+// selectDevToolModels 替换唯一测试 Key 的开发工具可见模型集合，钉死的订阅账号原样保留。
 func selectDevToolModels(t *testing.T, st *store.Store, modelIDs ...int64) {
+	t.Helper()
+	cfg := testKeyDevToolConfig(t, st)
+	cfg.CatalogModelIDs = modelIDs
+	if _, _, err := st.ReplaceDevToolConfig(t.Context(), cfg); err != nil {
+		t.Fatalf("ReplaceDevToolConfig: %v", err)
+	}
+}
+
+// testKeyDevToolConfig 读唯一测试 Key 当前的开发工具策略。
+func testKeyDevToolConfig(t *testing.T, st *store.Store) store.DevToolConfig {
 	t.Helper()
 	keys, err := st.ListAPIKeys(t.Context())
 	if err != nil || len(keys) == 0 {
 		t.Fatalf("ListAPIKeys: %v (%d)", err, len(keys))
 	}
-	if _, _, err := st.ReplaceDevToolConfig(t.Context(), store.DevToolConfig{
-		KeyID: keys[0].ID, AllowCodexSubscription: true,
-		AllowGrokSubscription: true, AllowClaudeSubscription: true,
-		AllowCursorSubscription: true,
-		CatalogModelIDs:         modelIDs,
-	}); err != nil {
+	cfg, err := st.GetDevToolConfig(t.Context(), keys[0].ID)
+	if err != nil {
+		t.Fatalf("GetDevToolConfig: %v", err)
+	}
+	return cfg
+}
+
+// pinSubscription 把某种订阅的账号行钉给唯一测试 Key（0 = 解开），其余策略保留。
+func pinSubscription(t *testing.T, st *store.Store, provider string, accountID int64) {
+	t.Helper()
+	cfg := testKeyDevToolConfig(t, st)
+	cfg.SetSubscriptionAccount(provider, accountID)
+	if _, _, err := st.ReplaceDevToolConfig(t.Context(), cfg); err != nil {
 		t.Fatalf("ReplaceDevToolConfig: %v", err)
 	}
+}
+
+// connectAgent 建一个订阅账号行并把它钉给唯一测试 Key——多账号语义下，
+// 「设备上有这份订阅」不等于「这把 Key 能用它」，两步都要做。
+func connectAgent(t *testing.T, st *store.Store, na store.NewAgentAccount) *store.AgentAccount {
+	t.Helper()
+	acct, err := st.UpsertAgentAccount(t.Context(), na)
+	if err != nil {
+		t.Fatalf("UpsertAgentAccount(%s): %v", na.Provider, err)
+	}
+	pinSubscription(t, st, acct.Provider, acct.ID)
+	return acct
 }
 
 func devToolModelID(t *testing.T, st *store.Store, name string) int64 {

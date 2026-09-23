@@ -751,7 +751,7 @@ function switchBody(target: api.ExternalMode, external: api.ExternalAccess): Rea
         <p>{t("将公布已登记的地址 {url}。", { url: external.manual_url })}</p>
       );
     default:
-      return <p>{t("切换后先在「第三方组件」页安装 cloudflared，再在下方面板完成 token 与域名设置并启用，公网地址才会生效。")}</p>;
+      return <p>{t("切换后先在「组件管理」页安装 cloudflared，再在下方面板完成 token 与域名设置并启用，公网地址才会生效。")}</p>;
   }
 }
 

@@ -17,8 +17,8 @@ func TestOpenCodeGoModelProtocolProjection(t *testing.T) {
 		model string
 		want  []string
 	}{
-		{"mimo-v2.5", []string{"opencode"}},
-		{"longcat-2.0", []string{"opencode"}},
+		{"mimo-v2.5", []string{"opencode", "mcode"}},
+		{"longcat-2.0", []string{"opencode", "mcode"}},
 		{"minimax-m3", []string{"claude"}},
 		{"gpt-5.6-luna", []string{}},
 	} {
@@ -73,14 +73,15 @@ func TestSnapshotIsPerKeyAndCatalogProjectsByProtocol(t *testing.T) {
 	if _, err := st.CreateModelSource(t.Context(), model.ID, anthropic.ID, "deepseek-v4-flash", 20); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := st.ReplaceDevToolConfig(t.Context(), store.DevToolConfig{
-		KeyID: keyA, AllowCodexSubscription: true, CatalogModelIDs: []int64{model.ID},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.UpsertAgentAccount(t.Context(), store.NewAgentAccount{
+	codex, err := st.UpsertAgentAccount(t.Context(), store.NewAgentAccount{
 		Provider: store.AgentProviderCodex, Label: "codex", AccountID: "test",
 		DefaultModel: "gpt-5.6-sol", AuthJSON: `{"tokens":{"access_token":"fake"}}`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := st.ReplaceDevToolConfig(t.Context(), store.DevToolConfig{
+		KeyID: keyA, CodexAccountID: codex.ID, CatalogModelIDs: []int64{model.ID},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +110,7 @@ func TestSnapshotIsPerKeyAndCatalogProjectsByProtocol(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if b.Revision != 0 || len(b.Tools["codex"].Models) != 0 || len(b.Tools["opencode"].Models) != 0 ||
+	if b.Revision != 0 || len(b.Tools["codex"].Models) != 0 || len(b.Tools["opencode"].Models) != 0 || len(b.Tools["mcode"].Models) != 0 ||
 		b.Subscription("codex").Configured {
 		t.Fatalf("unconfigured key leaked policy: %+v", b)
 	}
@@ -130,6 +131,7 @@ func TestSnapshotIsPerKeyAndCatalogProjectsByProtocol(t *testing.T) {
 		}
 		if snapshot.IsCatalogModel("codex", model.Name) != tc.responses ||
 			snapshot.IsCatalogModel("opencode", model.Name) != tc.chat ||
+			snapshot.IsCatalogModel("mcode", model.Name) != tc.chat ||
 			snapshot.IsCatalogModel("claude", model.Name) != tc.anthropic {
 			t.Fatalf("independent surface projection: %+v, tools=%+v", tc, snapshot.Tools)
 		}
@@ -167,11 +169,14 @@ func TestOpenCodeAcceptsOpenAIChatWithoutCodexCapabilities(t *testing.T) {
 		got.Models[0] != (Model{Name: model.Name, Source: "catalog"}) {
 		t.Fatalf("OpenCode projection=%+v", got)
 	}
+	if got := snap.Tools["mcode"]; got.DefaultModel != model.Name || len(got.Models) != 1 || got.Models[0].Source != "catalog" {
+		t.Fatalf("MiniMax Code projection=%+v", got)
+	}
 	if got := snap.Tools["codex"].Models; len(got) != 0 {
 		t.Fatalf("plain OpenAI Chat model leaked into Codex: %+v", got)
 	}
 	if options, err := (&Resolver{Store: st}).ModelOptions(t.Context(), keyID); err != nil ||
-		len(options) != 1 || !slices.Equal(options[0].Tools, []string{"opencode"}) {
+		len(options) != 1 || !slices.Equal(options[0].Tools, []string{"opencode", "mcode"}) {
 		t.Fatalf("OpenCode model options=%+v err=%v", options, err)
 	}
 }
@@ -224,14 +229,15 @@ func TestClaudeVisibleModelNarrowsSubscriptionButKeepsCatalog(t *testing.T) {
 	if _, err := st.CreateModelSource(t.Context(), catalog.ID, up.ID, catalog.Name, 10); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := st.ReplaceDevToolConfig(t.Context(), store.DevToolConfig{
-		KeyID: keyID, AllowClaudeSubscription: true, CatalogModelIDs: []int64{catalog.ID},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.UpsertAgentAccount(t.Context(), store.NewAgentAccount{
+	claude, err := st.UpsertAgentAccount(t.Context(), store.NewAgentAccount{
 		Provider: store.AgentProviderClaude, Label: "claude", DefaultModel: "claude-fable-5",
 		AuthJSON: `{"setup_token":"fake"}`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := st.ReplaceDevToolConfig(t.Context(), store.DevToolConfig{
+		KeyID: keyID, ClaudeAccountID: claude.ID, CatalogModelIDs: []int64{catalog.ID},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -271,16 +277,17 @@ func TestCursorProjectsNoModels(t *testing.T) {
 	if _, err := st.CreateModelSource(t.Context(), catalog.ID, up.ID, catalog.Name, 10); err != nil {
 		t.Fatal(err)
 	}
-	cfg := store.DevToolConfig{
-		KeyID: keyID, AllowCursorSubscription: true, CatalogModelIDs: []int64{catalog.ID},
-	}
-	if _, _, err := st.ReplaceDevToolConfig(t.Context(), cfg); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.UpsertAgentAccount(t.Context(), store.NewAgentAccount{
+	cursor, err := st.UpsertAgentAccount(t.Context(), store.NewAgentAccount{
 		Provider: store.AgentProviderCursor, Label: "cursor", DefaultModel: "cursor-fake-model",
 		AuthJSON: `{"api_key":"fake"}`,
-	}); err != nil {
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := store.DevToolConfig{
+		KeyID: keyID, CursorAccountID: cursor.ID, CatalogModelIDs: []int64{catalog.ID},
+	}
+	if _, _, err := st.ReplaceDevToolConfig(t.Context(), cfg); err != nil {
 		t.Fatal(err)
 	}
 	r := &Resolver{Store: st, AgentModels: func(context.Context) (map[string]string, error) {
@@ -312,7 +319,7 @@ func TestCursorProjectsNoModels(t *testing.T) {
 	if slices.Contains(options[0].Tools, "cursor") {
 		t.Fatalf("目录模型不该宣称兼容 cursor：%+v", options[0])
 	}
-	cfg.AllowCodexSubscription, cfg.AllowGrokSubscription, cfg.AllowClaudeSubscription = true, true, true
+	cfg.CodexAccountID, cfg.GrokAccountID, cfg.ClaudeAccountID = 11, 12, 13
 	if got := AllowedSubscriptions(cfg); !slices.Equal(got, []string{"codex", "grok", "claude", "cursor"}) {
 		t.Fatalf("AllowedSubscriptions=%v", got)
 	}
@@ -333,14 +340,15 @@ func TestSelectedCatalogWinsSameNameAndUnavailableSelectionIsRetained(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := st.ReplaceDevToolConfig(t.Context(), store.DevToolConfig{
-		KeyID: keyID, AllowCodexSubscription: true, CatalogModelIDs: []int64{model.ID},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.UpsertAgentAccount(t.Context(), store.NewAgentAccount{
+	codex, err := st.UpsertAgentAccount(t.Context(), store.NewAgentAccount{
 		Provider: store.AgentProviderCodex, Label: "codex", AccountID: "test",
 		DefaultModel: model.Name, AuthJSON: `{"tokens":{"access_token":"fake"}}`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := st.ReplaceDevToolConfig(t.Context(), store.DevToolConfig{
+		KeyID: keyID, CodexAccountID: codex.ID, CatalogModelIDs: []int64{model.ID},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -390,22 +398,31 @@ func TestToolEnabledFollowsSubscriptionOrCatalogProjection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, tool := range []string{"codex", "grok", "claude", "cursor", "opencode"} {
+	for _, tool := range []string{"codex", "grok", "claude", "cursor", "opencode", "mcode"} {
 		if snap.ToolEnabled(tool) {
 			t.Errorf("空策略下 %s 不该开放", tool)
 		}
 	}
 
-	// 只勾 Grok 订阅（账号没连也算勾了）：只有 grok 开放。
-	if _, _, err := st.ReplaceDevToolConfig(t.Context(), store.DevToolConfig{KeyID: key, AllowGrokSubscription: true}); err != nil {
+	// 只钉 Grok 账号（账号停用也算钉了）：只有 grok 开放。
+	grok, err := st.UpsertAgentAccount(t.Context(), store.NewAgentAccount{
+		Provider: store.AgentProviderGrok, AuthJSON: `{"tokens":{"access_token":"fake"}}`, Status: store.AgentStatusDisabled,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := st.ReplaceDevToolConfig(t.Context(), store.DevToolConfig{KeyID: key, GrokAccountID: grok.ID}); err != nil {
 		t.Fatal(err)
 	}
 	if snap, err = r.Snapshot(t.Context(), key); err != nil {
 		t.Fatal(err)
 	}
 	if !snap.ToolEnabled("grok") || snap.ToolEnabled("codex") || snap.ToolEnabled("claude") || snap.ToolEnabled("cursor") {
-		t.Errorf("只勾 grok 订阅时的开放集 = codex:%v grok:%v claude:%v cursor:%v",
+		t.Errorf("只钉 grok 账号时的开放集 = codex:%v grok:%v claude:%v cursor:%v",
 			snap.ToolEnabled("codex"), snap.ToolEnabled("grok"), snap.ToolEnabled("claude"), snap.ToolEnabled("cursor"))
+	}
+	if sub := snap.Subscription("grok"); !sub.Configured || sub.Available || sub.AccountID != grok.ID {
+		t.Errorf("停用账号应是「已钉、当前不可用」: %+v", sub)
 	}
 
 	// 只勾目录模型：投影到哪个工具，哪个工具就开放；grok / cursor 永远不靠目录开放。
@@ -429,9 +446,6 @@ func TestToolEnabledFollowsSubscriptionOrCatalogProjection(t *testing.T) {
 func TestClaudeQuotaOAuthDoesNotMakeSubscriptionAvailable(t *testing.T) {
 	st := openPolicyStore(t)
 	key := createPolicyKey(t, st, "7")
-	if _, _, err := st.ReplaceDevToolConfig(t.Context(), store.DevToolConfig{KeyID: key, AllowClaudeSubscription: true}); err != nil {
-		t.Fatal(err)
-	}
 	r := &Resolver{Store: st, AgentModels: func(context.Context) (map[string]string, error) {
 		return map[string]string{"claude-test": "claude"}, nil
 	}}
@@ -442,7 +456,11 @@ func TestClaudeQuotaOAuthDoesNotMakeSubscriptionAvailable(t *testing.T) {
 		{`{"oauth":{"access_token":"fake-quota","refresh_token":"fake-refresh","expires_at":2000000000000,"scopes":["user:profile"]}}`, false},
 		{`{"setup_token":"fake-setup","quota_auth_expired":true,"oauth":{"access_token":"fake-quota","refresh_token":"fake-refresh","expires_at":2000000000000,"scopes":["user:profile"]}}`, true},
 	} {
-		if _, err := st.UpsertAgentAccount(t.Context(), store.NewAgentAccount{Provider: "claude", AuthJSON: tc.blob}); err != nil {
+		acct, err := st.UpsertAgentAccount(t.Context(), store.NewAgentAccount{Provider: "claude", AuthJSON: tc.blob})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := st.ReplaceDevToolConfig(t.Context(), store.DevToolConfig{KeyID: key, ClaudeAccountID: acct.ID}); err != nil {
 			t.Fatal(err)
 		}
 		snapshot, err := r.Snapshot(t.Context(), key)
@@ -452,5 +470,73 @@ func TestClaudeQuotaOAuthDoesNotMakeSubscriptionAvailable(t *testing.T) {
 		if !snapshot.Subscription("claude").Configured || snapshot.Subscription("claude").Available != tc.available || snapshot.HasModel("claude", "claude-test") != tc.available {
 			t.Fatal("Claude availability did not follow setup-token")
 		}
+	}
+}
+
+// TestPinnedAccountSelectsAmongMultiple：同一种订阅有多个账号时，每把 Key 只看
+// 自己钉死的那一个；删掉被钉的账号，那把 Key 的授权随之解开，别的 Key 不受影响。
+func TestPinnedAccountSelectsAmongMultiple(t *testing.T) {
+	st := openPolicyStore(t)
+	keyA := createPolicyKey(t, st, "8")
+	keyB := createPolicyKey(t, st, "9")
+	first, err := st.UpsertAgentAccount(t.Context(), store.NewAgentAccount{
+		Provider: store.AgentProviderCodex, Label: "甲", DefaultModel: "gpt-5.6-sol", AuthJSON: `{"tokens":{"access_token":"fake-a"}}`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := st.UpsertAgentAccount(t.Context(), store.NewAgentAccount{
+		Provider: store.AgentProviderCodex, Label: "乙", DefaultModel: "gpt-5.6-luna", AuthJSON: `{"tokens":{"access_token":"fake-b"}}`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, pin := range []struct {
+		key, account int64
+	}{{keyA, first.ID}, {keyB, second.ID}} {
+		if _, _, err := st.ReplaceDevToolConfig(t.Context(), store.DevToolConfig{KeyID: pin.key, CodexAccountID: pin.account}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r := &Resolver{Store: st, AgentModels: func(context.Context) (map[string]string, error) {
+		return map[string]string{"gpt-5.6-sol": store.AgentProviderCodex, "gpt-5.6-luna": store.AgentProviderCodex}, nil
+	}}
+	a, err := r.Snapshot(t.Context(), keyA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := r.Snapshot(t.Context(), keyB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sa, sb := a.Subscription("codex"), b.Subscription("codex"); !sa.Available || sa.AccountID != first.ID || sa.AccountLabel != "甲" ||
+		sa.DefaultModel != "gpt-5.6-sol" || !sb.Available || sb.AccountID != second.ID || sb.DefaultModel != "gpt-5.6-luna" {
+		t.Fatalf("pinned projection A=%+v B=%+v", sa, sb)
+	}
+	if a.Tools["codex"].DefaultModel != "gpt-5.6-sol" || b.Tools["codex"].DefaultModel != "gpt-5.6-luna" {
+		t.Fatalf("default models A=%+v B=%+v", a.Tools["codex"], b.Tools["codex"])
+	}
+	// 停用甲：A 仍「已授权、当前不可用」，B 照旧可用。
+	if err := st.SetAgentStatus(t.Context(), first.ID, store.AgentStatusDisabled); err != nil {
+		t.Fatal(err)
+	}
+	if a, err = r.Snapshot(t.Context(), keyA); err != nil {
+		t.Fatal(err)
+	}
+	if sa := a.Subscription("codex"); !sa.Configured || sa.Available || !a.ToolEnabled("codex") {
+		t.Fatalf("disabled pinned account: %+v", sa)
+	}
+	// 删掉甲：A 的钉解开，codex 对 A 关闭；B 不受影响。
+	if err := st.DeleteAgentAccount(t.Context(), first.ID); err != nil {
+		t.Fatal(err)
+	}
+	if a, err = r.Snapshot(t.Context(), keyA); err != nil {
+		t.Fatal(err)
+	}
+	if sa := a.Subscription("codex"); sa.Configured || sa.Available || sa.AccountID != 0 || a.ToolEnabled("codex") {
+		t.Fatalf("deleted pinned account still projected: %+v", sa)
+	}
+	if b, err = r.Snapshot(t.Context(), keyB); err != nil || !b.Subscription("codex").Available {
+		t.Fatalf("other key affected: %+v err=%v", b.Subscription("codex"), err)
 	}
 }

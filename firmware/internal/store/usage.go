@@ -45,7 +45,7 @@ const usageDimColumns = `bucket_hour, key_id, model_name, upstream_name, entry,
 // `列 = 列 + excluded.列`）。
 const usageCounterColumns = `requests, errors, rejected_requests, estimated_requests, unavailable_requests,
 	prompt_tokens, completion_tokens, cache_read_tokens, cache_write_tokens, total_tokens,
-	video_seconds, image_count,
+	video_seconds, image_count, video_count,
 	cost_micro, duration_ms_sum`
 
 // usageColumns 是全列列表，与 usageArgs / scanUsageRow 的顺序一一对应
@@ -66,10 +66,10 @@ const usageColumns = usageDimColumns + `,
 //     分成两段。这是有意的（账要还原当时的事实），不是失真；读数端若要合并，
 //     得由人来认这两个名字是同一个对象。
 //
-// 已知边界（iteration-9 Phase 1 记，留给后续迭代裁决）：KeyID 是裸值且
-// api_keys 的主键是不带 AUTOINCREMENT 的 INTEGER PRIMARY KEY——删掉表中 id
-// 最大的那把密钥后，下一把新签的密钥会**复用**同一个 id，从而继承前任在本表
-// 里的历史。见 usage_test.go 的 TestUsageIDReuseInheritsHistory。
+// KeyID 是裸值、不设外键，但 api_keys 的主键带 AUTOINCREMENT（0048）：物理删除
+// 一把密钥后它的 id 不会再发给下一把，本表里的历史行不会被新密钥认领；而有历史
+// 行的密钥根本不能物理删除，只能归档（DeleteAPIKey / ArchiveAPIKey）。见
+// usage_test.go 的 TestUsageKeyIDNeverReused。
 type UsageDelta struct {
 	// BucketHour 是 unix 秒 / 3600（UTC）。
 	BucketHour int64
@@ -103,10 +103,13 @@ type UsageDelta struct {
 
 	// VideoSeconds / ImageCount 是**非 token 形态**的计费量（0007 加列）：
 	// 秒是 MiniMax H3 的权威计价量（输出秒 + 输入秒，同一单价故合成一列），
-	// 张数是 H3 的输入参考图或 Seedream 的出图（一行只可能是其中一种，由
-	// kind + 上游账户名区分）。文本行两列恒为 0。
+	// 张数是 H3 的输入参考图、Seedream 的出图或 Grok Imagine 的出图（一行只
+	// 可能是其中一种，由 kind + 上游账户名区分）。VideoCount 是 Grok Imagine
+	// 视频提交的受理个数（0041 加列）：异步任务只看到受理，不按秒记。文本行
+	// 三列恒为 0。
 	VideoSeconds int64
 	ImageCount   int64
+	VideoCount   int64
 
 	// CostMicro 是按记账时点目录价折算的消费额，int64 微元（1 元 = 10⁶ 微元）。
 	// 冲正场景下可以为负，见文件头注释。
@@ -139,7 +142,7 @@ func usageArgs(d UsageDelta) []any {
 		d.KeyDisplay, d.Kind,
 		d.Requests, d.Errors, d.RejectedRequests, d.EstimatedRequests, d.UnavailableRequests,
 		d.PromptTokens, d.CompletionTokens, d.CacheReadTokens, d.CacheWriteTokens, d.TotalTokens,
-		d.VideoSeconds, d.ImageCount,
+		d.VideoSeconds, d.ImageCount, d.VideoCount,
 		d.CostMicro, d.DurationMsSum,
 	}
 }
@@ -151,7 +154,7 @@ func scanUsageRow(r rowScanner) (UsageRow, error) {
 		&d.KeyDisplay, &d.Kind,
 		&d.Requests, &d.Errors, &d.RejectedRequests, &d.EstimatedRequests, &d.UnavailableRequests,
 		&d.PromptTokens, &d.CompletionTokens, &d.CacheReadTokens, &d.CacheWriteTokens, &d.TotalTokens,
-		&d.VideoSeconds, &d.ImageCount,
+		&d.VideoSeconds, &d.ImageCount, &d.VideoCount,
 		&d.CostMicro, &d.DurationMsSum)
 	return d, err
 }
@@ -431,7 +434,7 @@ const MaxPricingMicro int64 = 1_000_000_000_000
 // validatePricing 校验 models.pricing 的**形态无关**不变量：空串（未定价）放行，
 // 否则必须是一个 JSON 对象，且每个值都是非负整数（int64 内）。
 //
-// 分工刻意如此：形态字段集（文本三价 / Seedance 两档 / H3 秒价档+附加 / 图片
+// 分工刻意如此：形态字段集（文本三价 / Seedance 两档 / H3 秒价档+附加 / 图像
 // 张价）按模型 kind 校验，那是管理层的事；本层只保证「凡是入库的 pricing，
 // 计价函数拿到的必然是一张扁平的非负整数表」——于是 internal/usage 的换算不必
 // 为脏数据准备防御分支，全程 int64 无浮点也就有了前提。

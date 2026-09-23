@@ -24,21 +24,28 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/llm-net/llm-gate/firmware/internal/agenthost"
 	"github.com/llm-net/llm-gate/firmware/internal/agentquota"
 	"github.com/llm-net/llm-gate/firmware/internal/auth"
 	"github.com/llm-net/llm-gate/firmware/internal/claudehelper"
 	"github.com/llm-net/llm-gate/firmware/internal/cloudflared"
+	"github.com/llm-net/llm-gate/firmware/internal/codexappserver"
 	"github.com/llm-net/llm-gate/firmware/internal/codexhelper"
 	"github.com/llm-net/llm-gate/firmware/internal/config"
 	"github.com/llm-net/llm-gate/firmware/internal/cursorhelper"
+	"github.com/llm-net/llm-gate/firmware/internal/devhost"
 	"github.com/llm-net/llm-gate/firmware/internal/egress"
 	"github.com/llm-net/llm-gate/firmware/internal/gatehelper"
 	"github.com/llm-net/llm-gate/firmware/internal/grokhelper"
+	"github.com/llm-net/llm-gate/firmware/internal/hostagent"
 	"github.com/llm-net/llm-gate/firmware/internal/landomain"
+	"github.com/llm-net/llm-gate/firmware/internal/mcodehelper"
+	"github.com/llm-net/llm-gate/firmware/internal/mediagen"
 	"github.com/llm-net/llm-gate/firmware/internal/mihomo"
 	"github.com/llm-net/llm-gate/firmware/internal/netconfig"
 	"github.com/llm-net/llm-gate/firmware/internal/opencodehelper"
 	"github.com/llm-net/llm-gate/firmware/internal/store"
+	"github.com/llm-net/llm-gate/firmware/internal/studio"
 	"github.com/llm-net/llm-gate/firmware/internal/sysinfo"
 	"github.com/llm-net/llm-gate/firmware/internal/tunnelctx"
 	"github.com/llm-net/llm-gate/firmware/internal/ui"
@@ -79,13 +86,14 @@ type Server struct {
 	apps AppsSource
 	// appsPass 是透传的进程内状态（并发闸 + 失败翻转记录），由 New 构造。
 	appsPass appsPassState
-	// grokCLI / codexCLI / claudeCLI / openCodeCLI / cursorCLI 是五种官方 CLI
+	// grokCLI / codexCLI / claudeCLI / openCodeCLI / cursorCLI / mcodeCLI 是六种官方 CLI
 	// 安装物的白名单透传（无会话公共 GET|HEAD，分别见各 helper 的 cli.go）。
 	// 由 New 构造。
 	grokCLI     *grokhelper.CLIProxy
 	codexCLI    *codexhelper.CLIProxy
 	claudeCLI   *claudehelper.CLIProxy
 	openCodeCLI *opencodehelper.CLIProxy
+	mcodeCLI    *mcodehelper.CLIProxy
 	cursorCLI   *cursorhelper.CLIProxy
 	// catalogAuto 是数据升级自动检查的进程内状态（上次检查/上次更新的时刻、
 	// 与手动「立即更新」共用的单飞锁，见 catalogsync.go）。零值可用。
@@ -123,7 +131,43 @@ type Server struct {
 	// proxyCore 是内置代理内核管理器（*mihomo.Manager，装配后经 SetProxyCore 注入）。nil =
 	// 内核端点答 503 proxy_core_unavailable（测试路径；真实 gatewayd 恒注入，见 proxycore.go）。
 	proxyCore *mihomo.Manager
+	// codexAppServer 是 Codex App Server 组件管理器（*codexappserver.Manager，装配后经
+	// SetCodexAppServer 注入）。nil = 端点答 503 codex_app_server_unavailable（测试路径）。
+	codexAppServer *codexappserver.Manager
+	// hosts 是「智能体 → 主机/SoC」的纳管管理器（*agenthost.Manager，装配后经
+	// SetAgentHosts 注入）。nil = 相关端点答 503 agent_hosts_unavailable（测试路径；
+	// 真实 gatewayd 恒注入，见 agenthosts.go）。
+	hosts *agenthost.Manager
+	// hostAgent 是 Agent远控（*hostagent.Manager，装配后经 SetHostAgent 注入）。nil =
+	// 相关端点答 503 agent_unavailable，组件设置读数报「未接入」（测试路径）。
+	hostAgent *hostagent.Manager
+	// devHosts 是主机上守护进程 devd的管理器（*devhost.Manager，装配后经 SetDevHosts
+	// 注入）。nil = 相关端点答 503 dev_hosts_unavailable、读数不带 devd（测试路径）。
+	devHosts *devhost.Manager
+	// media 是媒体生成的任务内核（internal/mediagen）：管理面在装配时建它，数据面经
+	// MediaJobs 拿到同一份给凭 Key 自证的端点用，创作工作空间也用这一份。
+	media    *mediagen.Service
+	apiDebug APIDebugGateway
+	// studio 是创作工作空间管理器（*studio.Manager，装配后经 SetStudio 注入）。nil = 相关
+	// 端点答 503 studio_unavailable、创作工作空间不能创建（测试路径）。
+	studio *studio.Manager
 }
+
+// MediaGateway 是数据面给媒体生成提供的两样东西（生产是 gateway.Server）：生成后端——与开发
+// 工具、厂商协议面同一套凭据刷新、选路与出站路径——和受理时过的准入闸。
+type MediaGateway interface {
+	MediaBackends() []mediagen.Backend
+	mediagen.Admitter
+}
+
+// SetMediaGateway 注册生成后端与准入闸（装配期一次性）。
+func (s *Server) SetMediaGateway(g MediaGateway) {
+	s.media.SetAdmitter(g)
+	s.media.SetBackends(g.MediaBackends()...)
+}
+
+// MediaJobs 交出媒体生成的任务内核，供数据面的 /gate-helper/v1/media 端点与创作工作空间共用。
+func (s *Server) MediaJobs() *mediagen.Service { return s.media }
 
 // Handler 是 Server.Handler() 装配出的根 handler：除了服务请求，还把管理面的路由
 // 注册表（每条路由的 Tunnel 暴露档位）交给网关生成公网 allowlist。
@@ -166,10 +210,15 @@ func New(cfg *config.Config, logger *slog.Logger, st *store.Store, authSvc *auth
 		codexCLI:       codexhelper.NewCLIProxy(logger.With("srv", "admin"), codexhelper.WithEgress(router)),
 		claudeCLI:      claudehelper.NewCLIProxy(logger.With("srv", "admin"), claudehelper.WithEgress(router)),
 		openCodeCLI:    opencodehelper.NewCLIProxy(logger.With("srv", "admin"), opencodehelper.WithEgress(router)),
+		mcodeCLI:       mcodehelper.NewCLIProxy(logger.With("srv", "admin"), mcodehelper.WithEgress(router)),
 		cursorCLI:      cursorhelper.NewCLIProxy(logger.With("srv", "admin"), cursorhelper.WithEgress(router)),
 		egress:         eg,
 	}
 	s.agents.egress = router
+	// 生成结果取回复用管理面的上游客户端（同一套出站策略与分层超时），文件存
+	// 数据目录 preview/（DataDir 为空的窄测试进程不落盘）。订阅授权按开发工具策略快照解析。
+	s.media = mediagen.New(st, s.log, s.upstreamClient, cfg.DataDir)
+	s.media.SetEntitlements(s.mediaEntitlements)
 	return s
 }
 
@@ -204,6 +253,9 @@ func (s *Server) SetOpenCodeCLIArtifactBases(api, releases string) {
 		s.openCodeCLI.SetBases(api, releases)
 	}
 }
+
+// SetMCodeCLIArtifactBase replaces the official installer origin in tests.
+func (s *Server) SetMCodeCLIArtifactBase(base string) { s.mcodeCLI.SetBase(base) }
 
 // SetCursorCLIArtifactBases 把官方 Cursor CLI 安装脚本与整树归档来源换成
 // 测试桩。生产不该调用。
@@ -244,6 +296,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /admin/v1/keys", tunnelctx.Admin, s.handleCreateKey)
 	mux.HandleFunc("PATCH /admin/v1/keys/{id}", tunnelctx.Admin, s.handlePatchKey)
 	mux.HandleFunc("DELETE /admin/v1/keys/{id}", tunnelctx.Admin, s.handleDeleteKey)
+	mux.HandleFunc("POST /admin/v1/keys/{id}/archive", tunnelctx.Admin, s.handleArchiveKey)
 	mux.HandleFunc("POST /admin/v1/keys/{id}/plaintext", tunnelctx.LANOnly, s.handleRevealKey)
 	mux.HandleFunc("POST /admin/v1/keys/{id}/metered-allowance", tunnelctx.Admin, s.handleAdjustKeyMeteredAllowance)
 	mux.HandleFunc("GET /admin/v1/keys/{id}/dev-tools", tunnelctx.Admin, s.handleGetKeyDevTools)
@@ -257,6 +310,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /admin/v1/upstreams", tunnelctx.Admin, s.handleListUpstreams)
 	mux.HandleFunc("GET /admin/v1/upstream-platforms", tunnelctx.Admin, s.handleListUpstreamPlatforms)
 	mux.HandleFunc("POST /admin/v1/upstreams", tunnelctx.Admin, s.handleCreateUpstream)
+	mux.HandleFunc("POST /admin/v1/upstreams/test", tunnelctx.Admin, s.handleTestUpstreamProtocol)
 	mux.HandleFunc("PATCH /admin/v1/upstreams/{id}", tunnelctx.Admin, s.handlePatchUpstream)
 	mux.HandleFunc("DELETE /admin/v1/upstreams/{id}", tunnelctx.Admin, s.handleDeleteUpstream)
 	// 上游余额查询（特化平台能力，2026-08-09）：向平台余额 API 发一次只读
@@ -317,6 +371,17 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /admin/v1/system/components/mihomo/rollback", tunnelctx.LANOnly, s.handleMihomoRollback)
 	mux.HandleFunc("DELETE /admin/v1/system/components/mihomo/staged", tunnelctx.LANOnly, s.handleMihomoDiscard)
 	mux.HandleFunc("DELETE /admin/v1/system/components/mihomo", tunnelctx.LANOnly, s.handleMihomoRemove)
+	// Codex App Server 组件（codexappserver.go）：槽位安装/升级/回退/卸载，加一次性的握手自检；没有启停。
+	mux.HandleFunc("GET /admin/v1/system/components/codex-app-server", tunnelctx.Admin, s.handleCodexAppServerStatus)
+	mux.HandleFunc("POST /admin/v1/system/components/codex-app-server/check", tunnelctx.LANOnly, s.handleCodexAppServerCheck)
+	mux.HandleFunc("POST /admin/v1/system/components/codex-app-server/manifest", tunnelctx.LANOnly, s.handleCodexAppServerManifest)
+	mux.HandleFunc("POST /admin/v1/system/components/codex-app-server/download", tunnelctx.LANOnly, s.handleCodexAppServerDownload)
+	mux.HandleFunc("POST "+CodexAppServerUploadPath, tunnelctx.LANOnly, s.handleCodexAppServerUpload)
+	mux.HandleFunc("POST /admin/v1/system/components/codex-app-server/install", tunnelctx.LANOnly, s.handleCodexAppServerInstall)
+	mux.HandleFunc("POST /admin/v1/system/components/codex-app-server/rollback", tunnelctx.LANOnly, s.handleCodexAppServerRollback)
+	mux.HandleFunc("POST /admin/v1/system/components/codex-app-server/selfcheck", tunnelctx.LANOnly, s.handleCodexAppServerSelfCheck)
+	mux.HandleFunc("DELETE /admin/v1/system/components/codex-app-server/staged", tunnelctx.LANOnly, s.handleCodexAppServerDiscard)
+	mux.HandleFunc("DELETE /admin/v1/system/components/codex-app-server", tunnelctx.LANOnly, s.handleCodexAppServerRemove)
 	// 内网域名（landomain.go）：提供方式选择、LLM Gate官网账号关联、域名申领、证书
 	// 签发/续期与释放。改的是这台设备对外的名字与监听，写入端点恒 LANOnly。
 	mux.HandleFunc("GET /admin/v1/system/lan-domain", tunnelctx.Admin, s.handleLanDomainStatus)
@@ -385,6 +450,119 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /admin/v1/agent-accounts/{id}", tunnelctx.Admin, s.handleDeleteAgentAccount)
 	mux.HandleFunc("POST /admin/v1/agent-accounts/{id}/refresh", tunnelctx.Admin, s.handleRefreshAgentAccount)
 	mux.HandleFunc("POST /admin/v1/agent-accounts/{id}/quota/sync", tunnelctx.Admin, s.handleSyncAgentQuota)
+	// 智能体——主机/SoC（agenthosts.go）：设备访问证书的生成/更新，以及用用户名口令
+	// 把公钥装到主机上、补发、检查与解除纳管。写端点恒 LANOnly——它们要么带着主机
+	// 口令，要么改的是另一台机器上的 authorized_keys 与 sudoers。
+	mux.HandleFunc("GET /admin/v1/agent-hosts", tunnelctx.Admin, s.handleAgentHosts)
+	mux.HandleFunc("POST /admin/v1/agent-hosts/certificate", tunnelctx.LANOnly, s.handleAgentCertGenerate)
+	mux.HandleFunc("POST /admin/v1/agent-hosts/certificate/rotate", tunnelctx.LANOnly, s.handleAgentCertRotate)
+	mux.HandleFunc("POST /admin/v1/agent-hosts", tunnelctx.LANOnly, s.handleAddAgentHost)
+	mux.HandleFunc("POST /admin/v1/agent-hosts/{id}/enroll", tunnelctx.LANOnly, s.handleEnrollAgentHost)
+	mux.HandleFunc("POST /admin/v1/agent-hosts/{id}/push", tunnelctx.LANOnly, s.handlePushAgentHost)
+	mux.HandleFunc("POST /admin/v1/agent-hosts/{id}/check", tunnelctx.LANOnly, s.handleCheckAgentHost)
+	mux.HandleFunc("PATCH /admin/v1/agent-hosts/{id}", tunnelctx.LANOnly, s.handlePatchAgentHost)
+	mux.HandleFunc("DELETE /admin/v1/agent-hosts/{id}", tunnelctx.LANOnly, s.handleDeleteAgentHost)
+	// Agent远控（hostagent.go / hostagentoptions.go）：每台主机的「Agent远控」页——多个对话，
+	// 各自的指令队列、陪等；主机档案与操作日志。写端点恒 LANOnly（它们让智能体在另一台
+	// 机器上执行命令）。
+	mux.HandleFunc("GET /admin/v1/agent-hosts/{id}/agent", tunnelctx.Admin, s.handleAgentPage)
+	mux.HandleFunc("GET /admin/v1/agent-hosts/{id}/agent/options", tunnelctx.Admin, s.handleAgentOptions)
+	mux.HandleFunc("POST /admin/v1/agent-hosts/{id}/agent/chats", tunnelctx.LANOnly, s.handleAgentChatCreate)
+	mux.HandleFunc("GET /admin/v1/agent-hosts/{id}/agent/chats/{chat_id}", tunnelctx.Admin, s.handleAgentChat)
+	mux.HandleFunc("DELETE /admin/v1/agent-hosts/{id}/agent/chats/{chat_id}", tunnelctx.LANOnly, s.handleAgentChatDelete)
+	mux.HandleFunc("GET /admin/v1/agent-hosts/{id}/agent/chats/{chat_id}/wait", tunnelctx.Admin, s.handleAgentWait)
+	mux.HandleFunc("POST /admin/v1/agent-hosts/{id}/agent/chats/{chat_id}/runs", tunnelctx.LANOnly, s.handleAgentSubmit)
+	mux.HandleFunc("DELETE /admin/v1/agent-hosts/{id}/agent/chats/{chat_id}/runs/{run_id}", tunnelctx.LANOnly, s.handleAgentCancel)
+	mux.HandleFunc("POST /admin/v1/agent-hosts/{id}/agent/chats/{chat_id}/stop", tunnelctx.LANOnly, s.handleAgentStop)
+	mux.HandleFunc("GET /admin/v1/agent-hosts/{id}/agent/chats/{chat_id}/events", tunnelctx.Admin, s.handleAgentChatEvents)
+	mux.HandleFunc("GET /admin/v1/agent-hosts/{id}/agent/events", tunnelctx.Admin, s.handleAgentEvents)
+	mux.HandleFunc("GET /admin/v1/agent-hosts/{id}/agent/profile", tunnelctx.Admin, s.handleAgentProfile)
+	mux.HandleFunc("PUT /admin/v1/agent-hosts/{id}/agent/profile", tunnelctx.LANOnly, s.handleAgentProfileUpdate)
+	// Agent远控页的「文件」页签（hostagentfiles.go）：经 SSH 只读浏览主机；读的是另一台机器上
+	// 的任意文件，恒 LANOnly。
+	mux.HandleFunc("GET /admin/v1/agent-hosts/{id}/agent/files", tunnelctx.LANOnly, s.handleAgentFilesList)
+	mux.HandleFunc("GET /admin/v1/agent-hosts/{id}/agent/files/preview", tunnelctx.LANOnly, s.handleAgentFilesPreview)
+	mux.HandleFunc("GET /admin/v1/agent-hosts/{id}/agent/files/raw", tunnelctx.LANOnly, s.handleAgentFilesRaw)
+	// 守护进程 devd 与透传（devconsole.go）：给主机装 llmgate-devd、经 SSH 转发通道
+	// 做devd（文件 / Git / 终端）透传。恒 LANOnly——可能带 sudo 口令，或直达另一台
+	// 机器的文件与终端。读数并在主机行里。
+	mux.HandleFunc("POST /admin/v1/agent-hosts/{id}/devd/install", tunnelctx.LANOnly, s.handleDevdInstall)
+	mux.HandleFunc("POST /admin/v1/agent-hosts/{id}/devd/check", tunnelctx.LANOnly, s.handleDevdCheck)
+	mux.HandleFunc("DELETE /admin/v1/agent-hosts/{id}/devd", tunnelctx.LANOnly, s.handleDevdUninstall)
+	// 凭证管理（credentials.go）：交给智能体使用的第三方凭证（git 托管站点的账号 + 令牌）。
+	// 读数只回公开面、Admin 档；写端点带令牌明文，恒 LANOnly。
+	mux.HandleFunc("GET /admin/v1/credentials", tunnelctx.Admin, s.handleCredentials)
+	mux.HandleFunc("POST /admin/v1/credentials", tunnelctx.LANOnly, s.handleCreateCredential)
+	mux.HandleFunc("PATCH /admin/v1/credentials/{id}", tunnelctx.LANOnly, s.handlePatchCredential)
+	mux.HandleFunc("DELETE /admin/v1/credentials/{id}", tunnelctx.LANOnly, s.handleDeleteCredential)
+	// 工作空间（workspaces.go）：工作节点上的目录（可选从仓库克隆）；创建 / 删除要连主机，恒 LANOnly。
+	mux.HandleFunc("GET /admin/v1/workspaces", tunnelctx.Admin, s.handleWorkspaces)
+	mux.HandleFunc("POST /admin/v1/workspaces", tunnelctx.LANOnly, s.handleCreateWorkspace)
+	mux.HandleFunc("GET /admin/v1/workspaces/{id}", tunnelctx.Admin, s.handleGetWorkspace)
+	mux.HandleFunc("DELETE /admin/v1/workspaces/{id}", tunnelctx.LANOnly, s.handleDeleteWorkspace)
+	// 创作工作空间（studio.go）：三个子目录里的文件与智能体对话。文件与对话的写端点恒 LANOnly。
+	mux.HandleFunc("GET /admin/v1/workspaces/{id}/files", tunnelctx.Admin, s.handleStudioFiles)
+	mux.HandleFunc("POST /admin/v1/workspaces/{id}/files", tunnelctx.LANOnly, s.handleStudioUpload)
+	mux.HandleFunc("GET /admin/v1/workspaces/{id}/files/{dir}/{name}", tunnelctx.Admin, s.handleStudioFile)
+	mux.HandleFunc("GET /admin/v1/workspaces/{id}/files/{dir}/{name}/download", tunnelctx.Admin, s.handleStudioFileDownload)
+	mux.HandleFunc("GET /admin/v1/workspaces/{id}/files/{dir}/{name}/thumb", tunnelctx.Admin, s.handleStudioThumb)
+	mux.HandleFunc("POST /admin/v1/workspaces/{id}/files/{dir}/{name}/thumb", tunnelctx.LANOnly, s.handleStudioThumbUpload)
+	mux.HandleFunc("PATCH /admin/v1/workspaces/{id}/files/{dir}/{name}", tunnelctx.LANOnly, s.handleStudioFileRename)
+	mux.HandleFunc("DELETE /admin/v1/workspaces/{id}/files/{dir}/{name}", tunnelctx.LANOnly, s.handleStudioFileDelete)
+	mux.HandleFunc("GET /admin/v1/workspaces/{id}/agent", tunnelctx.Admin, s.handleStudioPage)
+	mux.HandleFunc("GET /admin/v1/workspaces/{id}/agent/options", tunnelctx.Admin, s.handleStudioOptions)
+	mux.HandleFunc("GET /admin/v1/workspaces/{id}/agent/media", tunnelctx.Admin, s.handleStudioMedia)
+	mux.HandleFunc("PUT /admin/v1/workspaces/{id}/agent/media", tunnelctx.LANOnly, s.handleStudioMediaUpdate)
+	mux.HandleFunc("POST /admin/v1/workspaces/{id}/agent/chats", tunnelctx.LANOnly, s.handleStudioChatCreate)
+	mux.HandleFunc("GET /admin/v1/workspaces/{id}/agent/chats/{chat_id}", tunnelctx.Admin, s.handleStudioChat)
+	mux.HandleFunc("DELETE /admin/v1/workspaces/{id}/agent/chats/{chat_id}", tunnelctx.LANOnly, s.handleStudioChatDelete)
+	mux.HandleFunc("GET /admin/v1/workspaces/{id}/agent/chats/{chat_id}/wait", tunnelctx.Admin, s.handleStudioWait)
+	mux.HandleFunc("POST /admin/v1/workspaces/{id}/agent/chats/{chat_id}/runs", tunnelctx.LANOnly, s.handleStudioSubmit)
+	mux.HandleFunc("DELETE /admin/v1/workspaces/{id}/agent/chats/{chat_id}/runs/{run_id}", tunnelctx.LANOnly, s.handleStudioCancel)
+	mux.HandleFunc("POST /admin/v1/workspaces/{id}/agent/chats/{chat_id}/stop", tunnelctx.LANOnly, s.handleStudioStop)
+	mux.HandleFunc("POST /admin/v1/workspaces/{id}/agent/chats/{chat_id}/archive", tunnelctx.LANOnly, s.handleStudioChatArchive)
+	mux.HandleFunc("GET /admin/v1/workspaces/{id}/agent/chats/{chat_id}/events", tunnelctx.Admin, s.handleStudioChatEvents)
+	// 工作节点的工具配置（hosttools.go）：读数也要开 SSH 连接，同样只在内网。
+	mux.HandleFunc("GET /admin/v1/agent-hosts/{id}/tools", tunnelctx.LANOnly, s.handleHostTools)
+	mux.HandleFunc("POST /admin/v1/agent-hosts/{id}/tools/git/install", tunnelctx.LANOnly, s.handleHostPackageInstall("git", EventHostGitInstall))
+	mux.HandleFunc("POST /admin/v1/agent-hosts/{id}/tools/tmux/install", tunnelctx.LANOnly, s.handleHostPackageInstall("tmux", EventHostTmuxInstall))
+	mux.HandleFunc("POST /admin/v1/agent-hosts/{id}/tools/studio/{tool}/install", tunnelctx.LANOnly, s.handleHostStudioToolInstall)
+	mux.HandleFunc("POST /admin/v1/agent-hosts/{id}/tools/gate/install", tunnelctx.LANOnly, s.handleHostGateInstall)
+	mux.HandleFunc("POST /admin/v1/agent-hosts/{id}/tools/gate/update", tunnelctx.LANOnly, s.handleHostGateUpdate)
+	mux.HandleFunc("POST /admin/v1/agent-hosts/{id}/tools/gate/config", tunnelctx.LANOnly, s.handleHostGateConfig)
+	mux.HandleFunc("POST /admin/v1/agent-hosts/{id}/tools/gate/uninstall", tunnelctx.LANOnly, s.handleHostGateUninstall)
+	mux.HandleFunc("POST /admin/v1/agent-hosts/{id}/tools/dev/{tool}/{action}", tunnelctx.LANOnly, s.handleHostDevTool)
+	mux.HandleFunc("POST /admin/v1/agent-hosts/{id}/tools/jobs", tunnelctx.LANOnly, s.handleHostDevToolBatch)
+	mux.HandleFunc("GET /admin/v1/agent-hosts/{id}/tools/jobs", tunnelctx.LANOnly, s.handleHostDevToolJobs)
+	mux.HandleFunc("GET /admin/v1/agent-hosts/{id}/tools/jobs/wait", tunnelctx.LANOnly, s.handleHostDevToolJobsWait)
+	mux.HandleFunc("DELETE /admin/v1/agent-hosts/{id}/tools/jobs", tunnelctx.LANOnly, s.handleHostDevToolJobsClear)
+	mux.HandleFunc("DELETE /admin/v1/agent-hosts/{id}/tools/jobs/{job}", tunnelctx.LANOnly, s.handleHostDevToolJobCancel)
+	// 模型服务节点（modelservice.go）：守护进程 modeld 的透传，恒 LANOnly（读数也要开 SSH 连接）。
+	mux.HandleFunc("GET /admin/v1/agent-hosts/{id}/model", tunnelctx.LANOnly, s.handleModelSummary)
+	mux.HandleFunc("POST /admin/v1/agent-hosts/{id}/model/engines/sessions", tunnelctx.LANOnly, s.handleModelEngineSession)
+	mux.HandleFunc("GET /admin/v1/agent-hosts/{id}/model/{path...}", tunnelctx.LANOnly, s.handleModelProxy)
+	mux.HandleFunc("POST /admin/v1/agent-hosts/{id}/model/{path...}", tunnelctx.LANOnly, s.handleModelProxy)
+	mux.HandleFunc("PUT /admin/v1/agent-hosts/{id}/model/{path...}", tunnelctx.LANOnly, s.handleModelProxy)
+	mux.HandleFunc("DELETE /admin/v1/agent-hosts/{id}/model/{path...}", tunnelctx.LANOnly, s.handleModelProxy)
+	mux.HandleFunc("GET /admin/v1/agent-hosts/{id}/terminal", tunnelctx.LANOnly, s.handleDevTerminal)
+	mux.HandleFunc("GET /admin/v1/agent-hosts/{id}/console/{path...}", tunnelctx.LANOnly, s.handleDevConsole)
+	mux.HandleFunc("POST /admin/v1/agent-hosts/{id}/console/{path...}", tunnelctx.LANOnly, s.handleDevConsole)
+	mux.HandleFunc("PUT /admin/v1/agent-hosts/{id}/console/{path...}", tunnelctx.LANOnly, s.handleDevConsole)
+	mux.HandleFunc("DELETE /admin/v1/agent-hosts/{id}/console/{path...}", tunnelctx.LANOnly, s.handleDevConsole)
+	mux.HandleFunc("GET /admin/v1/api-debug/models", tunnelctx.Admin, s.handleAPIDebugModels)
+	mux.HandleFunc("POST /admin/v1/api-debug/{id}", tunnelctx.Admin, s.handleAPIDebug)
+	mux.HandleFunc("GET /admin/v1/media/models", tunnelctx.Admin, s.handleMediaModels)
+	mux.HandleFunc("GET /admin/v1/media/jobs", tunnelctx.Admin, s.handleMediaJobs)
+	mux.HandleFunc("POST /admin/v1/media/jobs", tunnelctx.Admin, s.handleCreateMediaJob)
+	mux.HandleFunc("DELETE /admin/v1/media/jobs", tunnelctx.Admin, s.handleClearMediaJobs)
+	mux.HandleFunc("GET /admin/v1/media/jobs/{id}", tunnelctx.Admin, s.handleGetMediaJob)
+	mux.HandleFunc("DELETE /admin/v1/media/jobs/{id}", tunnelctx.Admin, s.handleDeleteMediaJob)
+	mux.HandleFunc("POST /admin/v1/media/jobs/{id}/refresh", tunnelctx.Admin, s.handleRefreshMediaJob)
+	mux.HandleFunc("POST /admin/v1/media/jobs/{id}/wait", tunnelctx.Admin, s.handleWaitMediaJob)
+	mux.HandleFunc("GET /admin/v1/media/jobs/{id}/download", tunnelctx.Admin, s.handleDownloadMediaJob)
+	mux.HandleFunc("GET /admin/v1/media/jobs/{id}/media", tunnelctx.Admin, s.handleMediaJobMedia)
+	mux.HandleFunc("GET /admin/v1/media/jobs/{id}/thumb", tunnelctx.Admin, s.handleMediaJobThumb)
+	mux.HandleFunc("POST /admin/v1/media/jobs/{id}/thumb", tunnelctx.Admin, s.handleUploadMediaJobThumb)
 	// Agent 订阅模型没有管理端点（2026-08-15）：它们由模型目录数据定义、连上
 	// 订阅即由收敛器建行（agentmodels.go），管理台只读。
 	// 界面入口：/ 精确匹配引到 /ui/，/admin/ 是旧管理台书签的客户端跳转页
@@ -418,6 +596,9 @@ func (s *Server) Handler() http.Handler {
 	// Claude Code release 指针、manifest 与八个平台二进制白名单透传。
 	mux.Handle("GET /claude-helper/cli/{path...}", tunnelctx.API, s.claudeCLI)
 	mux.Handle("HEAD /claude-helper/cli/{path...}", tunnelctx.API, s.claudeCLI)
+	// MiniMax Code 官方安装器与固定 Node.js 运行时白名单透传。
+	mux.Handle("GET /mcode-helper/cli/{path...}", tunnelctx.API, s.mcodeCLI)
+	mux.Handle("HEAD /mcode-helper/cli/{path...}", tunnelctx.API, s.mcodeCLI)
 	// OpenCode 稳定 release 元数据与六平台 CLI 归档白名单透传。
 	mux.Handle("GET /opencode-helper/cli/{path...}", tunnelctx.API, s.openCodeCLI)
 	mux.Handle("HEAD /opencode-helper/cli/{path...}", tunnelctx.API, s.openCodeCLI)

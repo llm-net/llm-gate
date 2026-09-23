@@ -211,9 +211,9 @@ func TestCostVideoSeedance(t *testing.T) {
 	}
 }
 
-// MiniMax H3：(输出秒 + 输入秒) × 输出档秒价 + 超 5 张的图片附加费。
+// MiniMax H3：(输出秒 + 输入秒) × 输出档秒价 + 超 5 张的图像附加费。
 func TestCostVideoMinimax(t *testing.T) {
-	// 2K 0.80 元/秒、768P 0.50 元/秒、超额图片 0.20 元/张。
+	// 2K 0.80 元/秒、768P 0.50 元/秒、超额图像 0.20 元/张。
 	const pricing = `{"minimax_video_sec_2k":800000,"minimax_video_sec_768p":500000,"minimax_video_image_extra":200000}`
 
 	tests := []struct {
@@ -238,7 +238,7 @@ func TestCostVideoMinimax(t *testing.T) {
 		resolution: "768P",
 		want:       6 * 500_000,
 	}, {
-		name:       "输入图片 5 张以内免费",
+		name:       "输入图像 5 张以内免费",
 		usageJSON:  `{"input_seconds":0,"output_seconds":5,"input_image_count":5}`,
 		resolution: "768P",
 		want:       5 * 500_000,
@@ -411,7 +411,7 @@ func TestCostUnknownShapes(t *testing.T) {
 			Kind: store.ModelKindVideo, Entry: EntryVideo, UpstreamType: config.UpstreamMock,
 			TaskUsage: TaskUsage{CompletionTokens: 1_000_000},
 		}},
-		{"图片形态但上游是 minimax（本迭代不服务）", Measure{
+		{"图像形态但上游是 minimax（本迭代不服务）", Measure{
 			Kind: store.ModelKindImage, Entry: EntryImage, UpstreamType: config.UpstreamMinimax,
 			TaskUsage: TaskUsage{GeneratedImages: 10},
 		}},
@@ -633,8 +633,8 @@ func TestParseTaskUsageRequiresShapeMatch(t *testing.T) {
 		{"ark 视频遇 minimax 原文 → 不可得", minimaxRaw, store.ModelKindVideo, config.UpstreamArk, false},
 		{"minimax 视频遇 minimax 原文", minimaxRaw, store.ModelKindVideo, config.UpstreamMinimax, true},
 		{"minimax 视频遇 ark 原文 → 不可得", arkRaw, store.ModelKindVideo, config.UpstreamMinimax, false},
-		{"ark 图片遇出图原文", imageRaw, store.ModelKindImage, config.UpstreamArk, true},
-		{"ark 图片遇视频原文 → 不可得", arkRaw, store.ModelKindImage, config.UpstreamArk, false},
+		{"ark 图像遇出图原文", imageRaw, store.ModelKindImage, config.UpstreamArk, true},
+		{"ark 图像遇视频原文 → 不可得", arkRaw, store.ModelKindImage, config.UpstreamArk, false},
 		{"上游行已删（族未知）→ 不可得", arkRaw, store.ModelKindVideo, "", false},
 		{"本形态不由任务 usage 计价（文本）→ 不可得", arkRaw, store.ModelKindText, config.UpstreamArk, false},
 	}

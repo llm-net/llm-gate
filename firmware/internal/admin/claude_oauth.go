@@ -2,7 +2,6 @@ package admin
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"sync"
 	"time"
@@ -63,12 +62,16 @@ func (s *Server) handleClaudeLoginCallback(w http.ResponseWriter, r *http.Reques
 		Code         string `json:"code"`
 		Label        string `json:"label"`
 		DefaultModel string `json:"default_model"`
+		AccountID    int64  `json:"account_id"`
 	}
 	if !decodeJSON(w, r, &req) {
 		return
 	}
 	label, model, ok := s.readAgentProfile(w, req.Label, req.DefaultModel)
 	if !ok {
+		return
+	}
+	if !s.checkAgentTarget(w, r, store.AgentProviderClaude, req.AccountID) {
 		return
 	}
 	a := &s.claudeLogin
@@ -107,7 +110,7 @@ func (s *Server) handleClaudeLoginCallback(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	a.clearLocked()
-	s.saveAgentAccount(w, r, store.AgentProviderClaude, "", blob, label, model, "login")
+	s.saveAgentAccount(w, r, req.AccountID, store.AgentProviderClaude, "", blob, label, model, "login")
 }
 
 // Only the non-secret credential kind reaches the UI, never tokens or scopes.
@@ -116,8 +119,8 @@ func (s *Server) agentAccountJSON(ctx context.Context, a *store.AgentAccount) ag
 	if a.Provider != store.AgentProviderClaude {
 		return out
 	}
-	current, blob, err := s.st.GetAgentCredential(ctx, a.Provider)
-	if err != nil || current.ID != a.ID || !current.UpdatedAt.Equal(a.UpdatedAt) {
+	current, blob, err := s.st.GetAgentCredential(ctx, a.ID)
+	if err != nil || !current.UpdatedAt.Equal(a.UpdatedAt) {
 		return out
 	}
 	cred, err := claudeauth.Parse(blob)
@@ -137,20 +140,17 @@ func (s *Server) agentAccountJSON(ctx context.Context, a *store.AgentAccount) ag
 	return out
 }
 
-// Caller holds claudeLogin.mu. Each submission replaces only its own component.
+// Caller holds claudeLogin.mu. in.ID == 0 creates a new Claude account row;
+// otherwise each submission replaces only its own component of that row.
 func (s *Server) saveClaudeCredential(ctx context.Context, in store.NewAgentAccount) (*store.AgentAccount, error) {
 	next, err := claudeauth.Parse(in.AuthJSON)
 	if err != nil {
 		return nil, err
 	}
-	current, _, err := s.st.GetAgentCredential(ctx, store.AgentProviderClaude)
-	if errors.Is(err, store.ErrNotFound) {
+	if in.ID == 0 {
 		return s.st.UpsertAgentAccount(ctx, in)
 	}
-	if err != nil {
-		return nil, err
-	}
-	return s.st.MutateAgentAuth(ctx, current.ID, store.AgentProviderClaude, false, func(a *store.AgentAccount, blob string) (string, error) {
+	return s.st.MutateAgentAuth(ctx, in.ID, store.AgentProviderClaude, false, func(a *store.AgentAccount, blob string) (string, error) {
 		cred, err := claudeauth.Parse(blob)
 		if err != nil {
 			return "", err

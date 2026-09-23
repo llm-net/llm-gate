@@ -1,6 +1,6 @@
-// API密钥页：签发、复制、分享、限额、按量额度、启停、删除，以及每把 Key 的两份
-// 授权——「可用订阅」（Agent 订阅四开关）与「可用模型」（调用范围 + 开发工具
-// 可见）。
+// API密钥页：签发、复制、分享、限额、按量额度、启停、归档、删除，以及每把 Key 的两份
+// 授权——「可用订阅」（四种 Agent 订阅各钉一个账号）与「可用模型」（调用范围 +
+// 开发工具可见）。
 //
 // 设备只有一个管理员，密钥因此没有「属主」这一维（用户概念退场前本页还带
 // 属主列与属主过滤，签发时还要先选一个人）。一台设备一串密钥，这一页就是它们
@@ -48,9 +48,11 @@ import {
   rpmValue,
   StatusBadge,
 } from "@/features/limits/limits";
+import { accountName } from "@/features/upstreams/agent-status";
 import { RowActionsMenu } from "@/features/upstreams/row-actions";
 import * as api from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
+import { cn } from "@/lib/cn";
 import { useConfirm } from "@/lib/confirm";
 import { fmtTime, keyDisplay } from "@/lib/format";
 import { t, tx } from "@/lib/i18n";
@@ -61,7 +63,75 @@ import { PageContainer, PageHeader, ResourceGate } from "./page-shell";
 // ---- 可用订阅对话框 ----
 
 // 这把 Key 能使用设备上的哪些 Agent 订阅（Codex / Grok Build / Claude Code /
-// Cursor）。目录模型层面的授权（调用范围与开发工具可见）在「可用模型」里配。
+// Cursor）：每种订阅从设备上已录入的账号里固定选一个，或不使用。同一种订阅有多个
+// 账号时，一把 Key 只能钉其中一个。目录模型层面的授权（调用范围与开发工具可见）
+// 在「可用模型」里配。
+// 账号在按钮上的附注：只标需要管理员留意的状态，正常态不标。
+function accountHint(a: api.AgentAccount): string {
+  if (a.status === "disabled") return t("已停用");
+  if (a.status === "auth_expired") return a.provider === "claude" || a.provider === "cursor" ? t("需重新连接") : t("需重新登录");
+  if (a.provider === "claude" && !a.setup_token_configured) return t("待配置 setup-token");
+  return "";
+}
+
+// 账号按钮上的状态灯：与「开发工具订阅」页 StatusPill 同一套三色——正常绿、需留意
+// 琥珀、已停用熄灭灰；灯旁恒有文字，颜色不单独承担语义。
+function accountDot(a: api.AgentAccount): string {
+  if (a.status === "disabled") return "bg-muted-foreground/40";
+  return accountHint(a) === "" ? "bg-signal-ok" : "bg-signal-alert";
+}
+
+// 一种订阅的账号选择组：「不使用」与各账号并排成一组按钮，一眼看全有哪些账号、
+// 各自什么状态、当前钉的是哪一个。已停用/失效的账号照常可选（选择保留是契约），
+// 只是按钮本身标出状态。
+function AccountChoice({
+  provider,
+  candidates,
+  chosen,
+  onChoose,
+}: {
+  provider: api.AgentProvider;
+  candidates: api.AgentAccount[];
+  chosen: number | null;
+  onChoose: (id: number | null) => void;
+}): React.ReactElement {
+  const base =
+    "inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-left text-sm transition-colors hover:bg-accent hover:text-accent-foreground";
+  const pressed = "border-primary bg-primary/10 text-foreground";
+  const idle = "text-muted-foreground";
+  return (
+    <div role="group" aria-labelledby={`sub-${provider}`} className="flex flex-wrap gap-1.5">
+      <button
+        type="button"
+        aria-pressed={chosen === null}
+        onClick={() => onChoose(null)}
+        className={cn(base, chosen === null ? pressed : idle)}
+      >
+        {t("不使用")}
+      </button>
+      {candidates.map((a) => {
+        const hint = accountHint(a);
+        const active = chosen === a.id;
+        return (
+          <button
+            key={a.id}
+            type="button"
+            aria-pressed={active}
+            onClick={() => onChoose(a.id)}
+            className={cn(base, active ? pressed : idle, a.status === "disabled" && !active && "opacity-70")}
+          >
+            <span aria-hidden="true" className={cn("size-1.5 shrink-0 rounded-full", accountDot(a))} />
+            <span className="min-w-0 truncate">{accountName(a)}</span>
+            {hint === "" ? null : (
+              <span className={cn("shrink-0 text-xs", a.status === "disabled" ? "text-muted-foreground" : "text-signal-alert")}>{hint}</span>
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function SubscriptionsDialog({
   target,
   onClose,
@@ -70,11 +140,12 @@ function SubscriptionsDialog({
   onClose: () => void;
 }) {
   const [data, setData] = useState<api.DevToolConfig | null>(null);
+  const [accounts, setAccounts] = useState<api.AgentAccount[]>([]);
   const [subscriptions, setSubscriptions] = useState<api.DevToolSubscriptionChoices>({
-    codex: false,
-    grok: false,
-    claude: false,
-    cursor: false,
+    codex: null,
+    grok: null,
+    claude: null,
+    cursor: null,
   });
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -84,10 +155,11 @@ function SubscriptionsDialog({
     let active = true;
     setData(null);
     setError(null);
-    api.getKeyDevTools(target.id).then(
-      (got) => {
+    Promise.all([api.getKeyDevTools(target.id), api.listAgentAccounts()]).then(
+      ([got, list]) => {
         if (!active) return;
         setData(got);
+        setAccounts(list.accounts);
         setSubscriptions(got.subscriptions);
       },
       (err: unknown) => {
@@ -99,10 +171,14 @@ function SubscriptionsDialog({
     };
   }, [target]);
 
+  // 选中账号此刻的状态：按本地账号列表即时读（切换选择时不必回读服务端）。
   function subscriptionState(provider: api.AgentProvider): string {
-    const state = data?.subscription_status.find((item) => item.provider === provider);
-    if (state?.available) return t("设备订阅当前可用");
-    return subscriptions[provider] ? t("已配置，当前不可用") : t("设备订阅当前不可用");
+    const chosen = subscriptions[provider];
+    if (chosen === null) return t("不使用该订阅");
+    const account = accounts.find((a) => a.id === chosen);
+    if (account === undefined) return t("所选账号已不存在，保存后将不再授权");
+    const hint = accountHint(account);
+    return hint === "" ? t("固定使用「{account}」，当前可用", { account: accountName(account) }) : t("固定使用「{account}」，当前不可用：{hint}", { account: accountName(account), hint });
   }
 
   function submit(ev: React.FormEvent): void {
@@ -135,7 +211,7 @@ function SubscriptionsDialog({
             {data === null ? null : (
               <>
                 <p className="text-muted-foreground text-xs leading-relaxed">
-                  {t("勾选这把 Key 能使用的 Agent 订阅，四项独立授权；订阅未连接或凭据失效时仍可保留选择。目录模型的授权在「可用模型」里配置。")}
+                  {t("为这把 Key 的每种 Agent 订阅固定一个设备上已录入的账号，或不使用；四项独立授权，一种订阅只能固定一个账号。账号停用或凭据失效时选择仍保留。目录模型的授权在「可用模型」里配置。")}
                 </p>
                 <div className="flex flex-col gap-3">
                   {(
@@ -145,20 +221,28 @@ function SubscriptionsDialog({
                       ["claude", "Claude Code"],
                       ["cursor", "Cursor"],
                     ] as const
-                  ).map(([provider, label]) => (
-                    <label key={provider} className="flex cursor-pointer items-start gap-3 rounded-md border p-3">
-                      <Checkbox
-                        checked={subscriptions[provider]}
-                        onCheckedChange={(checked) =>
-                          setSubscriptions((current) => ({ ...current, [provider]: checked === true }))
-                        }
-                      />
-                      <span className="min-w-0">
-                        <span className="block text-sm font-medium">{label}</span>
-                        <span className="text-muted-foreground block text-xs">{subscriptionState(provider)}</span>
-                      </span>
-                    </label>
-                  ))}
+                  ).map(([provider, label]) => {
+                    const candidates = accounts.filter((a) => a.provider === provider);
+                    const chosen = subscriptions[provider];
+                    return (
+                      <div key={provider} className="flex flex-col gap-2 rounded-md border p-3">
+                        <span id={`sub-${provider}`} className="text-sm font-medium">
+                          {label}
+                        </span>
+                        {candidates.length === 0 ? (
+                          <p className="text-muted-foreground text-xs">{t("设备上还没有录入这种订阅的账号；先到「开发工具订阅」页连接。")}</p>
+                        ) : (
+                          <AccountChoice
+                            provider={provider}
+                            candidates={candidates}
+                            chosen={chosen}
+                            onChoose={(id) => setSubscriptions((current) => ({ ...current, [provider]: id }))}
+                          />
+                        )}
+                        <span className="text-muted-foreground text-xs">{subscriptionState(provider)}</span>
+                      </div>
+                    );
+                  })}
                 </div>
               </>
             )}
@@ -888,8 +972,17 @@ function SpendCell({ k }: { k: api.ApiKey }) {
   );
 }
 
-function KeysPageContent({ resource }: { resource: Resource<{ keys: api.ApiKey[] }> }) {
+function KeysPageContent({
+  resource,
+  showArchived,
+  onShowArchived,
+}: {
+  resource: Resource<{ keys: api.ApiKey[] }>;
+  showArchived: boolean;
+  onShowArchived: (show: boolean) => void;
+}) {
   const keys = resource.data?.keys ?? [];
+  const activeCount = keys.filter((k) => !k.archived).length;
   const reload = resource.reload;
   const confirm = useConfirm();
   const [creating, setCreating] = useState(false);
@@ -955,7 +1048,42 @@ function KeysPageContent({ resource }: { resource: Resource<{ keys: api.ApiKey[]
     else setShareText(text);
   }
 
-  // 删除不可撤销（封存明文随行删除，删掉即无从恢复）；想留档就用禁用。
+  // 归档不可逆：凭据作废（客户端立即 401、明文再也复制不出），但行、标签与用量
+  // 历史保留，用量页仍能把它对回名字。这是有使用记录的 Key 的正规退场方式。
+  async function archiveKey(k: api.ApiKey, intro?: React.ReactNode): Promise<void> {
+    const disp = keyDisplay(k);
+    const ok = await confirm({
+      title: t("归档 Key"),
+      body: (
+        <>
+          {intro}
+          <p>
+            {tx("确定归档 Key <c>{key}</c>？", {
+              c: (chunk) => <code className="font-mono">{chunk}</code>,
+              key: disp,
+            })}
+          </p>
+          <p className="text-destructive">{t("归档不可逆：凭据立即作废，正在使用它的客户端会立即 401，明文也不能再复制。")}</p>
+          <p className="text-muted-foreground text-xs">
+            {t("标签与用量历史保留，用量页仍按这把 Key 归集；仅需暂停请改用「禁用」。")}
+          </p>
+        </>
+      ),
+      confirmText: t("确定归档"),
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await api.archiveKey(k.id);
+      toast(t("Key {key} 已归档", { key: disp }));
+    } catch (err) {
+      toast.error(api.errorMessage(err));
+    }
+    reload();
+  }
+
+  // 删除只给没有使用记录的 Key（不可撤销：封存明文随行删除，删掉即无从恢复）。
+  // 服务端答 key_has_history 时顺手引到归档，不让人在两个菜单项之间猜。
   async function deleteKey(k: api.ApiKey): Promise<void> {
     const disp = keyDisplay(k);
     const ok = await confirm({
@@ -969,7 +1097,9 @@ function KeysPageContent({ resource }: { resource: Resource<{ keys: api.ApiKey[]
             })}
           </p>
           <p className="text-destructive">{t("删除不可撤销，正在使用它的客户端会立即 401。")}</p>
-          <p className="text-muted-foreground text-xs">{t("仅需暂停请改用「禁用」。")}</p>
+          <p className="text-muted-foreground text-xs">
+            {t("只有从未使用过的 Key 能删除；有使用记录的请改用「归档」，仅需暂停请改用「禁用」。")}
+          </p>
         </>
       ),
       confirmText: t("确定删除"),
@@ -980,6 +1110,12 @@ function KeysPageContent({ resource }: { resource: Resource<{ keys: api.ApiKey[]
       await api.deleteKey(k.id);
       toast(t("Key {key} 已删除", { key: disp }));
     } catch (err) {
+      // 在用的 Key 有使用记录：顺手引到归档。已归档的 Key 有使用记录就是终态，
+      // 只把服务端的说明摆出来，不再弹一次归档确认。
+      if (err instanceof api.ApiError && err.code === "key_has_history" && !k.archived) {
+        await archiveKey(k, <p className="font-medium">{t("这把 Key 已有使用记录，不能删除；可以改为归档。")}</p>);
+        return;
+      }
       toast.error(api.errorMessage(err));
     }
     reload();
@@ -993,10 +1129,13 @@ function KeysPageContent({ resource }: { resource: Resource<{ keys: api.ApiKey[]
         actions={
           <>
             {resource.data === null ? null : (
-              <Badge variant="secondary" title={t("共 {n} 个 Key", { n: keys.length })}>
-                {keys.length}
+              <Badge variant="secondary" title={t("共 {n} 个 Key", { n: activeCount })}>
+                {activeCount}
               </Badge>
             )}
+            <Button size="sm" variant="outline" onClick={() => onShowArchived(!showArchived)}>
+              {showArchived ? t("隐藏已归档") : t("显示已归档")}
+            </Button>
             <Button size="sm" onClick={() => setCreating(true)}>
               {t("新建 Key")}
             </Button>
@@ -1031,7 +1170,7 @@ function KeysPageContent({ resource }: { resource: Resource<{ keys: api.ApiKey[]
                     </TableRow>
                   ) : (
                     keys.map((k) => (
-                      <TableRow key={k.id} className={k.disabled ? "opacity-60" : undefined}>
+                      <TableRow key={k.id} className={k.disabled || k.archived ? "opacity-60" : undefined}>
                         <TableCell className="pl-4">
                           <div className="min-w-0">
                             <div className="flex w-fit max-w-full items-center gap-1">
@@ -1072,7 +1211,16 @@ function KeysPageContent({ resource }: { resource: Resource<{ keys: api.ApiKey[]
                         </TableCell>
                         <TableCell>
                           <div className="text-xs">
-                            <StatusBadge disabled={k.disabled} />
+                            {k.archived ? (
+                              <Badge
+                                variant="secondary"
+                                title={k.archived_at === undefined ? undefined : t("归档于 {time}", { time: fmtTime(k.archived_at) })}
+                              >
+                                {t("已归档")}
+                              </Badge>
+                            ) : (
+                              <StatusBadge disabled={k.disabled} />
+                            )}
                             <div className="mt-1.5">
                               <span className="text-muted-foreground">{t("最近")} </span>
                               {k.last_used_at === undefined ? t("从未使用") : fmtTime(k.last_used_at)}
@@ -1094,9 +1242,11 @@ function KeysPageContent({ resource }: { resource: Resource<{ keys: api.ApiKey[]
                             <div className="min-w-0">
                               <SpendCell k={k} />
                             </div>
-                            <Button size="xs" variant="outline" onClick={() => setEditing(k)}>
-                              {t("限额")}
-                            </Button>
+                            {k.archived ? null : (
+                              <Button size="xs" variant="outline" onClick={() => setEditing(k)}>
+                                {t("限额")}
+                              </Button>
+                            )}
                           </div>
                         </TableCell>
                         <TableCell>
@@ -1109,11 +1259,25 @@ function KeysPageContent({ resource }: { resource: Resource<{ keys: api.ApiKey[]
                                 {k.metered_allowance_micro > 0 ? t("预算用完后可用") : t("无剩余额度")}
                               </div>
                             </div>
-                            <Button size="xs" variant="outline" onClick={() => setAdjusting(k)}>
-                              {t("调整")}
-                            </Button>
+                            {k.archived ? null : (
+                              <Button size="xs" variant="outline" onClick={() => setAdjusting(k)}>
+                                {t("调整")}
+                              </Button>
+                            )}
                           </div>
                         </TableCell>
+                        {/* 已归档的行凭据已作废：分享、订阅、模型与启停都没有对象了，
+                            只留删除（没有使用记录的归档 Key 仍可物理删除）。 */}
+                        {k.archived ? (
+                          <TableCell className="pr-4">
+                            <div className="flex items-center justify-end gap-2">
+                              <RowActionsMenu
+                                label={t("Key {key} 的更多操作", { key: keyDisplay(k) })}
+                                actions={[{ label: t("删除"), destructive: true, onSelect: () => void deleteKey(k) }]}
+                              />
+                            </div>
+                          </TableCell>
+                        ) : (
                         <TableCell className="pr-4">
                           <div className="flex items-center justify-end gap-2">
                             {/* 分享：接入方法页地址 + 这把 Key 的明文一起进剪贴板。
@@ -1150,11 +1314,18 @@ function KeysPageContent({ resource }: { resource: Resource<{ keys: api.ApiKey[]
                               label={t("Key {key} 的更多操作", { key: keyDisplay(k) })}
                               actions={[
                                 { label: k.disabled ? t("启用") : t("禁用"), onSelect: () => void toggleKey(k) },
+                                {
+                                  label: t("归档"),
+                                  destructive: true,
+                                  title: t("凭据作废，标签与用量历史保留"),
+                                  onSelect: () => void archiveKey(k),
+                                },
                                 { label: t("删除"), destructive: true, onSelect: () => void deleteKey(k) },
                               ]}
                             />
                           </div>
                         </TableCell>
+                        )}
                       </TableRow>
                     ))
                   )}
@@ -1201,10 +1372,12 @@ function KeysPageContent({ resource }: { resource: Resource<{ keys: api.ApiKey[]
 }
 
 export function KeysPage(): React.ReactElement {
-  const res = useResource(() => api.listKeys(), []);
+  // 已归档的 Key 缺省不列（它们退场了，不该占着表格）；切换开关重取一次列表。
+  const [showArchived, setShowArchived] = useState(false);
+  const res = useResource(() => api.listKeys(showArchived), [showArchived]);
   return (
     <PageContainer wide>
-      <KeysPageContent resource={res} />
+      <KeysPageContent resource={res} showArchived={showArchived} onShowArchived={setShowArchived} />
     </PageContainer>
   );
 }

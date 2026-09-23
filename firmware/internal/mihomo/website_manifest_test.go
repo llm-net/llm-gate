@@ -24,4 +24,13 @@ func TestWebsiteManifestVerifies(t *testing.T) {
 	if v.Index.Releases[0].Version != "1.19.30" {
 		t.Fatalf("版本不对: %+v", v.Index.Releases[0])
 	}
+	for _, platform := range []string{"linux-arm64", "linux-amd64"} {
+		found := false
+		for _, r := range v.Index.Releases {
+			found = found || (r.Platform == platform && r.Version == "1.19.30" && r.AllowInstall)
+		}
+		if !found {
+			t.Fatalf("%s 没有可安装的 1.19.30: %+v", platform, v.Index.Releases)
+		}
+	}
 }

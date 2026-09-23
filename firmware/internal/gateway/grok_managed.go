@@ -121,8 +121,23 @@ func (s *Server) handleGrokManagedConfig(w http.ResponseWriter, r *http.Request)
 // 重试一次、只看状态码（responses.go 的纪律，理由不重抄）。
 func (s *Server) grokCatalogModels(r *http.Request) ([]grokhelper.CatalogModel, string) {
 	info := infoFrom(r.Context())
-	acct, authJSON, err := s.store.GetAgentCredential(r.Context(), store.AgentProviderGrok)
+	snapshot, err := s.policySnapshot(r)
+	if err != nil {
+		if r.Context().Err() == nil {
+			s.log.Error("读取开发工具策略失败，受管区降级为仅默认条目", "request_id", info.id, "err", err.Error())
+		}
+		return nil, ""
+	}
+	accountID := snapshot.Subscription(store.AgentProviderGrok).AccountID
+	if accountID == 0 {
+		s.log.Info("这把 Key 未钉 Grok 订阅账号，受管区降级为仅默认条目", "request_id", info.id)
+		return nil, ""
+	}
+	acct, authJSON, err := s.store.GetAgentCredential(r.Context(), accountID)
 	switch {
+	case err == nil && acct.Provider != store.AgentProviderGrok:
+		s.log.Warn("钉给 Grok 的账号不是 Grok 订阅，受管区降级为仅默认条目", "request_id", info.id)
+		return nil, ""
 	case err == nil:
 	case errors.Is(err, store.ErrNotFound):
 		s.log.Info("Grok 订阅未连接，受管区降级为仅默认条目", "request_id", info.id)

@@ -1,9 +1,11 @@
 // imagine_grok.go 是 Grok Build 订阅接入面的 Grok Imagine 门：这份订阅自带的
-// 图片/视频生成，挂在与 Responses 面同一张脸下——
+// 图像/视频生成，挂在与 Responses 面同一张脸下——
 //
 //	POST /agents/grok/v1/images/generations     文生图
 //	POST /agents/grok/v1/images/edits           图生图（参考图经 image 对象给）
-//	POST /agents/grok/v1/videos/generations     提交视频生成，回 request_id
+//	POST /agents/grok/v1/videos/generations     提交视频生成（文生 / 图生 / 首尾帧 / 参考图），回 request_id
+//	POST /agents/grok/v1/videos/edits           提交视频编辑（video 对象给源视频）
+//	POST /agents/grok/v1/videos/extensions      提交视频延长（video 对象给源视频）
 //	GET  /agents/grok/v1/videos/{request_id}    轮询视频任务
 //
 // 设备只做**鉴权替换的逐字节透传**：路径就是 xAI 官方 Imagine API 在
@@ -16,7 +18,7 @@
 //
 // 计量：画图门 beginEntry 到 usage.EntryImagineImage（张数从响应 data[] 数出，
 // 0 元是真值；管理员在目录建同名 image 行录 ark_image_each 时按张记名义金额），
-// 视频提交门到 usage.EntryImagineVideo（1 次请求、0 元，没有任务行与清算）。
+// 三个视频提交门到 usage.EntryImagineVideo（受理即记 1 个、0 元，没有任务行与清算）。
 // 轮询 GET 是辅助调用：不入账、不消耗密钥 RPM，只进访问日志（同 Cursor 的
 // 非 Run RPC 口径）。两个门都过子树闸（withDevTool）与订阅勾选闸
 // （subscriptionPermitted），未连订阅回 409 agent_not_configured。
@@ -38,6 +40,8 @@ const (
 	grokImagesGenerationsPath = "/images/generations"
 	grokImagesEditsPath       = "/images/edits"
 	grokVideosGenerationsPath = "/videos/generations"
+	grokVideosEditsPath       = "/videos/edits"
+	grokVideosExtensionsPath  = "/videos/extensions"
 	grokVideosPath            = "/videos/"
 )
 
@@ -76,11 +80,19 @@ func (s *Server) handleGrokVideosGenerations(w http.ResponseWriter, r *http.Requ
 	s.handleGrokImagineSubmit(w, r, grokVideosGenerationsPath, usage.EntryImagineVideo)
 }
 
-// handleGrokImagineSubmit 是三个 POST 门共用的一段：解码（model 必填）→ 订阅
+func (s *Server) handleGrokVideosEdits(w http.ResponseWriter, r *http.Request) {
+	s.handleGrokImagineSubmit(w, r, grokVideosEditsPath, usage.EntryImagineVideo)
+}
+
+func (s *Server) handleGrokVideosExtensions(w http.ResponseWriter, r *http.Request) {
+	s.handleGrokImagineSubmit(w, r, grokVideosExtensionsPath, usage.EntryImagineVideo)
+}
+
+// handleGrokImagineSubmit 是五个 POST 门共用的一段：解码（model 必填）→ 订阅
 // 勾选闸 → 入账 → 预算准入 → 名义价旋钮（只画图门、只借 image 行）→ 取订阅
 // 凭据 → 转发。顺序与 handleAgentResponsesFor 逐条对齐。
 func (s *Server) handleGrokImagineSubmit(w http.ResponseWriter, r *http.Request, path, entry string) {
-	// 参考图可能以 data URI 内嵌：与视频/图片入口同一体积闸（超限 413）。
+	// 首帧、尾帧、参考图与源视频可能以 data URI 内嵌：与视频/图像入口同一体积闸（超限 413）。
 	r.Body = http.MaxBytesReader(w, r.Body, videoSubmitBodyLimit)
 	payload, model, ok := decodeEntryPayload(w, r, openAIErrorStyle)
 	if !ok {
@@ -95,7 +107,7 @@ func (s *Server) handleGrokImagineSubmit(w http.ResponseWriter, r *http.Request,
 	}
 	if entry == usage.EntryImagineImage {
 		// 视频不借价：视频形态的 Cost 按上游族分流，订阅路径没有上游族，借了
-		// 也算不出数；视频提交恒记 1 次、0 元。
+		// 也算不出数；视频提交受理即记 1 个、0 元（metering.go）。
 		s.applyAgentModelPricingKind(r, info, model, store.ModelKindImage)
 	}
 	sess, accountID, ok := s.agentCredential(w, r, store.AgentProviderGrok)

@@ -1,7 +1,7 @@
 package store
 
 // agent_accounts 仓储：Agents（Codex / Grok Build / Claude Code / Cursor 订阅
-// 代理）的账号与凭据（迭代 11 Phase 1，Claude 于 2026-08-14 接入）。
+// 代理）的账号与凭据。
 // 约定同 repo.go：context 化、走 prepared statement、未命中 → ErrNotFound、
 // 唯一性冲突 → ErrConflict、时间入库经 fmtTime。
 //
@@ -10,12 +10,14 @@ package store
 //   - **管理视图** [AgentAccount]（[Store.ListAgentAccounts] / [Store.GetAgentAccount]）：
 //     provider/label/account_id/default_model/status/last_refresh_at。密文列
 //     根本不进 SELECT——不是"取了再抹掉"，是压根没读上来。
-//   - **取凭据视图** [Store.GetAgentCredential]：解封后的规范凭据明文（Codex/Grok
-//     是 auth.json，Claude 是 setup-token 包装，Cursor 是 Dashboard API Key
-//     包装）。只在刷新或代理注入的进程内路径上出现。
+//   - **取凭据视图** [Store.GetAgentCredential]：按行 id 解封后的规范凭据明文
+//     （Codex/Grok 是 auth.json，Claude 是 setup-token 包装，Cursor 是 Dashboard
+//     API Key 包装）。只在刷新或代理注入的进程内路径上出现。
 //
-// 单账户语义：一个 provider 一行（UNIQUE(provider)），重复连接是覆盖而非增行。
-// 代价（决策 2 已接受）：订阅代理没有多来源故障切换。
+// 多账号语义：同一 provider 可以有多行，每行一份独立凭据。行由 id 标识；
+// 重新登录/粘贴导入按 id 覆盖既有行（[NewAgentAccount.ID] 非零），不带 id 即新建。
+// 哪把 Key 用哪一行由开发工具策略钉死（devtools.go 的 <provider>_account_id），
+// 数据面不按 provider 猜账号。
 //
 // §15.1：Agent 凭据（auth.json 或 Claude setup-token）与它的密文绝不进 API 响应、日志、
 // 审计 detail。本文件的错误只含 id/provider/状态与补救动作，两侧都不回显。
@@ -44,6 +46,9 @@ const (
 	// 凭据形态见 internal/cursorauth）。
 	AgentProviderCursor = "cursor"
 )
+
+// AgentProviders 是四种订阅的固定顺序（管理面与策略投影都按它铺位）。
+var AgentProviders = []string{AgentProviderCodex, AgentProviderGrok, AgentProviderClaude, AgentProviderCursor}
 
 // agent_accounts.status 的封闭词汇表（与 0011 迁移的 CHECK 同步维护）。
 const (
@@ -117,9 +122,12 @@ func (a AgentAccount) LogValue() slog.Value {
 // NewAgentAccount 是 [Store.UpsertAgentAccount] 的入参。同型 string 字段多，
 // 用具名结构体而非位置参数（同 NewUser 的理由）。
 type NewAgentAccount struct {
+	// ID 为 0 新建一行；非零则覆盖该行的凭据（重新登录 / 粘贴导入到既有账号），
+	// 行的 provider 必须与 Provider 一致，否则 ErrNotFound。
+	ID       int64
 	Provider string
 	// Label/DefaultModel 为空 = **保持既有值**（见 UpsertAgentAccount 的
-	// "空即保持"语义）。
+	// "空即保持"语义；新建时空就是空）。
 	Label string
 	// AccountID 跟着凭据走，**无条件覆盖**（空就是空）——它是 id_token 的 claim，
 	// 与 AuthJSON 必须同进同出，理由见 UpsertAgentAccount。
@@ -134,19 +142,19 @@ type NewAgentAccount struct {
 	CreatedAt time.Time
 }
 
-// UpsertAgentAccount 落一份订阅凭据并返回该行（管理视图）。同一 provider 重复
-// 连接是**覆盖而非增行**（UNIQUE(provider)，决策 3 的单账户语义）。
+// UpsertAgentAccount 落一份订阅凭据并返回该行（管理视图）。ID 为 0 新建一行
+// （同一 provider 可以有多行）；ID 非零是**覆盖既有行**——重新登录要达到的效果。
 //
 // 覆盖语义分两组，分界线是**这个值是不是从凭据里来的**：
 //
-//   - 凭据、AccountID 与状态**无条件覆盖**——这就是重新登录要达到的效果。
-//     AccountID 是 id_token 的 claim，必须与凭据同进同出：换一个 ChatGPT 账号
-//     重连、而 claim 又恰好解不出来（粘贴的 auth.json 没有可用 id_token）时，
-//     若"空即保持"就会留下甲账号的 AccountID 配乙账号的 token——代理注入
-//     ChatGPT-Account-ID 的那一刻必 401，管理台却还显示着甲。宁可空着。
+//   - 凭据、AccountID 与状态**无条件覆盖**。AccountID 是 id_token 的 claim，
+//     必须与凭据同进同出：换一个 ChatGPT 账号重连、而 claim 又恰好解不出来
+//     （粘贴的 auth.json 没有可用 id_token）时，若"空即保持"就会留下甲账号的
+//     AccountID 配乙账号的 token——代理注入 ChatGPT-Account-ID 的那一刻必 401，
+//     管理台却还显示着甲。宁可空着。
 //   - Label/DefaultModel **空即保持**：重新登录（或粘贴 auth.json 兜底）通常
 //     不带这两项，若照空值覆盖，管理员设过的默认模型会被每一次重登悄悄抹掉。
-//     要显式改这两项走管理面的更新方法（迭代 11 Phase 4 的 PATCH），不走本方法。
+//     要显式改这两项走管理面的更新方法（PATCH），不走本方法。
 //   - LastRefreshAt 不动：重新登录不是一次刷新。
 func (s *Store) UpsertAgentAccount(ctx context.Context, na NewAgentAccount) (*AgentAccount, error) {
 	if na.Provider == "" {
@@ -180,19 +188,35 @@ func (s *Store) UpsertAgentAccount(ctx context.Context, na NewAgentAccount) (*Ag
 		at = time.Now()
 	}
 	ts := fmtTime(at)
-	if _, err := s.stmtUpsertAgentAccount.ExecContext(ctx,
-		na.Provider, na.Label, na.AccountID, na.DefaultModel, sealed, status, ts, ts); err != nil {
-		return nil, fmt.Errorf("连接 Agents 账号: %w", mapErr(err))
+	id := na.ID
+	if id == 0 {
+		res, err := s.stmtInsertAgentAccount.ExecContext(ctx,
+			na.Provider, na.Label, na.AccountID, na.DefaultModel, sealed, status, ts, ts)
+		if err != nil {
+			return nil, fmt.Errorf("连接 Agents 账号: %w", mapErr(err))
+		}
+		if id, err = res.LastInsertId(); err != nil {
+			return nil, fmt.Errorf("连接 Agents 账号: %w", err)
+		}
+	} else {
+		// provider 进 WHERE：把 codex 的凭据写到 claude 的行上在 SQL 层就落不下去
+		//（AAD 防的正是这件事，别让写入路径自己绕过它）。
+		res, err := s.stmtReconnectAgentAccount.ExecContext(ctx,
+			na.Label, na.Label, na.DefaultModel, na.DefaultModel, na.AccountID, sealed, status, ts, id, na.Provider)
+		if err := execOneRow(res, err, "连接 Agents 账号"); err != nil {
+			return nil, err
+		}
 	}
 	// 覆盖分支的"空即保持"发生在 SQL 里，返回值必须回读而不是就地拼装。
-	acct, err := scanAgentAccount(s.stmtGetAgentAccountByProvider.QueryRowContext(ctx, na.Provider), false)
+	acct, err := scanAgentAccount(s.stmtGetAgentAccountByID.QueryRowContext(ctx, id), false)
 	if err != nil {
 		return nil, fmt.Errorf("连接 Agents 账号: %w", err)
 	}
 	return acct, nil
 }
 
-// ListAgentAccounts 列出全部订阅账号（管理视图，无密文、无 auth.json）。
+// ListAgentAccounts 列出全部订阅账号（管理视图，无密文、无 auth.json），
+// 按 provider、id 排序。
 func (s *Store) ListAgentAccounts(ctx context.Context) ([]AgentAccount, error) {
 	rows, err := s.stmtListAgentAccounts.QueryContext(ctx)
 	if err != nil {
@@ -223,19 +247,19 @@ func (s *Store) GetAgentAccount(ctx context.Context, id int64) (*AgentAccount, e
 	return acct, nil
 }
 
-// GetAgentCredential 按 provider 取一行**并解开 auth.json**，供刷新令牌与代理
+// GetAgentCredential 按行 id 取一行**并解开 auth.json**，供刷新令牌与代理
 // 注入请求头的进程内路径使用。返回的明文不得进日志/审计/API 响应（§15.1）。
 //
 // 状态不过滤是有意的：调用方要按状态分岔出不同的机读原因（无行 →
 // agent_not_configured，auth_expired → agent_auth_expired），在 SQL 里滤掉行
 // 就把两种情况压成了同一种。密文解不开返回 ErrAgentAuthUnreadable——那与"没
 // 连过"是两件事，补救动作也不同。
-func (s *Store) GetAgentCredential(ctx context.Context, provider string) (*AgentAccount, string, error) {
-	acct, err := scanAgentAccount(s.stmtGetAgentCredential.QueryRowContext(ctx, provider), true)
+func (s *Store) GetAgentCredential(ctx context.Context, id int64) (*AgentAccount, string, error) {
+	acct, err := scanAgentAccount(s.stmtGetAgentCredential.QueryRowContext(ctx, id), true)
 	if err != nil {
 		return nil, "", fmt.Errorf("读取 Agents 凭据: %w", err)
 	}
-	authJSON, err := s.openAgent(acct.AuthJSONSealed, provider)
+	authJSON, err := s.openAgent(acct.AuthJSONSealed, acct.Provider)
 	if err != nil {
 		return nil, "", err
 	}
@@ -289,11 +313,32 @@ func (s *Store) SetAgentStatus(ctx context.Context, id int64, status string) err
 	return execOneRow(res, err, "更新 Agents 状态")
 }
 
-// DeleteAgentAccount 删除一行（连同密文）。删除后 /v1/responses 立刻回
-// agent_not_configured——取账号是每请求点查，没有缓存要失效。
+// DeleteAgentAccount 删除一行（连同密文），并把钉在这一行上的 Key 策略解开：
+// 对应的 <provider>_account_id 置空、revision 递增，gate 下次读配置就看到变化。
+// 删除后订阅面立刻回 agent_not_configured——取账号是每请求点查，没有缓存要失效。
 func (s *Store) DeleteAgentAccount(ctx context.Context, id int64) error {
-	res, err := s.stmtDeleteAgentAccount.ExecContext(ctx, id)
-	return execOneRow(res, err, "删除 Agents 账号")
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("删除 Agents 账号: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+	now := fmtTime(time.Now())
+	for _, col := range devToolAccountColumns {
+		// 列名来自本包常量表，不是外部输入。
+		if _, err := tx.ExecContext(ctx, `UPDATE api_key_devtool_configs
+			   SET `+col+` = NULL, revision = revision + 1, updated_at = ?
+			 WHERE `+col+` = ?`, now, id); err != nil {
+			return fmt.Errorf("删除 Agents 账号: 解开 Key 策略: %w", err)
+		}
+	}
+	res, err := tx.ExecContext(ctx, `DELETE FROM agent_accounts WHERE id = ?`, id)
+	if err := execOneRow(res, err, "删除 Agents 账号"); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("删除 Agents 账号: %w", err)
+	}
+	return nil
 }
 
 // validAgentStatus 判定状态是否在封闭词汇表内。
@@ -304,6 +349,16 @@ func validAgentStatus(status string) bool {
 	default:
 		return false
 	}
+}
+
+// ValidAgentProvider 判定 provider 是否在封闭词汇表内（管理面与策略校验共用）。
+func ValidAgentProvider(provider string) bool {
+	for _, p := range AgentProviders {
+		if p == provider {
+			return true
+		}
+	}
+	return false
 }
 
 // sealAgent 把整份 auth.json 封存为入库文本，AAD 钉 "agent:<provider>"：

@@ -31,6 +31,7 @@ func TestSubscriptionReportGroupsStoredAndPendingTraffic(t *testing.T) {
 	stored[1].Errors, stored[1].RejectedRequests, stored[1].EstimatedRequests = 1, 1, 1
 	stored[3].ImageCount = 2
 	stored[4].VideoSeconds = 6
+	stored[4].VideoCount = 3
 	// 辅助 RPC 不算订阅模型消费；另一把 Key 只进入全量视图。
 	stored = append(stored,
 		store.UsageDelta{BucketHour: bucket, KeyID: 7, Entry: EntryCursorAgent, ModelName: "aiserver.v1.AiService/AvailableModels", Requests: 99},
@@ -56,7 +57,7 @@ func TestSubscriptionReportGroupsStoredAndPendingTraffic(t *testing.T) {
 	want := Summary{
 		Requests: 12, CostMicro: 579, Errors: 1, RejectedRequests: 1, EstimatedRequests: 1,
 		PromptTokens: 20, CompletionTokens: 4, CacheReadTokens: 6, CacheWriteTokens: 8, TotalTokens: 38,
-		ImageCount: 2, VideoSeconds: 6, DurationMsSum: 255,
+		ImageCount: 2, VideoSeconds: 6, VideoCount: 3, DurationMsSum: 255,
 	}
 	for _, phase := range []string{"pending", "flushed"} {
 		if phase == "flushed" {

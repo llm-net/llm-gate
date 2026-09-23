@@ -45,9 +45,11 @@ export async function request<T>(
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
   path: string,
   body?: unknown,
+  opts?: { signal?: AbortSignal },
 ): Promise<T> {
   const headers: Record<string, string> = { "Accept-Language": currentLang() };
   const init: RequestInit = { method, credentials: "same-origin", headers };
+  if (opts?.signal !== undefined) init.signal = opts.signal;
   if (method !== "GET") {
     headers["X-LlmGate-CSRF"] = "1";
     headers["Content-Type"] = "application/json";
@@ -56,7 +58,9 @@ export async function request<T>(
   let resp: Response;
   try {
     resp = await fetch(path, init);
-  } catch {
+  } catch (err) {
+    // 调用方主动中止（页面切走）：原样抛出，让它按中止处理而不是当网络故障提示。
+    if (err instanceof DOMException && err.name === "AbortError") throw err;
     throw new ApiError(0, "network", t("无法连接服务器，请检查设备与网络后重试"));
   }
   if (resp.status === 204) {
@@ -101,37 +105,25 @@ function wellFormedKey(key: string): boolean {
   return true;
 }
 
-// keyRequest 是凭 API 密钥自证的只读请求，只打数据面 /gate-helper/v1/* 那两条端点
-// （「接入方法」页 /ui/connect 用）。与 request 的三处不同：
+// keyRequest 是凭 API 密钥自证的请求，只打数据面 /gate-helper/v1/* 下给设备界面
+// 用的端点（「接入方法」页 /ui/connect：endpoints、config 两条只读读数，以及
+// media/* 的媒体生成任务）。与 request 的三处不同：
 // - 凭据是调用方逐次传入的 Key，走 Authorization: Bearer；恒不带 Cookie
 //   （credentials: "omit"），与管理员会话完全无关；
-// - 错误体是数据面的 OpenAI 形 {"error":{"message","type","code"}}，message 是给
-//   程序看的英文；ApiError 照带，界面按 status/code 自己给中文；
+// - endpoints / config 的错误体是数据面的 OpenAI 形 {"error":{"message","type","code"}}，
+//   message 是给程序看的英文，界面按 status/code 自己给中文；media/* 的错误体与
+//   管理面同形、message 已按 Accept-Language 本地化，可直接展示；
 // - 401 在这里是「Key 无效或已停用」，**不是**会话失效——绝不触发 sessionExpired
 //   回调（那会把贴 Key 的人送去管理员登录页）。
 // Key 先过上面的 wellFormedKey 再进头：形状不对当场拒绝，不发请求。
 // Key 不进 URL、不进日志；本函数不缓存任何东西。
-export async function keyRequest<T>(path: string, key: string): Promise<T> {
-  if (!wellFormedKey(key)) {
-    // 形状就不对，不发请求。status 0 沿用「没走到服务端」那一档，message 已是中文
-    // 可直接展示；code 与网络故障分开，免得把「粘错了东西」说成设备或网络坏了。
-    throw new ApiError(
-      0,
-      "invalid_key_format",
-      t("这不像一把 API 密钥：请只粘贴密钥本身，不要带空格、换行或其他内容。"),
-    );
-  }
-  let resp: Response;
-  try {
-    resp = await fetch(path, {
-      method: "GET",
-      credentials: "omit",
-      cache: "no-store",
-      headers: { Authorization: `Bearer ${key}`, "Accept-Language": currentLang() },
-    });
-  } catch {
-    throw new ApiError(0, "network", t("无法连接服务器，请检查设备与网络后重试"));
-  }
+export async function keyRequest<T>(
+  path: string,
+  key: string,
+  method: "GET" | "POST" | "DELETE" = "GET",
+  body?: unknown,
+): Promise<T> {
+  const resp = await keyFetch(path, key, method, body);
   let data: unknown = null;
   try {
     data = await resp.json();
@@ -145,6 +137,51 @@ export async function keyRequest<T>(path: string, key: string): Promise<T> {
     throw new ApiError(resp.status, code, message);
   }
   return data as T;
+}
+
+// keyRequestBlob 是 keyRequest 的二进制版：给凭 Key 下载生成结果用。<a download>
+// 带不上 Authorization 头，只能 fetch 成 Blob 再交给浏览器保存；返回体与服务端
+// 给的下载文件名（Content-Disposition 里的 filename）。
+export async function keyRequestBlob(path: string, key: string): Promise<{ blob: Blob; filename: string }> {
+  const resp = await keyFetch(path, key, "GET");
+  if (!resp.ok) {
+    let data: unknown = null;
+    try {
+      data = await resp.json();
+    } catch {
+      // 非 JSON 响应落入下方通用文案。
+    }
+    const eb = (data ?? {}) as ErrorBody;
+    const code = eb.error?.code ?? "unknown";
+    const message = eb.error?.message ?? t("请求失败（HTTP {status}）", { status: resp.status });
+    throw new ApiError(resp.status, code, message);
+  }
+  const disposition = resp.headers.get("Content-Disposition") ?? "";
+  const match = /filename="?([^";]+)"?/.exec(disposition);
+  return { blob: await resp.blob(), filename: match?.[1] ?? "" };
+}
+
+async function keyFetch(path: string, key: string, method: "GET" | "POST" | "DELETE", body?: unknown): Promise<Response> {
+  if (!wellFormedKey(key)) {
+    // 形状就不对，不发请求。status 0 沿用「没走到服务端」那一档，message 已是中文
+    // 可直接展示；code 与网络故障分开，免得把「粘错了东西」说成设备或网络坏了。
+    throw new ApiError(
+      0,
+      "invalid_key_format",
+      t("这不像一把 API 密钥：请只粘贴密钥本身，不要带空格、换行或其他内容。"),
+    );
+  }
+  const headers: Record<string, string> = { Authorization: `Bearer ${key}`, "Accept-Language": currentLang() };
+  const init: RequestInit = { method, credentials: "omit", cache: "no-store", headers };
+  if (method !== "GET") {
+    headers["Content-Type"] = "application/json";
+    init.body = JSON.stringify(body ?? {});
+  }
+  try {
+    return await fetch(path, init);
+  } catch {
+    throw new ApiError(0, "network", t("无法连接服务器，请检查设备与网络后重试"));
+  }
 }
 
 // requestBinary 是唯一的非 JSON 变更请求通道：体是裸二进制

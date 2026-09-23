@@ -2,41 +2,41 @@
 //
 // 给**拿到一把 API 密钥、但不是设备管理员**的人看。贴入自己的 Key → 页面用这把
 // Key 打数据面两条只读端点（GET /gate-helper/v1/endpoints、GET /gate-helper/v1/config）
-// → 按这把 Key 渲染「开发工具接入」与「API调用」两个标签页，缺省停在开发工具接入。
-// 正文与管理台同名页面是同一组组件（features/access），只是数据按 Key 裁剪、
-// 安装命令直接带这把 Key。
+// → 按这把 Key 渲染「API调用」「开发工具接入」「API调测」「媒体生成」四页，缺省停在
+// 开发工具接入。正文与管理台同名页面是同一组组件（features/access、
+// pages/media），只是数据按 Key 裁剪、安装命令直接带这把 Key；媒体生成
+// 凭 Key 打 /gate-helper/v1/media/*，只能选这把 Key 可用的图像 / 视频生成模型（设备
+// 按能力表逐个给出可用性），只看自己的任务。
 //
 // **Key 只活在登录入口与本组件的 state 里**：不进 localStorage / sessionStorage / URL /
-// 查询缓存，刷新即回到贴 Key 的状态（§15.1 同款纪律）。没有会话、没有 Cookie、
-// 没有「退出」——「返回登录」只是清掉内存、回到贴 Key 的那一屏。管理员登着的时候打开它看到的也是
+// 查询缓存，刷新即回到贴 Key 的状态（§15.1 同款纪律）。没有会话、没有 Cookie；
+// 顶栏的「退出」只是清掉内存、回到贴 Key 的那一屏。管理员登着的时候打开它看到的也是
 // Key 视角：这一页不问会话。
 //
-// 两段外观：贴 Key 用登录页那块设备面板（AuthShell），拿到读数后换成一条窄顶栏 +
-// 铺满内容区的正文——正文是双栏、摆着整段命令，登录卡那么窄摆不下。
+// 两段外观：贴 Key 用登录页那块设备面板（AuthShell），拿到读数后换成与管理员登录后
+// 同一副外壳（features/access/holder-shell.tsx：贯通整幅的顶栏 + 左侧菜单 + 主区内滚），
+// 四页由左侧菜单切换。菜单项不是路由——Key 不进 URL，切页只是本组件的 state。
 
 import { ArrowRight, KeyRound, LoaderCircle } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
-import logoUrl from "@/assets/logo.svg";
-import { LangSwitch } from "@/components/lang-switch";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   accessTargets,
   defaultTarget,
-  SegTabs,
   TargetTabs,
   type TargetKind,
 } from "@/features/access/access";
 import { ApiGuide } from "@/features/access/api-guide";
 import { DevToolGuide, type DevToolHelpTab, type KeyFill } from "@/features/access/devtool-guide";
+import { HolderShell, holderTabTitle, type HolderTab } from "@/features/access/holder-shell";
 import { ModelsCard } from "@/features/access/models-list";
 import * as api from "@/lib/api";
-import * as brand from "@/lib/brand";
-import { keyMask } from "@/lib/format";
 import { t } from "@/lib/i18n";
+import { APIDebugPage } from "@/pages/api-debug";
+import { MediaView } from "@/pages/media";
 import { PageContainer, PageHeader } from "@/pages/page-shell";
 
 export interface HolderData {
@@ -122,7 +122,7 @@ export function KeyEntry({
         </span>
       </label>
       <p id="key-entry-hint" className="auth-form-hint">
-        {t("Key 只用于向这台设备读取你自己的接入信息，不会保存在浏览器里；刷新或关闭页面后需要重新贴入。")}
+        {t("Key 用于读取你的接入信息和发起调测、媒体生成请求，只保存在当前页面内存中；刷新或关闭页面后需要重新贴入。")}
       </p>
       <div className="auth-form-message">
         {error === null ? null : <p id="key-entry-error" role="alert" className="text-destructive text-sm">{error}</p>}
@@ -135,8 +135,6 @@ export function KeyEntry({
     </form>
   );
 }
-
-type HolderTab = "api" | "dev-tools";
 
 function HolderView({
   holderKey,
@@ -157,6 +155,8 @@ function HolderView({
   // DevToolGuide 的 Key 下拉状态在持有者视角里用不到（holder 入参接管了 Key），
   // 但组件契约要它在场；给一份空的、永不写入的。
   const [fill, setFill] = useState<KeyFill>({ selectedID: 0, plain: new Map() });
+  // 媒体生成客户端随 Key 建一次：Key 只活在这里的闭包里，不进 URL、存储或缓存。
+  const media = useMemo(() => api.keyMedia(holderKey), [holderKey]);
 
   const targets = accessTargets(data.snap.endpoints);
   const target = targets.find((tg) => tg.kind === kind) ?? defaultTarget(targets);
@@ -174,77 +174,67 @@ function HolderView({
     hardware_model: data.snap.hardware_model,
   };
 
-  return (
-    <div className="flex h-svh min-h-0 flex-col">
-      <header className="bg-card flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b px-4 py-2.5 sm:px-6">
-        <div className="flex min-w-0 items-center gap-2">
-          <img src={logoUrl} alt="" aria-hidden className="size-6 shrink-0" />
-          <span className="font-semibold">{brand.productName}</span>
-          <span className="text-muted-foreground text-sm">· {t("接入方法")}</span>
-        </div>
-        <div className="ml-auto flex flex-wrap items-center gap-2">
-          <Badge variant="outline" className="gap-1 font-mono" title={t("当前使用的 API 密钥")}>
-            <KeyRound className="size-3" aria-hidden />
-            {keyMask(holderKey)}
-          </Badge>
-          <Button type="button" size="sm" variant="outline" onClick={onReset}>
-            {t("返回登录")}
-          </Button>
-          <LangSwitch />
-        </div>
-      </header>
-      <main className="min-h-0 flex-1 overflow-y-auto">
-        <PageContainer wide>
-          <PageHeader
-            title={tab === "api" ? t("API调用") : t("开发工具接入")}
-            note={
-              tab === "api"
-                ? t("先选从哪个地址连到这台设备，再复制对应的调用地址和示例。")
-                : t("先安装 gate 工具，再查看各开发工具的独立接入方法。")
-            }
-            actions={
-              <SegTabs
-                items={[
-                  { key: "dev-tools", label: t("开发工具接入") },
-                  { key: "api", label: t("API调用") },
-                ]}
-                active={tab}
-                onSelect={(key) => setTab(key as HolderTab)}
-                size="sm"
-              />
-            }
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-          />
-          {tab === "api" ? (
-            <>
-              <div className="flex flex-col gap-2">
-                <div className="flex flex-wrap items-center gap-3">
-                  <span className="text-sm font-medium">{t("接入地址")}</span>
-                  <TargetTabs targets={targets} active={target} onSelect={(next) => setKind(next.kind)} />
-                </div>
-                <p className="text-muted-foreground text-xs">{target.note}</p>
+  // 主区与管理员外壳同一条滚动区（ShellFrame）；媒体生成在里面自己 `h-full`、
+  // 两张卡片内滚，与管理员的 /media 一样。
+  let body: React.ReactNode;
+  if (tab === "api-debug") {
+    body = <APIDebugPage holderKey={holderKey} />;
+  } else if (tab === "media") {
+    body = <MediaView client={media} audience="holder" />;
+  } else {
+    body = (
+      <PageContainer wide>
+        <PageHeader
+          title={holderTabTitle(tab)}
+          note={
+            tab === "api"
+              ? t("先选从哪个地址连到这台设备，再复制对应的调用地址和示例。")
+              : t("先安装 gate 工具，再查看各开发工具的独立接入方法。")
+          }
+          refreshing={refreshing}
+          onRefresh={onRefresh}
+        />
+        {tab === "api" ? (
+          <>
+            <div className="flex flex-col gap-2">
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="text-sm font-medium">{t("接入地址")}</span>
+                <TargetTabs targets={targets} active={target} onSelect={(next) => setKind(next.kind)} />
               </div>
-              <ApiGuide target={target} models={data.snap.models} audience="holder" />
-              <ModelsCard models={data.snap.models} aigc={data.snap.aigc_models ?? []} audience="holder" />
-            </>
-          ) : (
-            <DevToolGuide
-              targets={targets}
-              target={target}
-              onTargetSelect={(next) => setKind(next.kind)}
-              snap={snap}
-              keys={[]}
-              activeTab={activeToolTab}
-              setActiveTab={setActiveToolTab}
-              fill={fill}
-              setFill={setFill}
-              holder={{ plaintext: holderKey, policy: data.policy }}
-            />
-          )}
-        </PageContainer>
-      </main>
-    </div>
+              <p className="text-muted-foreground text-xs">{target.note}</p>
+            </div>
+            <ApiGuide target={target} models={data.snap.models} audience="holder" />
+            <ModelsCard models={data.snap.models} aigc={data.snap.aigc_models ?? []} systemone={data.snap.systemone_models ?? []} audience="holder" />
+          </>
+        ) : (
+          <DevToolGuide
+            targets={targets}
+            target={target}
+            onTargetSelect={(next) => setKind(next.kind)}
+            snap={snap}
+            keys={[]}
+            activeTab={activeToolTab}
+            setActiveTab={setActiveToolTab}
+            fill={fill}
+            setFill={setFill}
+            holder={{ plaintext: holderKey, policy: data.policy }}
+          />
+        )}
+      </PageContainer>
+    );
+  }
+
+  return (
+    <HolderShell
+      holderKey={holderKey}
+      snap={data.snap}
+      policy={data.policy}
+      tab={tab}
+      onSelect={setTab}
+      onReset={onReset}
+    >
+      {body}
+    </HolderShell>
   );
 }
 

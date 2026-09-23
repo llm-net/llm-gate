@@ -1,6 +1,6 @@
 package store
 
-// aigc_tasks 仓储：视频/图片异步任务行（iteration-8 Phase 1）。约定同
+// aigc_tasks 仓储：视频/图像异步任务行（iteration-8 Phase 1）。约定同
 // repo.go：context 化、走 prepared statement、未命中 → ErrNotFound、唯一性
 // 冲突 → ErrConflict、时间入库经 fmtTime。
 //

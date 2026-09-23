@@ -291,8 +291,8 @@ func (p *SchedulePeriod) hasDay(d time.Weekday) bool {
 // 不在表里的字段是**有意可选**的，别顺手补进来：
 //   - cache_read 缺省按 in 计（缓存命中没单独标价就按输入价，文档口径）；
 //   - minimax 的 768P / 2K 秒价互为回退是明写的设计（取已配最高档，偏高看得见）；
-//   - minimax_video_image_extra 是超额图片附加费，不配即无此项；
-//   - 图片的张价与 token 价「按价签只配其一」。
+//   - minimax_video_image_extra 是超额图像附加费，不配即无此项；
+//   - 图像的张价与 token 价「按价签只配其一」。
 var PricingPairs = [][2]string{
 	{FieldIn, FieldOut},                                 // 文本：只配输入价 = 输出白送
 	{FieldArkVideoToken, FieldArkVideoTokenRef},         // Seedance 两档

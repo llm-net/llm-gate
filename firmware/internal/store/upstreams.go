@@ -36,8 +36,10 @@ type Upstream struct {
 	APIKeyLast4 string
 	// BaseURL：mock 与两种 compat 的必填端点根（无内置端点表条目）、minimax
 	// 的站点选择；其余产品上游为空串（dev 覆盖除外）。
-	BaseURL  string
-	Disabled bool
+	BaseURL string
+	// ProtocolURLs 是通用适配的协议面地址 JSON，不含凭据。
+	ProtocolURLs string
+	Disabled     bool
 	// EgressMode 是该账号的出站方式覆盖（internal/egress）：inherit 跟随设备级
 	// 「模型与订阅接口」出口，direct / proxy 强制。表 DEFAULT 'inherit'。
 	EgressMode string
@@ -46,14 +48,15 @@ type Upstream struct {
 }
 
 // 模型种类（models.kind 的 CHECK 约束同步维护）。契约：数据面入口按 kind
-// 选路——文本入口只收 text、视频/图片入口同理，kind 不匹配一律
+// 选路——文本入口只收 text、视频/图像入口同理，kind 不匹配一律
 // model_not_found（gateway.resolveRoute 的 kind 闸门）。本包保证 kind 事实
 // 随各视图透出，且两条 servable 读数（/v1/models 与使用API页）恒为文本口径
 // （谓词钉死 kind=text）。
 const (
-	ModelKindText  = "text"
-	ModelKindVideo = "video"
-	ModelKindImage = "image"
+	ModelKindText      = "text"
+	ModelKindVideo     = "video"
+	ModelKindImage     = "image"
+	ModelKindSystemOne = "systemone"
 )
 
 // modelColumns 是 models 全列的 SELECT 列表（与 scanModel 及各联查里的内联
@@ -76,14 +79,14 @@ type Model struct {
 	// 行），由第一条来源懒钉，行为与旧「首源钉族」一致。
 	Family string
 	// Pricing 是该模型的目录价 JSON（**形态定字段**：文本三价 / Seedance 两档 /
-	// H3 秒价档+附加 / 图片张价），值一律整数微元。空串 = 未定价——照常转发、
+	// H3 秒价档+附加 / 图像张价），值一律整数微元。空串 = 未定价——照常转发、
 	// 金额记 0、管理台挂警示徽章；与显式 0 价（定价为免费）是两个状态。
 	// 入库前经 validatePricing 保证是一张扁平的非负整数表；形态字段集按 kind
 	// 校验是管理层的事。计价函数（internal/usage）是它唯一的读取方。
 	Pricing  string
 	Disabled bool
 	// EntryOpenAI / EntryResponses / EntryAnthropic 是协议面开关：仅 kind=text 有
-	// 语义（kind 闸门先于入口开关，视频/图片入口不读它们），默认全开。
+	// 语义（kind 闸门先于入口开关，视频/图像入口不读它们），默认全开。
 	// 管理层保证 text 模型至少开一个；选路对关掉的入口不组候选
 	// （gateway.resolveRoute），两条 servable 读数的谓词同步排除全关的行。
 	EntryOpenAI    bool
@@ -114,12 +117,13 @@ type ModelSource struct {
 // 端点），管理面不必为它再拉一次上游列表；凭证仍然不在内。
 type ModelSourceDetail struct {
 	ModelSource
-	UpstreamName        string
-	UpstreamType        string
-	UpstreamCatalogID   string
-	UpstreamBillingMode string
-	UpstreamBaseURL     string
-	UpstreamDisabled    bool
+	UpstreamName         string
+	UpstreamType         string
+	UpstreamCatalogID    string
+	UpstreamBillingMode  string
+	UpstreamProtocolURLs string
+	UpstreamBaseURL      string
+	UpstreamDisabled     bool
 	// UpstreamEgressMode 随行带回，让管理台在同一模型混合直连/代理来源时给出提示。
 	UpstreamEgressMode string
 }
@@ -134,14 +138,15 @@ type ModelWithSources struct {
 // RouteUpstream 是路由候选携带的上游事实集，APIKey 是解密后的明文——
 // 只允许注入出站请求头，绝不进日志、审计或管理响应（§15.1）。
 type RouteUpstream struct {
-	ID          int64
-	Name        string
-	Type        string
-	CatalogID   string
-	BillingMode string
-	APIKey      string
-	BaseURL     string
-	Disabled    bool
+	ID           int64
+	Name         string
+	Type         string
+	CatalogID    string
+	BillingMode  string
+	APIKey       string
+	ProtocolURLs string
+	BaseURL      string
+	Disabled     bool
 	// EgressMode 是该账号的出站方式覆盖（inherit|direct|proxy），数据面装配请求时带进 ctx。
 	EgressMode string
 }
@@ -184,13 +189,17 @@ func (s *Store) CreateUpstream(ctx context.Context, name, typ, apiKey, baseURL s
 
 // CreateCatalogUpstream 建一条由平台目录选择的账号。catalogID/billingMode 与
 // baseURL 都在管理员录入 Key 的同一次创建里快照，之后目录更新不改这三项。
-func (s *Store) CreateCatalogUpstream(ctx context.Context, name, typ, catalogID, billingMode, apiKey, baseURL string) (*Upstream, error) {
+func (s *Store) CreateCatalogUpstream(ctx context.Context, name, typ, catalogID, billingMode, apiKey, baseURL string, protocolURLs ...string) (*Upstream, error) {
+	urls := ""
+	if len(protocolURLs) > 0 {
+		urls = protocolURLs[0]
+	}
 	sealed, err := s.sealKey(apiKey)
 	if err != nil {
 		return nil, fmt.Errorf("创建上游: %w", err)
 	}
 	ts := fmtTime(time.Now())
-	res, err := s.stmtCreateUpstream.ExecContext(ctx, name, typ, catalogID, billingMode, sealed, baseURL, ts, ts)
+	res, err := s.stmtCreateUpstream.ExecContext(ctx, name, typ, catalogID, billingMode, sealed, baseURL, urls, ts, ts)
 	if err != nil {
 		return nil, fmt.Errorf("创建上游: %w", mapErr(err))
 	}
@@ -201,7 +210,7 @@ func (s *Store) CreateCatalogUpstream(ctx context.Context, name, typ, catalogID,
 	t, _ := parseTime(ts)
 	return &Upstream{
 		ID: id, Name: name, Type: typ, CatalogID: catalogID, BillingMode: billingMode,
-		APIKeyLast4: last4(apiKey), BaseURL: baseURL, EgressMode: "inherit",
+		ProtocolURLs: urls, APIKeyLast4: last4(apiKey), BaseURL: baseURL, EgressMode: "inherit",
 		CreatedAt: t, UpdatedAt: t,
 	}, nil
 }
@@ -261,7 +270,7 @@ func (s *Store) GetRouteUpstreamByID(ctx context.Context, id int64) (*RouteUpstr
 		disabled int
 	)
 	err := s.stmtGetRouteUpstreamByID.QueryRowContext(ctx, id).
-		Scan(&u.ID, &u.Name, &u.Type, &u.CatalogID, &u.BillingMode, &sealed, &u.BaseURL, &disabled, &u.EgressMode)
+		Scan(&u.ID, &u.Name, &u.Type, &u.CatalogID, &u.BillingMode, &sealed, &u.BaseURL, &u.ProtocolURLs, &disabled, &u.EgressMode)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("查询上游路由: %w", ErrNotFound)
 	}
@@ -547,12 +556,12 @@ func collectModelsWithSources(rows *sql.Rows) ([]ModelWithSources, error) {
 			srcID, srcUpstreamID, srcPriority, srcDisabled sql.NullInt64
 			srcUpstreamModelID, srcCreated, srcUpdated     sql.NullString
 
-			upName, upType, upCatalogID, upBillingMode, upBaseURL, upEgress sql.NullString
-			upDisabled                                                      sql.NullInt64
+			upName, upType, upCatalogID, upBillingMode, upBaseURL, upProtocolURLs, upEgress sql.NullString
+			upDisabled                                                                      sql.NullInt64
 		)
 		if err := rows.Scan(&m.ID, &m.Name, &m.Kind, &m.Family, &m.Pricing, &modelDisabled, &mEntryOpenAI, &mEntryResponses, &mEntryAnthropic, &mCreated, &mUpdated,
 			&srcID, &srcUpstreamID, &srcUpstreamModelID, &srcPriority, &srcDisabled, &srcCreated, &srcUpdated,
-			&upName, &upType, &upCatalogID, &upBillingMode, &upBaseURL, &upDisabled, &upEgress); err != nil {
+			&upName, &upType, &upCatalogID, &upBillingMode, &upBaseURL, &upProtocolURLs, &upDisabled, &upEgress); err != nil {
 			return nil, err
 		}
 		var err error
@@ -579,13 +588,14 @@ func collectModelsWithSources(rows *sql.Rows) ([]ModelWithSources, error) {
 				Priority:        srcPriority.Int64,
 				Disabled:        srcDisabled.Int64 != 0,
 			},
-			UpstreamName:        upName.String,
-			UpstreamType:        upType.String,
-			UpstreamCatalogID:   upCatalogID.String,
-			UpstreamBillingMode: upBillingMode.String,
-			UpstreamBaseURL:     upBaseURL.String,
-			UpstreamEgressMode:  upEgress.String,
-			UpstreamDisabled:    upDisabled.Int64 != 0,
+			UpstreamName:         upName.String,
+			UpstreamType:         upType.String,
+			UpstreamCatalogID:    upCatalogID.String,
+			UpstreamBillingMode:  upBillingMode.String,
+			UpstreamBaseURL:      upBaseURL.String,
+			UpstreamProtocolURLs: upProtocolURLs.String,
+			UpstreamEgressMode:   upEgress.String,
+			UpstreamDisabled:     upDisabled.Int64 != 0,
 		}
 		if src.CreatedAt, err = parseTime(srcCreated.String); err != nil {
 			return nil, fmt.Errorf("来源 created_at 非法: %w", err)
@@ -650,12 +660,12 @@ func (s *Store) ResolveModelRoute(ctx context.Context, name string) (*ModelRoute
 			srcID, srcPriority, srcDisabled sql.NullInt64
 			srcUpstreamModelID              sql.NullString
 
-			upID, upDisabled                                                          sql.NullInt64
-			upName, upType, upCatalogID, upBillingMode, upSealed, upBaseURL, upEgress sql.NullString
+			upID, upDisabled                                                                          sql.NullInt64
+			upName, upType, upCatalogID, upBillingMode, upSealed, upBaseURL, upProtocolURLs, upEgress sql.NullString
 		)
 		if err := rows.Scan(&m.ID, &m.Name, &m.Kind, &m.Family, &m.Pricing, &modelDisabled, &mEntryOpenAI, &mEntryResponses, &mEntryAnthropic, &mCreated, &mUpdated,
 			&srcID, &srcUpstreamModelID, &srcPriority, &srcDisabled,
-			&upID, &upName, &upType, &upCatalogID, &upBillingMode, &upSealed, &upBaseURL, &upDisabled, &upEgress); err != nil {
+			&upID, &upName, &upType, &upCatalogID, &upBillingMode, &upSealed, &upBaseURL, &upProtocolURLs, &upDisabled, &upEgress); err != nil {
 			return nil, fmt.Errorf("解析模型路由: %w", err)
 		}
 		if route == nil {
@@ -692,15 +702,16 @@ func (s *Store) ResolveModelRoute(ctx context.Context, name string) (*ModelRoute
 			UpstreamModelID: upstreamModelID,
 			SourceDisabled:  sourceDisabled,
 			Upstream: RouteUpstream{
-				ID:          upID.Int64,
-				Name:        upName.String,
-				Type:        upType.String,
-				CatalogID:   upCatalogID.String,
-				BillingMode: upBillingMode.String,
-				APIKey:      apiKey,
-				BaseURL:     upBaseURL.String,
-				Disabled:    upstreamDisabled,
-				EgressMode:  upEgress.String,
+				ID:           upID.Int64,
+				Name:         upName.String,
+				Type:         upType.String,
+				CatalogID:    upCatalogID.String,
+				BillingMode:  upBillingMode.String,
+				APIKey:       apiKey,
+				BaseURL:      upBaseURL.String,
+				ProtocolURLs: upProtocolURLs.String,
+				Disabled:     upstreamDisabled,
+				EgressMode:   upEgress.String,
 			},
 		})
 	}
@@ -736,7 +747,7 @@ func (s *Store) GetSourceRoute(ctx context.Context, sourceID int64) (*SourceRout
 	err := s.stmtGetSourceRoute.QueryRowContext(ctx, sourceID).Scan(
 		&m.ID, &m.Name, &m.Kind, &m.Family, &m.Pricing, &modelDisabled, &mEntryOpenAI, &mEntryResponses, &mEntryAnthropic, &mCreated, &mUpdated,
 		&c.SourceID, &c.UpstreamModelID, &c.Priority, &srcDisabled,
-		&c.Upstream.ID, &c.Upstream.Name, &c.Upstream.Type, &c.Upstream.CatalogID, &c.Upstream.BillingMode, &sealed, &c.Upstream.BaseURL, &upsDisabled, &c.Upstream.EgressMode)
+		&c.Upstream.ID, &c.Upstream.Name, &c.Upstream.Type, &c.Upstream.CatalogID, &c.Upstream.BillingMode, &sealed, &c.Upstream.BaseURL, &c.Upstream.ProtocolURLs, &upsDisabled, &c.Upstream.EgressMode)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("查询来源路由: %w", ErrNotFound)
 	}
@@ -764,7 +775,7 @@ func (s *Store) GetSourceRoute(ctx context.Context, sourceID int64) (*SourceRout
 }
 
 // ListServableModels 返回 /v1/models 的口径：**文本**（kind=text，迭代 8 起
-// 谓词钉死——/v1/models 是文本对话面的契约，视频/图片模型不进）、启用、且
+// 谓词钉死——/v1/models 是文本对话面的契约，视频/图像模型不进）、启用、且
 // 至少有一条启用来源（其上游也启用）的模型，按原始名字典序（SQLite 默认
 // BINARY 排序即字节序）。
 func (s *Store) ListServableModels(ctx context.Context) ([]Model, error) {
@@ -804,12 +815,13 @@ type ServableModelSource struct {
 	// EntryOpenAI / EntryResponses / EntryAnthropic 是模型行的调用入口开关：调用方把「来源
 	// 能服务的协议」与它求交集才是对客户端真实开放的入口——开关是模型的
 	// 服务承诺，能力是来源的事实，两者都带回、由读数层合成。
-	EntryOpenAI       bool
-	EntryResponses    bool
-	EntryAnthropic    bool
-	UpstreamType      string
-	UpstreamCatalogID string
-	UpstreamBaseURL   string
+	EntryOpenAI          bool
+	EntryResponses       bool
+	EntryAnthropic       bool
+	UpstreamType         string
+	UpstreamCatalogID    string
+	UpstreamProtocolURLs string
+	UpstreamBaseURL      string
 	// UpstreamBillingMode 供管理顶栏按账号快照分组计数，不出客户端模型清单。
 	UpstreamBillingMode string
 }
@@ -831,7 +843,7 @@ func (s *Store) ListServableModelSources(ctx context.Context) ([]ServableModelSo
 			row                                      ServableModelSource
 			entryOpenAI, entryResponses, entryAnthro int
 		)
-		if err := rows.Scan(&row.ModelID, &row.ModelName, &row.UpstreamModelID, &entryOpenAI, &entryResponses, &entryAnthro, &row.UpstreamType, &row.UpstreamCatalogID, &row.UpstreamBaseURL, &row.UpstreamBillingMode); err != nil {
+		if err := rows.Scan(&row.ModelID, &row.ModelName, &row.UpstreamModelID, &entryOpenAI, &entryResponses, &entryAnthro, &row.UpstreamType, &row.UpstreamCatalogID, &row.UpstreamBaseURL, &row.UpstreamProtocolURLs, &row.UpstreamBillingMode); err != nil {
 			return nil, fmt.Errorf("列出可服务模型来源: %w", err)
 		}
 		row.EntryOpenAI, row.EntryResponses, row.EntryAnthropic = entryOpenAI != 0, entryResponses != 0, entryAnthro != 0
@@ -846,23 +858,24 @@ func (s *Store) ListServableModelSources(ctx context.Context) ([]ServableModelSo
 	return out, nil
 }
 
-// ServableAIGCSource 是「一个启用的视频/图片模型 × 它的一条启用来源」的
+// ServableAIGCSource 是「一个启用的视频/图像模型 × 它的一条启用来源」的
 // 扁平读数（迭代 8 Phase 6，使用API页的最小可见性）。字段纪律同
 // ServableModelSource：只带模型名、kind 与该来源所在上游的 type/base_url——
 // 调用方拿后两者判定「这条来源能不能服务该 kind 的入口」；上游名、来源侧
 // 模型 ID 与凭据对客户端恒隐藏，不出这条查询。ModelID 同 ServableModelSource：
 // 只给读数层套 Key 的 API模型范围，不出响应。
 type ServableAIGCSource struct {
-	ModelID         int64
-	ModelName       string
-	Kind            string // ModelKindVideo | ModelKindImage
-	UpstreamType    string
-	UpstreamBaseURL string
+	ModelID              int64
+	ModelName            string
+	Kind                 string // ModelKindVideo | ModelKindImage
+	UpstreamType         string
+	UpstreamProtocolURLs string
+	UpstreamBaseURL      string
 	// UpstreamBillingMode 与文本来源同口径，只用于管理顶栏分组计数。
 	UpstreamBillingMode string
 }
 
-// ListServableAIGCSources 列出视频/图片模型的可用来源：启用谓词与文本读数
+// ListServableAIGCSources 列出视频/图像模型的可用来源：启用谓词与文本读数
 // 逐字相同（模型/来源/上游三层都启用），kind 显式圈定 video|image。零启用
 // 来源的模型不出现（与 /v1/models 排除无来源模型同一口径）；来源挂在不服务
 // 该 kind 的上游类型上时行照出——「列得出但入口进不去」由调用方按协议表
@@ -870,19 +883,19 @@ type ServableAIGCSource struct {
 func (s *Store) ListServableAIGCSources(ctx context.Context) ([]ServableAIGCSource, error) {
 	rows, err := s.stmtListServableAIGCSources.QueryContext(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("列出可服务视频/图片来源: %w", err)
+		return nil, fmt.Errorf("列出可服务视频/图像来源: %w", err)
 	}
 	defer rows.Close()
 	var out []ServableAIGCSource
 	for rows.Next() {
 		var row ServableAIGCSource
-		if err := rows.Scan(&row.ModelID, &row.ModelName, &row.Kind, &row.UpstreamType, &row.UpstreamBaseURL, &row.UpstreamBillingMode); err != nil {
-			return nil, fmt.Errorf("列出可服务视频/图片来源: %w", err)
+		if err := rows.Scan(&row.ModelID, &row.ModelName, &row.Kind, &row.UpstreamType, &row.UpstreamBaseURL, &row.UpstreamProtocolURLs, &row.UpstreamBillingMode); err != nil {
+			return nil, fmt.Errorf("列出可服务视频/图像来源: %w", err)
 		}
 		out = append(out, row)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("列出可服务视频/图片来源: %w", err)
+		return nil, fmt.Errorf("列出可服务视频/图像来源: %w", err)
 	}
 	return out, nil
 }
@@ -898,7 +911,7 @@ func (s *Store) scanUpstream(r rowScanner) (*Upstream, error) {
 		disabled         int
 		created, updated string
 	)
-	err := r.Scan(&u.ID, &u.Name, &u.Type, &u.CatalogID, &u.BillingMode, &sealed, &u.BaseURL, &disabled, &u.EgressMode, &created, &updated)
+	err := r.Scan(&u.ID, &u.Name, &u.Type, &u.CatalogID, &u.BillingMode, &sealed, &u.BaseURL, &u.ProtocolURLs, &disabled, &u.EgressMode, &created, &updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -969,4 +982,18 @@ func scanModelSource(r rowScanner) (*ModelSource, error) {
 		return nil, fmt.Errorf("updated_at 非法: %w", err)
 	}
 	return &src, nil
+}
+
+// UpdateGenericUpstream atomically associates explicitly entered credentials with protocol URLs.
+func (s *Store) UpdateGenericUpstream(ctx context.Context, id int64, name, urls, apiKey string) error {
+	if apiKey == "" {
+		res, err := s.db.ExecContext(ctx, `UPDATE upstreams SET name = ?, protocol_urls = ?, updated_at = ? WHERE id = ? AND type = 'generic'`, name, urls, fmtTime(time.Now()), id)
+		return execOneRow(res, err, "更新通用适配")
+	}
+	sealed, err := s.sealKey(apiKey)
+	if err != nil {
+		return err
+	}
+	res, err := s.db.ExecContext(ctx, `UPDATE upstreams SET name = ?, protocol_urls = ?, api_key_sealed = ?, updated_at = ? WHERE id = ? AND type = 'generic'`, name, urls, sealed, fmtTime(time.Now()), id)
+	return execOneRow(res, err, "更新通用适配")
 }

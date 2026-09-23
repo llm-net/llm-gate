@@ -32,7 +32,7 @@ VERSION ?= $(BUILD_STAMP)-$(or $(GIT_SUFFIX),0000)$(if $(GIT_DIRTY),-d)
 LDFLAGS := -X $(MODULE)/internal/buildinfo.Version=$(VERSION) \
            -X $(MODULE)/internal/buildinfo.FileMarker=lgfw1{$(VERSION)|}lgfw1
 
-.PHONY: build build-arm64 build-amd64 release release-arm64 release-amd64 release-check print-version gate-assets web catalog check test clean
+.PHONY: build build-arm64 build-amd64 release release-arm64 release-amd64 release-check print-version gate-assets devd-assets web catalog check test clean
 
 ## print-version: 打印本次构建会用的版本名称。发布时先取这一串，再把同一个 VERSION 显式传给
 ## release——两次 make 之间分钟数可能翻页，只算一次才不会出现制品自述版本与索引 version 不一致。
@@ -40,25 +40,45 @@ print-version:
 	@echo $(VERSION)
 
 ## gate-assets: 交叉构建六个平台的 gate 客户端并生成固件内嵌清单。
-## 公开源码仓库（github.com/llm-net/llm-gate）只含 firmware/，没有 gate/：
-## 此时跳过重建，直接用已入库的 internal/gatehelper/assets/。
+## 主仓不追踪 internal/gatehelper/assets/ 里的制品（只有 .gitkeep），每次 build/test 都由这里重建，
+## 制品变化不会弄脏工作树，也不会把版本推成 -d。
+## 公开源码仓库（github.com/llm-net/llm-gate）同样带 gate/ 源码、同样不追踪这些制品，
+## 走的是与主仓一样的重建路径，只需要 Go 工具链。没有 ../gate 的源码包（例如只解开
+## firmware/ 的分发包）才回退到已有制品，两者都没有时报错——与 web 目标同规矩。
 gate-assets:
 	@if [ -d ../gate ]; then \
 	  $(MAKE) -C ../gate assets VERSION=$(VERSION) OUTPUT=../firmware/internal/gatehelper/assets; \
+	elif [ -f internal/gatehelper/assets/stable.json ]; then \
+	  echo "gate-assets: 没有 ../gate，使用已有的内嵌制品"; \
 	else \
-	  echo "gate-assets: 没有 ../gate，使用已入库的内嵌制品"; \
+	  echo "gate-assets: 没有 ../gate 也没有 internal/gatehelper/assets 制品，无法内嵌 gate 客户端" >&2; exit 1; \
 	fi
 
+## devd-assets: 交叉构建 linux/amd64 与 linux/arm64 的两个主机守护进程——工作节点的 llmgate-devd
+## （cmd/llmgate-devd）与模型服务节点的 llmgate-modeld（cmd/llmgate-modeld），都是纯标准库——并 gzip 成
+## 固件内嵌制品 internal/devhost/assets/<名>-linux-<arch>.gz 与共用的 VERSION。
+## 与 gate-assets 同规矩：目录只跟踪 .gitkeep，制品被 gitignore，每次 build/test 重建；固件把它按目标
+## 架构经 SSH 送到纳管主机上，也给「手动安装」下载。版本随固件同一个 VERSION。
+DEVD_ASSETS := internal/devhost/assets
+DAEMONS := llmgate-devd llmgate-modeld
+devd-assets:
+	@mkdir -p $(BIN_DIR) $(DEVD_ASSETS)
+	@for name in $(DAEMONS); do for arch in amd64 arm64; do \
+	  CGO_ENABLED=0 GOOS=linux GOARCH=$$arch go build -trimpath -ldflags '$(LDFLAGS)' -o $(BIN_DIR)/$$name-linux-$$arch ./cmd/$$name || exit 1; \
+	  gzip -9 -n -c $(BIN_DIR)/$$name-linux-$$arch > $(DEVD_ASSETS)/$$name-linux-$$arch.gz || exit 1; \
+	done; done
+	@printf '%s\n' '$(VERSION)' > $(DEVD_ASSETS)/VERSION
+
 ## build: 本机构建 bin/llmgate
-build: gate-assets
+build: gate-assets devd-assets web
 	CGO_ENABLED=0 go build -trimpath -ldflags '$(LDFLAGS)' -o $(BIN_DIR)/llmgate ./cmd/llmgate
 
 ## build-arm64: 交叉编译 linux/arm64 静态二进制（开发板与 ARM64 主机），产物 bin/llmgate-linux-arm64
-build-arm64: gate-assets
+build-arm64: gate-assets devd-assets web
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags '$(LDFLAGS)' -o $(BIN_DIR)/llmgate-linux-arm64 ./cmd/llmgate
 
 ## build-amd64: 交叉编译 linux/amd64 静态二进制（x86-64 云主机与电脑），产物 bin/llmgate-linux-amd64
-build-amd64: gate-assets
+build-amd64: gate-assets devd-assets web
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags '$(LDFLAGS)' -o $(BIN_DIR)/llmgate-linux-amd64 ./cmd/llmgate
 
 ## release-check: 正式发布的前置闸。拒绝脏工作树与不成形状的 VERSION——版本名称由构建时刻
@@ -100,33 +120,46 @@ release-amd64: release-check
 	$(MAKE) build-amd64 VERSION=$(VERSION)
 	@sha256sum $(BIN_DIR)/llmgate-linux-amd64
 
-## web: 重建前端产物（入库；go build 不依赖 Node）——
-##   web/ui → internal/ui/uidist（设备界面，挂在 /ui/）
-## 产物 embed 进二进制，改了源码要把重建的 uidist 与源码一起提交。
+## web: 重建设备界面产物 web/ui → internal/ui/uidist（挂在 /ui/，embed 进二进制）。
+## 产物不入库（目录只跟踪 .gitkeep），build / test 每次先经这里重建，与 gate-assets 同规矩。
+## 有 npm 就重建（node_modules 缺失时先 npm ci；WEB_INSTALL=1 强制重装）；没有 npm 但
+## 已有产物（公开源码快照随带 uidist）就直接内嵌；两者都没有时报错。
 web:
-	cd web/ui && npm ci && npm run build
-
-## catalog: 把目录数据的维护源（公开发布仓库检出 distribute/llm-gate/catalog/ 里的
-## official-pricing.json 与 platform-models.json）校验后复制到官网副本与固件内嵌副本。
-## 三份必须逐字节一致（internal/platformcatalog 与 internal/catalogcheck 的绊线测试把守）；
-## 不在副本上直接改。维护流程见维护源目录的 README.md。用法：make catalog [CATALOG_SRC=<目录>]
-CATALOG_SRC ?= ../distribute/llm-gate/catalog
-catalog:
-	@if [ ! -f "$(CATALOG_SRC)/official-pricing.json" ] || [ ! -f "$(CATALOG_SRC)/platform-models.json" ]; then \
-	  echo "catalog: $(CATALOG_SRC) 里没有 official-pricing.json / platform-models.json（需要公开发布仓库的独立检出）" >&2; exit 1; \
+	@if command -v npm >/dev/null 2>&1; then \
+	  cd web/ui && { [ -d node_modules ] && [ -z "$(WEB_INSTALL)" ] || npm ci; } && npm run build; \
+	elif [ -f internal/ui/uidist/index.html ]; then \
+	  echo "web: 没有 npm，使用已有的 internal/ui/uidist 产物"; \
+	else \
+	  echo "web: 没有 npm 也没有 internal/ui/uidist 产物，无法内嵌设备界面" >&2; exit 1; \
 	fi
-	go run ./tools/catalogcheck "$(CATALOG_SRC)"
-	cp "$(CATALOG_SRC)/official-pricing.json" ../website/public/updates/data/official-pricing.json
-	cp "$(CATALOG_SRC)/platform-models.json" ../website/public/updates/data/platform-models.json
-	cp "$(CATALOG_SRC)/platform-models.json" internal/platformcatalog/platform-models.json
-	go test ./internal/platformcatalog/ ./internal/catalogcheck/
+
+## catalog: 从公开数据仓库 llm-model-data 的最新正式 tag 合成模型目录文件
+## model-catalog.json（tools/modeldata），校验（tools/catalogcheck）后写官网副本并复制到
+## 固件内嵌副本。两份必须逐字节一致（internal/platformcatalog 与 internal/catalogcheck 的
+## 绊线测试把守）；不在副本上直接改：数据改到数据仓库并打正式 tag，映射改到 internal/modeldata。
+## 用法：make catalog [MODEL_DATA=<数据仓库检出>] [MODEL_DATA_REF=<tag>] [MODEL_DATA_FETCH=1]
+MODEL_DATA ?= ../llm-model-data
+MODEL_DATA_REF ?=
+MODEL_DATA_FETCH ?=
+CATALOG_OUT := ../website/public/updates/data/model-catalog.json
+catalog:
+	@if [ ! -d "$(MODEL_DATA)/.git" ]; then \
+	  echo "catalog: $(MODEL_DATA) 不是数据仓库的 git 检出（git clone https://github.com/llm-net/llm-model-data.git）" >&2; exit 1; \
+	fi
+	go run ./tools/modeldata -repo "$(MODEL_DATA)" -out "$(CATALOG_OUT)" \
+	  $(if $(MODEL_DATA_REF),-ref "$(MODEL_DATA_REF)") $(if $(MODEL_DATA_FETCH),-fetch)
+	go run ./tools/catalogcheck "$(CATALOG_OUT)"
+	cp "$(CATALOG_OUT)" internal/platformcatalog/model-catalog.json
+	go test ./internal/platformcatalog/ ./internal/catalogcheck/ ./internal/modeldata/
 
 ## check: 静态检查
 check:
 	go vet ./...
 
 ## test: 全量测试
-test:
+## test: 先重建 gate 内嵌制品与设备界面产物，再跑全部包测试（gatehelper 的制品校验与
+## internal/ui 的产物校验没有制品时会 skip）。
+test: gate-assets devd-assets web
 	go test ./...
 
 clean:

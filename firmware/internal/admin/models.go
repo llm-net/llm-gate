@@ -155,6 +155,8 @@ type sourceResponse struct {
 // 文本为三个协议面；视频与图像按模型声明的厂商协议面限制来源。
 func kindProtocols(kind string) []string {
 	switch kind {
+	case store.ModelKindSystemOne:
+		return []string{config.ProtocolSystemOne}
 	case store.ModelKindVideo:
 		return []string{config.ProtocolArkVideo, config.ProtocolMinimaxVideo}
 	case store.ModelKindImage:
@@ -167,11 +169,14 @@ func kindProtocols(kind string) []string {
 // servableProtocols 按运行时口径算出某上游在 kind 圈内能服务的入口协议
 // （内置 (type, 协议) 端点表优先于 base_url，见 upstream.Account.Endpoint
 // 的说明）。顺序固定，UI 直接按序渲染徽标。
-func servableProtocols(kind, upstreamType, baseURL string) []string {
+func servableProtocols(kind, upstreamType, baseURL string, protocolURLs ...string) []string {
 	acct := upstream.Account{Type: upstreamType, BaseURL: baseURL}
+	if len(protocolURLs) > 0 {
+		acct.ProtocolURLs = protocolURLs[0]
+	}
 	out := make([]string, 0, 3)
 	for _, p := range kindProtocols(kind) {
-		if _, ok := acct.Endpoint(upstream.CatalogWireProtocol(p)); ok {
+		if _, ok := acct.Endpoint(acct.WireProtocol(p)); ok {
 			out = append(out, p)
 		}
 	}
@@ -180,11 +185,14 @@ func servableProtocols(kind, upstreamType, baseURL string) []string {
 
 // sourceProtocols 是具体来源的协议能力，测试、徽标与接入读数共用；账号级
 // 的种类选单仍用 servableProtocols，不把某个型号的限制当成整个账号的限制。
-func sourceProtocols(doc platformcatalog.Doc, kind, model, upstreamModelID, upstreamType, catalogID, baseURL string) []string {
+func sourceProtocols(doc platformcatalog.Doc, kind, model, upstreamModelID, upstreamType, catalogID, baseURL string, protocolURLs ...string) []string {
 	acct := upstream.Account{Type: upstreamType, BaseURL: baseURL}
+	if len(protocolURLs) > 0 {
+		acct.ProtocolURLs = protocolURLs[0]
+	}
 	out := make([]string, 0, 3)
 	for _, p := range kindProtocols(kind) {
-		if _, ok := acct.ModelEndpoint(doc, catalogID, model, upstreamModelID, upstream.CatalogWireProtocol(p)); ok {
+		if _, ok := acct.ModelEndpoint(doc, catalogID, model, upstreamModelID, acct.WireProtocol(p)); ok {
 			out = append(out, p)
 		}
 	}
@@ -194,7 +202,7 @@ func sourceProtocols(doc platformcatalog.Doc, kind, model, upstreamModelID, upst
 // toSourceJSON 组装来源的对外形态。kind 是所属模型的种类（决定 protocols 的
 // 圈定范围）；上游展示字段由调用方从管理视图或 GetUpstreamByID 取得——
 // 凭证不参与，这里拿不到也不需要明文。
-func toSourceJSON(doc platformcatalog.Doc, kind, model string, src store.ModelSource, upName, upType, upCatalogID, upBillingMode, upBaseURL string, upDisabled bool, upEgressMode string) sourceJSON {
+func toSourceJSON(doc platformcatalog.Doc, kind, model string, src store.ModelSource, upName, upType, upCatalogID, upBillingMode, upBaseURL string, upDisabled bool, upEgressMode string, protocolURLs ...string) sourceJSON {
 	return sourceJSON{
 		ID:                    src.ID,
 		ModelID:               src.ModelID,
@@ -209,7 +217,7 @@ func toSourceJSON(doc platformcatalog.Doc, kind, model string, src store.ModelSo
 		UpstreamModelID:       src.UpstreamModelID,
 		Priority:              src.Priority,
 		Disabled:              src.Disabled,
-		Protocols:             sourceProtocols(doc, kind, model, src.UpstreamModelID, upType, upCatalogID, upBaseURL),
+		Protocols:             sourceProtocols(doc, kind, model, src.UpstreamModelID, upType, upCatalogID, upBaseURL, protocolURLs...),
 	}
 }
 
@@ -309,7 +317,7 @@ func toModelJSON(doc platformcatalog.Doc, m store.ModelWithSources) modelJSON {
 	for _, src := range m.Sources {
 		mj.Sources = append(mj.Sources, toSourceJSON(doc, m.Kind, m.Name, src.ModelSource,
 			src.UpstreamName, src.UpstreamType, src.UpstreamCatalogID, src.UpstreamBillingMode,
-			src.UpstreamBaseURL, src.UpstreamDisabled, src.UpstreamEgressMode))
+			src.UpstreamBaseURL, src.UpstreamDisabled, src.UpstreamEgressMode, src.UpstreamProtocolURLs))
 	}
 	return mj
 }
@@ -472,11 +480,11 @@ func (s *Server) handleCreateModel(w http.ResponseWriter, r *http.Request) {
 	switch kind {
 	case "":
 		kind = store.ModelKindText
-	case store.ModelKindText, store.ModelKindVideo, store.ModelKindImage:
+	case store.ModelKindText, store.ModelKindVideo, store.ModelKindImage, store.ModelKindSystemOne:
 	default:
 		writeError(w, http.StatusBadRequest, "invalid_kind",
-			fmt.Sprintf("未知模型种类 %q（可选 %s|%s|%s）", req.Kind,
-				store.ModelKindText, store.ModelKindVideo, store.ModelKindImage))
+			fmt.Sprintf("未知模型种类 %q（可选 %s|%s|%s|%s）", req.Kind,
+				store.ModelKindText, store.ModelKindVideo, store.ModelKindImage, store.ModelKindSystemOne))
 		return
 	}
 	// 协议面声明先校验（0014）：协议面是模型对客户端的 API 格式承诺，只能显式
@@ -484,9 +492,12 @@ func (s *Server) handleCreateModel(w http.ResponseWriter, r *http.Request) {
 	// 开关的口径）；image 缺省补唯一一个；video 传了就按 kind 圈内校验，
 	// 缺省 = 未声明（由首条来源懒钉，兼容不带该字段的旧调用方）。
 	family := req.Family
+	if family == "" && kind == store.ModelKindSystemOne {
+		family = config.ProtocolSystemOne
+	}
 	if kind == store.ModelKindText {
 		if family != "" {
-			writeError(w, http.StatusBadRequest, "family_text_only", "协议面仅视频/图像模型可声明")
+			writeError(w, http.StatusBadRequest, "family_text_only", "协议面仅视频、图像或语义判断模型可声明")
 			return
 		}
 	} else {
@@ -534,12 +545,17 @@ func (s *Server) handleCreateModel(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "entries_required", "至少开启一个协议面")
 		return
 	}
-	// 目录价可在建模时一并录（缺省未定价——照常转发、金额记 0、管理台挂
-	// 警示徽章）。形态字段集按刚定下的 kind 校验。
-	pricing, _, perr := parseModelPricing(kind, req.Pricing)
+	// 目录价可在建模时一并录；形态字段集按刚定下的 kind 校验。不带 pricing 字段
+	// 时按名到生效目录里找估算目录价（找不到才是未定价——照常转发、金额记 0、
+	// 管理台挂警示徽章）；显式 null / {} 是「我就要未定价」，尊重它。
+	pricing, present, perr := parseModelPricing(kind, req.Pricing)
 	if perr != nil {
 		writeError(w, http.StatusBadRequest, "invalid_pricing", "目录价不合法："+perr.Error())
 		return
+	}
+	pricedFrom := ""
+	if !present {
+		pricing, pricedFrom = s.initialCatalogPricing(r.Context(), req.Name, kind, "", "")
 	}
 	m, err := s.st.CreateModel(r.Context(), req.Name, kind, pricing)
 	if err != nil {
@@ -568,10 +584,14 @@ func (s *Server) handleCreateModel(w http.ResponseWriter, r *http.Request) {
 		}
 		m.Family = family
 	}
+	detail := fmt.Sprintf("name=%s kind=%s family=%s entries=%s pricing=%s", m.Name, m.Kind, familyAudit(m.Family), entriesLabel(m.EntryOpenAI, m.EntryResponses, m.EntryAnthropic), pricingAudit(m.Pricing))
+	if pricedFrom != "" {
+		detail += " pricing_source=model_catalog:" + pricedFrom
+	}
 	s.audit(r.Context(), store.AuditEvent{
 		Event:    EventModelCreate,
 		Entity:   entityModel(m.ID),
-		Detail:   fmt.Sprintf("name=%s kind=%s family=%s entries=%s pricing=%s", m.Name, m.Kind, familyAudit(m.Family), entriesLabel(m.EntryOpenAI, m.EntryResponses, m.EntryAnthropic), pricingAudit(m.Pricing)),
+		Detail:   detail,
 		RemoteIP: remoteIP(r),
 	})
 	one := []modelJSON{{
@@ -868,8 +888,12 @@ func (s *Server) handleCreateModelSource(w http.ResponseWriter, r *http.Request)
 	// 客户端路径上，正是纯转发要消灭的形态。文本模型不在此列（文本三协议是行业
 	// 通形，入口按协议各自过滤）。写入时校验而非选路时过滤：死配置当场报错，
 	// 不留到客户端 404 才被发现。
+	if (up.Type == config.UpstreamSystemOne || up.Type == config.UpstreamGeneric) && len(servableProtocols(model.Kind, up.Type, up.BaseURL, up.ProtocolURLs)) == 0 {
+		writeError(w, http.StatusBadRequest, "source_kind_unservable", "该账号未配置此模型种类的协议面")
+		return
+	}
 	if model.Kind != store.ModelKindText {
-		fam := servableProtocols(model.Kind, up.Type, up.BaseURL)
+		fam := servableProtocols(model.Kind, up.Type, up.BaseURL, up.ProtocolURLs)
 		if len(fam) == 0 {
 			writeError(w, http.StatusBadRequest, "source_kind_unservable",
 				"该上游类型不服务此模型种类的任何协议面，无法作为来源")
@@ -920,7 +944,7 @@ func (s *Server) handleCreateModelSource(w http.ResponseWriter, r *http.Request)
 	})
 	doc, _ := s.effectivePlatformModels(r.Context())
 	writeJSON(w, http.StatusCreated, sourceResponse{
-		Source: toSourceJSON(doc, model.Kind, model.Name, *src, up.Name, up.Type, up.CatalogID, up.BillingMode, up.BaseURL, up.Disabled, up.EgressMode)})
+		Source: toSourceJSON(doc, model.Kind, model.Name, *src, up.Name, up.Type, up.CatalogID, up.BillingMode, up.BaseURL, up.Disabled, up.EgressMode, up.ProtocolURLs)})
 }
 
 // handlePatchModelSource 改来源的优先级 / 来源侧模型 ID / 启停。上游归属不可改
@@ -1000,7 +1024,7 @@ func (s *Server) handlePatchModelSource(w http.ResponseWriter, r *http.Request) 
 	updated.UpstreamModelID, updated.Priority, updated.Disabled = upstreamModelID, priority, disabled
 	doc, _ := s.effectivePlatformModels(r.Context())
 	writeJSON(w, http.StatusOK, sourceResponse{
-		Source: toSourceJSON(doc, model.Kind, model.Name, updated, up.Name, up.Type, up.CatalogID, up.BillingMode, up.BaseURL, up.Disabled, up.EgressMode)})
+		Source: toSourceJSON(doc, model.Kind, model.Name, updated, up.Name, up.Type, up.CatalogID, up.BillingMode, up.BaseURL, up.Disabled, up.EgressMode, up.ProtocolURLs)})
 }
 
 // handleDeleteModelSource 删来源；模型与上游都不受影响。

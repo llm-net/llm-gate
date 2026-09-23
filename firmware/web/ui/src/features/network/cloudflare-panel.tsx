@@ -5,7 +5,7 @@
 // 一个「已开启」掩盖不了故障在哪一层，四盏灯才说得清。
 //
 // 组件本身（安装 / 升级 / 回退 / 卸载）不在这里操作：本面板只放一张先决条件卡
-// （features/components/prereq-card.tsx）指向「第三方组件」页。
+// （features/components/prereq-card.tsx）指向「组件管理」页。
 //
 // 版面只留状态、动作与数据：解释性文字收进「说明」对话框与字段旁的问号；设置卡片平时
 // 只读，点「编辑」才出表单，保存 / 取消收口。
@@ -532,7 +532,7 @@ function enableBlocker(status: api.CloudflareStatus): string {
   if (status.config.hostname === "") return t("先设置 hostname");
   if (status.credential.state !== "sealed") return t("先粘贴并保存 token");
   if (!status.component.engine_available) return t("升级引擎不可达");
-  return t("先到「第三方组件」页安装 cloudflared");
+  return t("先到「组件管理」页安装 cloudflared");
 }
 
 function lastErrorText(err: string): string {

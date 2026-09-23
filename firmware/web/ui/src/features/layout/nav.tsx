@@ -1,16 +1,17 @@
 // 侧栏导航，也是侧栏里唯一的滚动容器。
 //
-// 结构上只有一个 `SidebarContent`（`flex-1 min-h-0 overflow-auto`），使用指南、模型接入
-// 与设备三组都在它里面：菜单一多就整块一起滚，不出现「某一组自己卷动、别的组钉在
-// 原地」。
+// 结构上只有一个 `SidebarContent`（`flex-1 min-h-0 overflow-auto`），四个菜单组都在
+// 它里面：菜单一多就整块一起滚，不出现「某一组自己卷动、别的组钉在原地」。
 //
-// 设备只有一个管理员，登录进来就都看得见。三组的分工：
+// 设备只有一个管理员，登录进来就都看得见。四组的分工：
 //   使用指南   讲局域网里的客户端与开发工具怎样接入这台设备——输出侧；
 //   模型接入   四种接入各一页（API按量计费 / API订阅套餐 / API私有部署 / 开发工具订阅）
 //              ——输入侧。四种接入在设备上统一成同一组输出，全部是协议面：文本的
 //              OpenAI Chat / OpenAI Responses / Anthropic Messages，按厂商与模态各一个的
 //              视频 / 图像协议面（火山方舟 视频、火山方舟 图像、MiniMax 视频…），以及
 //              各开发工具订阅自己的协议面；
+//   智能体     可被智能体远程管理的主机 / SoC 开发板（访问证书与免密登录，以及每台
+//              主机上的守护进程 devd），以及交给智能体使用的第三方凭证；
 //   设备       管理设备自身的页面。
 //
 // 一处刻意保留的行为：`/egress` 在轨上高亮「网络/域名/代理」——同页不同标签，
@@ -20,17 +21,22 @@
 
 import {
   Activity,
+  FlaskConical,
   Blocks,
   Bot,
   Code2,
   Coins,
+  Cpu,
+  FolderGit2,
   HardDriveDownload,
   KeyRound,
   Network,
   ReceiptText,
   ServerCog,
   Terminal,
+  WandSparkles,
   Ticket,
+  Vault,
 } from "lucide-react";
 
 import {
@@ -58,6 +64,8 @@ interface NavItem {
 const GUIDE_ITEMS: NavItem[] = [
   { to: "/model-routing/api", label: t("API调用"), icon: Code2 },
   { to: "/model-routing/dev-tools", label: t("开发工具接入"), icon: Terminal },
+  { to: "/api-debug", label: t("API调测"), icon: FlaskConical },
+  { to: "/media", label: t("媒体生成"), icon: WandSparkles },
 ];
 
 // 模型接入四页的顺序就是管理员录账号时的心智顺序：先按量、再套餐、再自己部署的，
@@ -69,13 +77,24 @@ const MODEL_ACCESS_ITEMS: NavItem[] = [
   { to: "/agent-accounts", label: t("开发工具订阅"), icon: Bot },
 ];
 
+// 智能体：设备之外、由智能体远程管理的那些机器。「主机/SoC」登记主机、发访问证书、
+// 配免密登录；每台主机的「Agent远控」页 `/host-agent`、工作节点的工具配置 `/host-tools`
+// （devd / git / gate）都从它进入、也高亮它。
+// 「凭证管理」保管交给智能体使用的第三方凭证（git 托管站点的账号 + 令牌）。「工作空间管理」是
+// 工作节点上的目录（可选从仓库克隆），打开其中一个的 `/workspace` 页也高亮它。
+const AGENT_ITEMS: NavItem[] = [
+  { to: "/agent-hosts", label: t("主机/SoC"), icon: Cpu, aliases: ["/host-agent", "/host-tools", "/host-model"] },
+  { to: "/credentials", label: t("凭证管理"), icon: Vault },
+  { to: "/workspaces", label: t("工作空间管理"), icon: FolderGit2, aliases: ["/workspace"] },
+];
+
 const DEVICE_ITEMS: NavItem[] = [
   { to: "/keys", label: t("API密钥"), icon: KeyRound },
   { to: "/usage", label: t("模型用量"), icon: ReceiptText },
   { to: "/status", label: t("设备状态"), icon: Activity },
   { to: "/network", label: t("网络/域名/代理"), icon: Network, aliases: ["/egress"] },
   { to: "/updates", label: t("设备更新"), icon: HardDriveDownload },
-  { to: "/components", label: t("第三方组件"), icon: Blocks },
+  { to: "/components", label: t("组件管理"), icon: Blocks },
 ];
 
 function NavLinks({ items, route }: { items: NavItem[]; route: string }) {
@@ -113,6 +132,10 @@ function Nav() {
       <SidebarGroup>
         <SidebarGroupLabel>{t("模型接入")}</SidebarGroupLabel>
         <NavLinks items={MODEL_ACCESS_ITEMS} route={route} />
+      </SidebarGroup>
+      <SidebarGroup>
+        <SidebarGroupLabel>{t("智能体")}</SidebarGroupLabel>
+        <NavLinks items={AGENT_ITEMS} route={route} />
       </SidebarGroup>
       <SidebarGroup>
         <SidebarGroupLabel>{t("设备")}</SidebarGroupLabel>

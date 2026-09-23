@@ -21,6 +21,8 @@
 // 页头在取数闸外**常驻渲染**；标题、简介与刷新入口都使用管理页共用标题栏，不随正文
 // 加载态消失。零轮询：进页一次并发取两份读数（账号 + 模型目录），刷新按钮再取一次。
 
+import { useState } from "react";
+
 import { AgentAccountsColumn } from "@/features/upstreams/agent-accounts";
 import { AgentModelsColumn } from "@/features/upstreams/agent-models";
 import { ApiAccountsColumn } from "@/features/upstreams/api-accounts";
@@ -37,6 +39,28 @@ import { PageContainer, PageHeader, ResourceGate } from "./page-shell";
 // 模型卡里那张上游小表一宽就把整列撑出视口；下限归零后表在卡内横滚，列不动。
 const twoColumns =
   "grid grid-cols-[minmax(0,1fr)] gap-x-4 gap-y-3 lg:grid-cols-[25rem_minmax(0,1fr)] xl:grid-cols-[27rem_minmax(0,1fr)]";
+
+// 开发工具订阅页右列「模型」收起后的网格：右列只剩一根窄轨，左列吃掉整宽、订阅卡平铺。
+const railColumns = "grid grid-cols-[minmax(0,1fr)] gap-x-4 gap-y-3 lg:grid-cols-[minmax(0,1fr)_auto]";
+
+// 「模型」列开合是纯浏览器偏好，随主题/语言一样放 localStorage，不进服务端设置。
+const MODELS_OPEN_KEY = "llmgate.ui.agentModelsOpen";
+
+function readModelsOpen(): boolean {
+  try {
+    return localStorage.getItem(MODELS_OPEN_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
+
+function writeModelsOpen(open: boolean): void {
+  try {
+    localStorage.setItem(MODELS_OPEN_KEY, open ? "1" : "0");
+  } catch {
+    // 私密窗口等禁用存储时只影响本次会话的记忆，不影响功能。
+  }
+}
 
 const API_PAGE_COPY: Record<ApiBillingPage, { title: string; note: string }> = {
   usage: {
@@ -105,6 +129,13 @@ export function PrivateDeploymentPage(): React.ReactElement {
 }
 
 export function AgentAccountsPage(): React.ReactElement {
+  const [modelsOpen, setModelsOpen] = useState(readModelsOpen);
+  function toggleModels(): void {
+    setModelsOpen((o) => {
+      writeModelsOpen(!o);
+      return !o;
+    });
+  }
   const res = useResource(async () => {
     const [{ accounts }, { models }, cursorPrices] = await Promise.all([
       api.listAgentAccounts(),
@@ -124,9 +155,15 @@ export function AgentAccountsPage(): React.ReactElement {
       />
       <ResourceGate resource={res}>
         {(d) => (
-          <div className={twoColumns}>
-            <AgentAccountsColumn accounts={d.accounts} reload={res.reload} />
-            <AgentModelsColumn all={d.models} accounts={d.accounts} cursorPrices={d.cursorPrices} />
+          <div className={modelsOpen ? twoColumns : railColumns}>
+            <AgentAccountsColumn accounts={d.accounts} reload={res.reload} tiled={!modelsOpen} />
+            <AgentModelsColumn
+              all={d.models}
+              accounts={d.accounts}
+              cursorPrices={d.cursorPrices}
+              open={modelsOpen}
+              onToggle={toggleModels}
+            />
           </div>
         )}
       </ResourceGate>

@@ -137,7 +137,7 @@ func run(args []string, in io.Reader, out, errOut io.Writer) int {
 		return 0
 	}
 	if commandMutates(args) && !installerChild(root, args) {
-		a.lease, err = acquireOperation(root, commandLaunches(args))
+		a.lease, err = acquireOperation(root, commandSharesUsage(args))
 		if err != nil {
 			fmt.Fprintln(errOut, "gate:", err)
 			return 1
@@ -225,7 +225,9 @@ func run(args []string, in io.Reader, out, errOut io.Writer) int {
 			return 2
 		}
 		err = a.selfUpdate()
-	case "codex", "grok", "claude", "cursor", "opencode":
+	case "media":
+		return a.media(args[1:], in)
+	case "codex", "grok", "claude", "cursor", "opencode", "mcode":
 		err = a.tool(args[0], args[1:], in)
 	default:
 		fmt.Fprintf(errOut, "gate: 未知命令 %q\n", args[0])
@@ -249,15 +251,18 @@ func printHelp(w io.Writer) {
   gate status               显示设备策略和工具状态
   gate update               从当前设备检查并升级 gate
   gate <工具> connect       关联 PATH 中已有工具
-  gate <工具> install       缺失时经设备安装
+  gate <工具> install       缺失时安装（先官方源，不可达再经设备）
   gate <工具> update [--adopt]
   gate <工具> disconnect
   gate <工具> status
-  gate <工具> [参数...]      启动 codex、grok、claude、cursor 或 opencode
+  gate <工具> [参数...]      启动 codex、grok、claude、cursor、opencode 或 mcode
   gate codex connect --shared [--path <内核路径>]
                            把设备接入写进使用者自己的 ~/.codex，供 ChatGPT.app
                            桌面版、IDE 插件等不经 gate 启动的 Codex 使用
   gate codex disconnect --shared
+  gate media models|generate|wait|status|cancel
+                           用这把 Key 生成图像 / 视频并把结果存到当前目录；
+                           详见 gate media help
 `)
 }
 
@@ -526,6 +531,12 @@ func (a *app) fetchRuntimeAt(base, key string) (runtimeConfig, error) {
 	if got.Tools == nil {
 		return got, errors.New("设备配置缺少 tools")
 	}
+	// Older firmware already projects the same authorized Chat catalog for
+	// OpenCode. Only absence permits fallback; an explicit empty mcode policy
+	// must remain empty.
+	if _, ok := got.Tools["mcode"]; !ok {
+		got.Tools["mcode"] = got.Tools["opencode"]
+	}
 	return got, nil
 }
 
@@ -542,10 +553,10 @@ func (a *app) status() error {
 	if err != nil {
 		return fmt.Errorf("读取设备配置: %w", err)
 	}
-	for _, name := range []string{"codex", "grok", "claude", "cursor", "opencode"} {
+	for _, name := range toolNames {
 		sub := findSubscription(rc, name)
 		state := "未授权"
-		if name == "opencode" {
+		if name == "opencode" || name == "mcode" {
 			state = "无需订阅"
 		} else if sub.Configured && sub.Available {
 			state = "已授权"
@@ -647,12 +658,27 @@ func (a *app) tool(name string, args []string, in io.Reader) error {
 }
 
 func toolBinaryName(name string) string {
-	// cursor 的 CLI 程序名是 cursor-agent；官方安装另有 agent 软链，但太泛
-	// （grok 也装同名 agent 软链），不作候选。
-	if name == "cursor" {
-		name = "cursor-agent"
+	return toolBinaryNameFor(runtime.GOOS, name)
+}
+
+// toolBinaryNameFor 给出工具在 goos 上的入口文件名。cursor 的 CLI 程序名是
+// cursor-agent；官方安装另有 agent 软链，但太泛（grok 也装同名 agent 软链），
+// 不作候选。Windows 的 Cursor 官方整树制品与官方安装脚本都没有
+// cursor-agent.exe：入口是 cursor-agent.cmd（经 cursor-agent.ps1 调同树
+// node.exe index.js），官方脚本把它放到 %LOCALAPPDATA%\cursor-agent 并加入
+// PATH；受管树与外部安装因此在 Windows 上统一以 .cmd 为入口，--version 自检、
+// 落点校验与启动都指向它。
+func toolBinaryNameFor(goos, name string) string {
+	if name == "mcode" && goos == "windows" {
+		return "mcode.cmd"
 	}
-	if runtime.GOOS == "windows" {
+	if name == "cursor" {
+		if goos == "windows" {
+			return "cursor-agent.cmd"
+		}
+		return "cursor-agent"
+	}
+	if goos == "windows" {
 		return name + ".exe"
 	}
 	return name
@@ -707,6 +733,9 @@ func (a *app) usablePathCandidate(name string, rc runtimeConfig) (string, error)
 	binary := toolBinaryName(name)
 	candidates := lookPathAll(binary)
 	if len(candidates) == 0 {
+		if name == "mcode" {
+			return "", errors.New("PATH 中没有 mcode；请执行 gate mcode install 安装受管副本")
+		}
 		return "", fmt.Errorf("PATH 中没有 %s；可执行 gate %s install", binary, name)
 	}
 	var failures []error
@@ -816,9 +845,9 @@ func (e *noUsableCLIError) Error() string {
 		parts[i] = err.Error()
 	}
 	if len(parts) == 1 {
-		return fmt.Sprintf("%s；可升级或卸载后重试，或执行 gate %s install 经设备安装受管副本", parts[0], e.tool)
+		return fmt.Sprintf("%s；可升级或卸载后重试，或执行 gate %s install 安装受管副本", parts[0], e.tool)
 	}
-	return fmt.Sprintf("PATH 中的 %d 个 %s 都不可用：%s。多渠道安装并存时，升级请认准 gate 实际使用的路径；可卸载多余安装，或执行 gate %s install 经设备安装受管副本",
+	return fmt.Sprintf("PATH 中的 %d 个 %s 都不可用：%s。多渠道安装并存时，升级请认准 gate 实际使用的路径；可卸载多余安装，或执行 gate %s install 安装受管副本",
 		len(parts), e.tool, strings.Join(parts, "；"), e.tool)
 }
 
@@ -850,23 +879,48 @@ func detectVersion(path string) string {
 }
 
 func detectVersionWithEnv(path string, env []string) string {
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	line, err := probeVersion(path, env, 8*time.Second)
+	if err != nil {
+		return "unknown"
+	}
+	return line
+}
+
+// probeVersion 执行 path --version 并返回首行；失败时带回可诊断的原因
+// （无法启动、退出码、超时及输出前缀），供安装自检把「不一致」的真实成因
+// 说出来。输出只截首行/前 120 字节，不含 Key（env 由调用方脱敏）。
+func probeVersion(path string, env []string, timeout time.Duration) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, path, "--version")
+	if runtime.GOOS == "windows" && strings.EqualFold(filepath.Base(path), "mcode.cmd") {
+		cmd = mcodeCommand(ctx, path, "--version")
+	}
 	cmd.Stdin = nil
 	if env != nil {
 		cmd.Env = env
 	}
 	b, err := cmd.CombinedOutput()
 	if err != nil {
-		return "unknown"
+		if ctx.Err() != nil {
+			return "", fmt.Errorf("%s --version 超过 %s 未结束", filepath.Base(path), timeout)
+		}
+		if snippet := firstLine(b); snippet != "" {
+			return "", fmt.Errorf("%s --version: %w（输出：%s）", filepath.Base(path), err, snippet)
+		}
+		return "", fmt.Errorf("%s --version: %w", filepath.Base(path), err)
 	}
+	line := firstLine(b)
+	if line == "" {
+		return "", fmt.Errorf("%s --version 没有输出", filepath.Base(path))
+	}
+	return line, nil
+}
+
+func firstLine(b []byte) string {
 	line, _, _ := strings.Cut(strings.TrimSpace(string(b)), "\n")
 	if len(line) > 120 {
 		line = line[:120]
-	}
-	if line == "" {
-		return "unknown"
 	}
 	return line
 }
@@ -957,6 +1011,9 @@ func (a *app) launch(name string, args []string, in io.Reader) error {
 		args = append([]string{"--settings", filepath.Join(a.derivedDir("claude"), "cli-settings.json")}, args...)
 	}
 	cmd := exec.Command(st.BinaryPath, args...)
+	if name == "mcode" {
+		cmd = mcodeCommand(context.Background(), st.BinaryPath, args...)
+	}
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = in, a.out, a.err
 	cmd.Env = a.toolEnv(name)
 	cmd.Dir, _ = os.Getwd()
@@ -1007,6 +1064,8 @@ func (a *app) prepareToolConfig(name, path string, rc runtimeConfig) error {
 		return a.prepareCursor(rc)
 	case "opencode":
 		return a.prepareOpenCode(path, rc.Tools[name])
+	case "mcode":
+		return a.prepareMCode(path, rc.Tools[name])
 	default:
 		return errors.New("未知工具")
 	}
@@ -1029,6 +1088,8 @@ func (a *app) toolEnv(name string) []string {
 		env = append(env, prefix+v)
 	}
 	switch name {
+	case "mcode":
+		return mcodeEnv(env, a.derivedDir(name))
 	case "codex":
 		set("CODEX_HOME", a.derivedDir(name))
 		set("LLMGATE_API_KEY", a.cfg.APIKey)
@@ -1096,7 +1157,7 @@ func (a *app) prepareCodex(path string, tool runtimeTool) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	catalog, err := a.codexCatalog(path, tool)
+	catalog, tool, err := a.codexCatalog(path, tool)
 	if err != nil {
 		return err
 	}
@@ -1133,18 +1194,20 @@ func rawSlug(raw json.RawMessage) string {
 	return v.Slug
 }
 
-func (a *app) codexCatalog(path string, tool runtimeTool) ([]byte, error) {
+// codexCatalog 同时返回实际写进目录的模型集合：内核不认识的订阅模型被略去，
+// 默认模型随之落到第一个保留的模型上。
+func (a *app) codexCatalog(path string, tool runtimeTool) ([]byte, runtimeTool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, path, "debug", "models", "--bundled")
 	cmd.Env = a.toolEnv("codex")
 	bundled, err := cmd.Output()
 	if err != nil {
-		return nil, codexUnusable(path, "无法导出 bundled 模型目录，需要升级 CLI："+execFailureDetail(err))
+		return nil, tool, codexUnusable(path, "无法导出 bundled 模型目录，需要升级 CLI："+execFailureDetail(err))
 	}
 	var base catalogEnvelope
 	if err := json.Unmarshal(bundled, &base); err != nil {
-		return nil, codexUnusable(path, fmt.Sprintf("导出的 bundled 模型目录形态未知：%v", err))
+		return nil, tool, codexUnusable(path, fmt.Sprintf("导出的 bundled 模型目录形态未知：%v", err))
 	}
 	byName := map[string]json.RawMessage{}
 	for _, raw := range base.Models {
@@ -1154,7 +1217,7 @@ func (a *app) codexCatalog(path string, tool runtimeTool) ([]byte, error) {
 	}
 	extra, err := a.fetchCodexDeviceCatalog()
 	if err != nil {
-		return nil, err
+		return nil, tool, err
 	}
 	fromDevice := map[string]bool{}
 	for _, raw := range extra.Models {
@@ -1163,11 +1226,30 @@ func (a *app) codexCatalog(path string, tool runtimeTool) ([]byte, error) {
 			fromDevice[name] = true
 		}
 	}
+	// 订阅模型的能力元数据只来自这个内核的 bundled 目录；OpenAI 会从新版
+	// bundled 里撤掉仍在订阅名单上的型号（官方最新版也可能没有），这类型号
+	// 略去并提示，不阻断启动。目录模型的元数据由设备给出，缺失是设备侧问题。
+	effective := runtimeTool{DefaultModel: tool.DefaultModel}
 	wanted := make([]string, 0, len(tool.Models))
+	var skipped []string
 	for _, model := range tool.Models {
-		wanted = append(wanted, model.Name)
 		if _, ok := byName[model.Name]; !ok {
-			return nil, codexUnusable(path, fmt.Sprintf("缺少模型 %q 的能力元数据，需要升级 CLI 或调整设备模型选择", model.Name))
+			if model.Source == "catalog" {
+				return nil, tool, fmt.Errorf("设备未返回所选目录模型 %q 的 Codex 能力元数据；请在管理台检查该模型的来源与协议面", model.Name)
+			}
+			skipped = append(skipped, model.Name)
+			continue
+		}
+		wanted = append(wanted, model.Name)
+		effective.Models = append(effective.Models, model)
+	}
+	if len(effective.Models) == 0 && len(skipped) > 0 {
+		return nil, tool, codexUnusable(path, fmt.Sprintf("bundled 模型目录不含这把 Key 可见的任何订阅模型（%s）", strings.Join(skipped, "、")))
+	}
+	if len(skipped) > 0 {
+		a.warnf("提示：%s 的 bundled 模型目录不含订阅模型 %s，已从模型菜单略去\n", detectVersion(path), strings.Join(skipped, "、"))
+		if slices.Contains(skipped, effective.DefaultModel) {
+			effective.DefaultModel = effective.Models[0].Name
 		}
 	}
 	sort.Strings(wanted)
@@ -1178,12 +1260,12 @@ func (a *app) codexCatalog(path string, tool runtimeTool) ([]byte, error) {
 			// bundled 里的订阅条目是给 OpenAI 自家后端写的；盒子承受什么由
 			// 设备覆盖片说了算（codex.go applyCatalogOverlay）。
 			if raw, err = applyCatalogOverlay(raw, extra.SubscriptionOverlay); err != nil {
-				return nil, codexUnusable(path, err.Error())
+				return nil, tool, codexUnusable(path, err.Error())
 			}
 		}
 		var entry map[string]json.RawMessage
 		if err := json.Unmarshal(raw, &entry); err != nil {
-			return nil, codexUnusable(path, fmt.Sprintf("模型目录条目形态未知：%v", err))
+			return nil, tool, codexUnusable(path, fmt.Sprintf("模型目录条目形态未知：%v", err))
 		}
 		var displayName string
 		_ = json.Unmarshal(entry["display_name"], &displayName)
@@ -1193,12 +1275,12 @@ func (a *app) codexCatalog(path string, tool runtimeTool) ([]byte, error) {
 		entry["display_name"], _ = json.Marshal(gateModelDisplayName(displayName))
 		raw, err = json.Marshal(entry)
 		if err != nil {
-			return nil, err
+			return nil, tool, err
 		}
 		out.Models = append(out.Models, raw)
 	}
 	b, err := json.MarshalIndent(out, "", "  ")
-	return append(b, '\n'), err
+	return append(b, '\n'), effective, err
 }
 
 func (a *app) fetchCodexDeviceCatalog() (catalogEnvelope, error) {
@@ -1695,6 +1777,9 @@ const (
 	cursorCLIBasePath = "/cursor-helper/cli"
 	cursorCLIMaxBytes = 512 << 20
 	cursorCLITimeout  = 60 * time.Minute
+	// 暂存树 --version 自检：首次启动要加载整棵 JS 树，Windows 还经
+	// cmd → powershell → node 三层壳，比常规 8 秒探测宽松。
+	cursorSelfCheckTimeout = 45 * time.Second
 )
 
 // cursorCLIMaxTreeBytes 限制整树解包总量（当前制品解开 ~190MB），防解压炸弹。
@@ -1735,6 +1820,9 @@ type openCodeReleaseAsset struct {
 // managedBinaryPath 是 gate 受管安装物的固定落点：单文件工具在 tools/<name>/bin/
 // 下；cursor 是整目录 Node 运行时包，入口脚本在 tools/cursor/app/ 树里。
 func (a *app) managedBinaryPath(name string) string {
+	if name == "mcode" {
+		return a.managedMCodePath()
+	}
 	if name == "cursor" {
 		return filepath.Join(a.root, "tools", "cursor", "app", toolBinaryName("cursor"))
 	}
@@ -1764,11 +1852,11 @@ func (a *app) install(name string, adopt, update bool) error {
 			if err == nil || !isCLIUnusable(err) {
 				return err
 			}
-			fmt.Fprintf(a.err, "%v\n改为经设备安装受管 %s。\n", err, name)
+			fmt.Fprintf(a.err, "%v\n改为安装受管 %s。\n", err, name)
 		}
 		path := ""
 		switch name {
-		case "grok", "claude", "opencode", "cursor":
+		case "grok", "claude", "opencode", "cursor", "mcode":
 			path = a.managedBinaryPath(name)
 		case "codex":
 			path = a.managedCodexPath()
@@ -1802,6 +1890,8 @@ func (a *app) install(name string, adopt, update bool) error {
 		path, err = a.installOpenCode()
 	} else if name == "cursor" {
 		path, err = a.installCursor()
+	} else if name == "mcode" {
+		path, err = a.installMCode()
 	} else {
 		path, err = a.installCodex()
 	}
@@ -1819,18 +1909,17 @@ func (a *app) installClaude() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if a.out != nil {
-		fmt.Fprintln(a.out, "正在经设备读取 Claude Code 官方 release…")
-	}
-	latest, err := a.getClaudePublic("latest", 4096)
+	src := a.claudeOrigins()
+	a.printf("正在从%s读取 Claude Code 官方 release…\n", src.label())
+	latest, err := src.get("latest", 4096)
 	if err != nil {
 		return "", fmt.Errorf("读取 Claude Code 最新版本: %w", err)
 	}
 	version := strings.TrimSpace(string(latest))
 	if !claudeVersionRE.MatchString(version) {
-		return "", errors.New("设备返回的 Claude Code 版本形态未知")
+		return "", errors.New("取回的 Claude Code 版本形态未知")
 	}
-	manifestBody, err := a.getClaudePublic(version+"/manifest.json", 2<<20)
+	manifestBody, err := src.get(version+"/manifest.json", 2<<20)
 	if err != nil {
 		return "", fmt.Errorf("读取 Claude Code release manifest: %w", err)
 	}
@@ -1853,10 +1942,8 @@ func (a *app) installClaude() (string, error) {
 		release.Size <= 0 || release.Size > claudeCLIMaxBytes {
 		return "", errors.New("Claude Code release manifest 的平台条目无效")
 	}
-	if a.out != nil {
-		fmt.Fprintf(a.out, "正在经设备下载 Claude Code %s（约 %d MiB）…\n", version, (release.Size+(1<<20)-1)/(1<<20))
-	}
-	path, err := a.downloadClaudeBinary(version, platform, release)
+	a.printf("正在从%s下载 Claude Code %s（约 %d MiB）…\n", src.label(), version, (release.Size+(1<<20)-1)/(1<<20))
+	path, err := a.downloadClaudeBinary(src, version, platform, release)
 	if err != nil {
 		return "", err
 	}
@@ -1972,10 +2059,9 @@ func (a *app) installOpenCode() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if a.out != nil {
-		fmt.Fprintln(a.out, "正在经设备读取 OpenCode 官方 release…")
-	}
-	body, err := a.getOpenCodePublic("latest", 4<<20)
+	src := a.openCodeOrigins()
+	a.printf("正在从%s读取 OpenCode 官方 release…\n", src.label())
+	body, err := src.get("latest", 4<<20)
 	if err != nil {
 		return "", fmt.Errorf("读取 OpenCode 最新 release: %w", err)
 	}
@@ -1985,7 +2071,7 @@ func (a *app) installOpenCode() (string, error) {
 	}
 	version := strings.TrimPrefix(release.TagName, "v")
 	if release.TagName != "v"+version || !openCodeVersionRE.MatchString(version) || release.Draft || release.Prerelease {
-		return "", errors.New("设备返回的 OpenCode 稳定版本形态未知")
+		return "", errors.New("取回的 OpenCode 稳定版本形态未知")
 	}
 	var asset openCodeReleaseAsset
 	for _, candidate := range release.Assets {
@@ -2000,10 +2086,8 @@ func (a *app) installOpenCode() (string, error) {
 	if asset.Size <= 0 || asset.Size > openCodeCLIMaxBytes || !openCodeDigestRE.MatchString(asset.Digest) {
 		return "", errors.New("OpenCode release 的平台条目无效")
 	}
-	if a.out != nil {
-		fmt.Fprintf(a.out, "正在经设备下载 OpenCode %s（约 %d MiB）…\n", version, (asset.Size+(1<<20)-1)/(1<<20))
-	}
-	path, err := a.downloadOpenCodeBinary(version, asset)
+	a.printf("正在从%s下载 OpenCode %s（约 %d MiB）…\n", src.label(), version, (asset.Size+(1<<20)-1)/(1<<20))
+	path, err := a.downloadOpenCodeBinary(src, version, asset)
 	if err != nil {
 		return "", err
 	}
@@ -2019,33 +2103,13 @@ func (a *app) openCodeHTTPClient() *http.Client {
 	return &client
 }
 
-func (a *app) getOpenCodePublic(path string, maxBytes int64) ([]byte, error) {
-	req, _ := http.NewRequest(http.MethodGet, a.cfg.BaseURL+openCodeCLIBasePath+"/"+path, nil)
-	resp, err := a.openCodeHTTPClient().Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
-		return nil, fmt.Errorf("下载 %s 返回 HTTP %d", path, resp.StatusCode)
-	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes+1))
-	if int64(len(body)) > maxBytes {
-		return nil, errors.New("下载内容超过大小限制")
-	}
-	return body, err
-}
-
-func (a *app) downloadOpenCodeBinary(version string, asset openCodeReleaseAsset) (string, error) {
+func (a *app) downloadOpenCodeBinary(src *originChain, version string, asset openCodeReleaseAsset) (string, error) {
 	dir := filepath.Join(a.root, "tools", "opencode", "bin")
 	digest, ok := strings.CutPrefix(asset.Digest, "sha256:")
 	if !ok {
 		return "", errors.New("OpenCode release 元数据的摘要形态未知")
 	}
-	archivePath, err := a.fetchArtifact(artifactFetch{
-		client: a.openCodeHTTPClient(),
-		url:    a.cfg.BaseURL + openCodeCLIBasePath + "/" + fmt.Sprintf("releases/%s/%s", version, asset.Name),
+	archivePath, err := src.fetch(fmt.Sprintf("releases/%s/%s", version, asset.Name), artifactFetch{
 		label:  "OpenCode",
 		dir:    dir,
 		prefix: ".opencode-archive",
@@ -2186,29 +2250,9 @@ func (a *app) claudeHTTPClient() *http.Client {
 	return &client
 }
 
-func (a *app) getClaudePublic(path string, maxBytes int64) ([]byte, error) {
-	req, _ := http.NewRequest(http.MethodGet, a.cfg.BaseURL+claudeCLIBasePath+"/"+path, nil)
-	resp, err := a.claudeHTTPClient().Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
-		return nil, fmt.Errorf("下载 %s 返回 HTTP %d", path, resp.StatusCode)
-	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes+1))
-	if int64(len(body)) > maxBytes {
-		return nil, errors.New("下载内容超过大小限制")
-	}
-	return body, err
-}
-
-func (a *app) downloadClaudeBinary(version, platform string, release claudeReleasePlatform) (string, error) {
+func (a *app) downloadClaudeBinary(src *originChain, version, platform string, release claudeReleasePlatform) (string, error) {
 	dir := filepath.Join(a.root, "tools", "claude", "bin")
-	tmpPath, err := a.fetchArtifact(artifactFetch{
-		client: a.claudeHTTPClient(),
-		url:    a.cfg.BaseURL + claudeCLIBasePath + "/" + version + "/" + platform + "/" + release.Binary,
+	tmpPath, err := src.fetch(version+"/"+platform+"/"+release.Binary, artifactFetch{
 		label:  "Claude Code",
 		dir:    dir,
 		prefix: ".claude-download",
@@ -2284,34 +2328,16 @@ func (a *app) cursorHTTPClient() *http.Client {
 	return &client
 }
 
-func (a *app) getCursorPublic(path string, maxBytes int64) ([]byte, error) {
-	req, _ := http.NewRequest(http.MethodGet, a.cfg.BaseURL+cursorCLIBasePath+"/"+path, nil)
-	resp, err := a.cursorHTTPClient().Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
-		return nil, fmt.Errorf("下载 %s 返回 HTTP %d", path, resp.StatusCode)
-	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes+1))
-	if int64(len(body)) > maxBytes {
-		return nil, errors.New("下载内容超过大小限制")
-	}
-	return body, err
-}
-
-// installCursor 经盒子受管安装官方 Cursor CLI 整树制品。官方没有独立版本清单
+// installCursor 受管安装官方 Cursor CLI 整树制品：先直连官方源，失败改经盒子
+// （见 source.go）。官方没有独立版本清单
 // 端点，脚本与制品也没有上游 SHA-256 清单可核（同 Grok 安装链的完整性水位）：
 // 版本从安装脚本正文解析，完整性依赖 gzip/zip 流式自校验加暂存树 --version
 // 与解析版本严格相等；暂存与原子切换都在 tools/cursor/ 同一文件系统内完成，
 // 任何失败保留现有 app/ 树。
 func (a *app) installCursor() (string, error) {
-	if a.out != nil {
-		fmt.Fprintln(a.out, "正在经设备读取 Cursor CLI 官方安装脚本…")
-	}
-	script, err := a.getCursorPublic("install.sh", 4<<20)
+	src := a.cursorOrigins()
+	a.printf("正在从%s读取 Cursor CLI 官方安装脚本…\n", src.label())
+	script, err := src.get("install.sh", 4<<20)
 	if err != nil {
 		return "", fmt.Errorf("读取 Cursor CLI 官方安装脚本: %w", err)
 	}
@@ -2334,7 +2360,7 @@ func (a *app) installCursor() (string, error) {
 	if a.out != nil {
 		switch {
 		case current == "unknown":
-			fmt.Fprintf(a.out, "正在经设备下载 Cursor CLI %s 整树制品…\n", version)
+			fmt.Fprintf(a.out, "正在从%s下载 Cursor CLI %s 整树制品…\n", src.label(), version)
 		case cursorVersionNewer(version, current):
 			fmt.Fprintf(a.out, "正在把受管 Cursor CLI 从 %s 升级到 %s…\n", current, version)
 		default:
@@ -2349,7 +2375,7 @@ func (a *app) installCursor() (string, error) {
 		return "", err
 	}
 	cleanupCursorInstallLeftovers(dir)
-	archivePath, err := a.downloadCursorArchive(assetPath, dir)
+	archivePath, err := a.downloadCursorArchive(src, assetPath, dir)
 	if err != nil {
 		return "", err
 	}
@@ -2368,8 +2394,14 @@ func (a *app) installCursor() (string, error) {
 		return "", err
 	}
 	// 版本完整性的唯一闸门：暂存树入口的 --version 必须与脚本钉死版本严格相等。
+	// 首次启动要解压/编译整棵 JS 树（Windows 还经 cmd → powershell → node 三层），
+	// 自检给比常规探测更长的时限；失败原因随错误带出，不折叠成 "unknown"。
 	entry := filepath.Join(staging, toolBinaryName("cursor"))
-	if got := detectVersionWithEnv(entry, installerEnv()); got != version {
+	got, err := probeVersion(entry, installerEnv(), cursorSelfCheckTimeout)
+	if err != nil {
+		return "", fmt.Errorf("Cursor CLI 制品自检失败（%v），已丢弃暂存树", err)
+	}
+	if got != version {
 		return "", fmt.Errorf("Cursor CLI 制品自检版本 %q 与官方脚本钉死的 %q 不一致，已丢弃暂存树", got, version)
 	}
 	appDir := filepath.Join(dir, "app")
@@ -2427,10 +2459,8 @@ func cleanupCursorInstallLeftovers(dir string) {
 
 // downloadCursorArchive 把整树归档取进 dir 下的续传件（与最终 app/ 同一文件
 // 系统），返回该文件路径；链路被掐时保留断点，见 fetch.go。
-func (a *app) downloadCursorArchive(requestPath, dir string) (string, error) {
-	return a.fetchArtifact(artifactFetch{
-		client: a.cursorHTTPClient(),
-		url:    a.cfg.BaseURL + cursorCLIBasePath + "/" + requestPath,
+func (a *app) downloadCursorArchive(src *originChain, requestPath, dir string) (string, error) {
+	return src.fetch(requestPath, artifactFetch{
 		label:  "Cursor CLI 整树归档",
 		dir:    dir,
 		prefix: ".cursor-archive",
@@ -2502,28 +2532,30 @@ func installerEnv() []string {
 		"CURSOR_CONFIG_DIR", "CURSOR_DATA_DIR", "AGENT_CLI_CREDENTIAL_STORE")
 }
 
+// installGrok 受管安装官方 Grok 单文件制品：先直连官方源（x.ai，再 GCS 回落），
+// 失败改经盒子（见 source.go）。
 func (a *app) installGrok() (string, error) {
-	b, err := a.getGrokPublic("stable", 4096)
+	src := a.grokOrigins()
+	a.printf("正在从%s读取 Grok 官方通道指针…\n", src.label())
+	b, err := src.get("stable", 4096)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("读取 Grok 最新版本: %w", err)
 	}
 	ver := strings.TrimSpace(string(b))
 	if !grokVersionRE.MatchString(ver) {
-		return "", errors.New("设备返回的 Grok 版本形态未知")
+		return "", errors.New("取回的 Grok 版本形态未知")
 	}
 	osName := map[string]string{"darwin": "macos", "linux": "linux", "windows": "windows"}[runtime.GOOS]
 	arch := map[string]string{"amd64": "x86_64", "arm64": "aarch64"}[runtime.GOARCH]
 	if osName == "" || arch == "" {
-		return "", fmt.Errorf("Grok 没有 %s/%s 的盒子安装物", runtime.GOOS, runtime.GOARCH)
+		return "", fmt.Errorf("Grok 没有 %s/%s 的官方安装物", runtime.GOOS, runtime.GOARCH)
 	}
 	asset := fmt.Sprintf("grok-%s-%s-%s", ver, osName, arch)
 	if runtime.GOOS == "windows" {
 		asset += ".exe"
 	}
-	if a.out != nil {
-		fmt.Fprintf(a.out, "正在经设备下载 Grok %s…\n", ver)
-	}
-	return a.downloadGrokBinary(asset)
+	a.printf("正在从%s下载 Grok %s…\n", src.label(), ver)
+	return a.downloadGrokBinary(src, asset)
 }
 
 func (a *app) grokHTTPClient() *http.Client {
@@ -2532,32 +2564,12 @@ func (a *app) grokHTTPClient() *http.Client {
 	return &client
 }
 
-func (a *app) getGrokPublic(path string, maxBytes int64) ([]byte, error) {
-	req, _ := http.NewRequest(http.MethodGet, a.cfg.BaseURL+grokCLIBasePath+"/"+path, nil)
-	resp, err := a.grokHTTPClient().Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
-		return nil, fmt.Errorf("下载 %s 返回 HTTP %d", path, resp.StatusCode)
-	}
-	b, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes+1))
-	if int64(len(b)) > maxBytes {
-		return nil, errors.New("下载内容超过大小限制")
-	}
-	return b, err
-}
-
 // downloadGrokBinary 把官方单文件制品取进目标目录内的续传件（链路被掐时保留
 // 断点，见 fetch.go），完成版本自检后再原子替换。普通配置/API 请求仍使用短
 // 超时；只有安装物使用长时限。
-func (a *app) downloadGrokBinary(asset string) (string, error) {
+func (a *app) downloadGrokBinary(src *originChain, asset string) (string, error) {
 	dir := filepath.Join(a.root, "tools", "grok", "bin")
-	tmpPath, err := a.fetchArtifact(artifactFetch{
-		client: a.grokHTTPClient(),
-		url:    a.cfg.BaseURL + grokCLIBasePath + "/" + asset,
+	tmpPath, err := src.fetch(asset, artifactFetch{
 		label:  "Grok",
 		dir:    dir,
 		prefix: ".grok-download",

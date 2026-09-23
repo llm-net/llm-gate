@@ -32,6 +32,7 @@ type grokImagineEnv struct {
 	*routeEnv
 	backend *stubUpstream
 	issuer  *grokStubIssuer
+	acctID  int64
 	mu      sync.Mutex
 	calls   []string // "METHOD /path"
 }
@@ -57,15 +58,13 @@ func newGrokImagineEnv(t *testing.T, respond, refresh http.HandlerFunc) *grokIma
 	e.issuer = newGrokStubIssuer(t, refresh)
 	e.srv.SetGrokEndpoints(e.issuer.url, e.backend.url+"/responses")
 	e.srv.SetGrokImagineEndpoint(e.backend.url)
-	if _, err := e.st.UpsertAgentAccount(t.Context(), store.NewAgentAccount{
+	e.acctID = connectAgent(t, e.st, store.NewAgentAccount{
 		Provider:     store.AgentProviderGrok,
 		Label:        "Grok 订阅",
 		AccountID:    "admin@example.invalid",
 		DefaultModel: grokModel,
 		AuthJSON:     grokAuthJSONFixture(grokAccess1, grokRefresh1),
-	}); err != nil {
-		t.Fatalf("UpsertAgentAccount: %v", err)
-	}
+	}).ID
 	return e
 }
 
@@ -75,7 +74,8 @@ func imagineReply(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case strings.HasSuffix(r.URL.Path, "/images/generations"), strings.HasSuffix(r.URL.Path, "/images/edits"):
 		fmt.Fprint(w, imagineImageBody)
-	case strings.HasSuffix(r.URL.Path, "/videos/generations"):
+	case strings.HasSuffix(r.URL.Path, "/videos/generations"), strings.HasSuffix(r.URL.Path, "/videos/edits"),
+		strings.HasSuffix(r.URL.Path, "/videos/extensions"):
 		fmt.Fprint(w, imagineVideoBody)
 	case strings.Contains(r.URL.Path, "/videos/"):
 		fmt.Fprint(w, imaginePollBody)
@@ -199,6 +199,9 @@ func TestGrokImagineVideoSubmitAndUnmeteredPoll(t *testing.T) {
 	if sample.Entry != usage.EntryImagineVideo || sample.ModelName != imagineVideoModel || sample.Estimated {
 		t.Fatalf("视频提交样本形态不对: %+v", sample)
 	}
+	if sample.TaskUsage.GeneratedVideos != 1 || sample.TaskUsage.GeneratedImages != 0 {
+		t.Fatalf("视频提交受理应记 1 个（video_count）: %+v", sample.TaskUsage)
+	}
 	if got := sampleCost(t, sample); got != 0 {
 		t.Fatalf("视频提交金额 = %d，期望 0", got)
 	}
@@ -218,6 +221,75 @@ func TestGrokImagineVideoSubmitAndUnmeteredPoll(t *testing.T) {
 	}
 	if fm.count() != 1 {
 		t.Fatalf("轮询后记账笔数 = %d，期望仍为 1（轮询不计量）", fm.count())
+	}
+}
+
+// 图生视频、首尾帧、参考图都是 videos/generations 请求体里的字段：设备逐字节透传，
+// 一个都不丢；视频编辑与延长是另两条官方路径，同样只换鉴权。三个提交门都按
+// imagine_video 记 1 次、受理 1 个。
+func TestGrokImagineVideoInputsEditsAndExtensions(t *testing.T) {
+	e := newGrokImagineEnv(t, imagineReply, issuerNever(t))
+	fm := &fakeMeter{}
+	e.srv.EnableMetering(fm)
+
+	const dataURI = "data:image/png;base64,iVBORw0KGgo="
+	cases := []struct{ path, body string }{
+		{"/agents/grok/v1/videos/generations", fmt.Sprintf(`{"model":%q,"prompt":"walk","image":{"url":%q},"last_frame":{"url":"https://example.invalid/last.png"},"reference_images":[{"url":"https://example.invalid/a.png"},{"url":%q}],"duration":10,"aspect_ratio":"16:9","resolution":"720p","generate_audio":false}`, imagineVideoModel, dataURI, dataURI)},
+		{"/agents/grok/v1/videos/edits", fmt.Sprintf(`{"model":%q,"prompt":"make it snow","video":{"url":"https://example.invalid/in.mp4"}}`, imagineVideoModel)},
+		{"/agents/grok/v1/videos/extensions", fmt.Sprintf(`{"model":%q,"prompt":"pan left","duration":6,"video":{"url":"https://example.invalid/in.mp4"}}`, imagineVideoModel)},
+	}
+	for i, tc := range cases {
+		w := do(e.h, http.MethodPost, tc.path, grokClientHeaders, tc.body)
+		if w.Code != http.StatusOK || w.Body.String() != imagineVideoBody {
+			t.Fatalf("%s：状态码 = %d，body: %s", tc.path, w.Code, w.Body.String())
+		}
+		if got, want := e.call(i), "POST /v1"+strings.TrimPrefix(tc.path, "/agents/grok/v1"); got != want {
+			t.Errorf("上游调用 = %q，期望 %q", got, want)
+		}
+		if sent := e.backend.sentBody(i); !sameJSON(t, sent, tc.body) {
+			t.Errorf("%s 请求体应语义等同透传（首帧 / 尾帧 / 参考图 / 源视频一个都不能丢）:\n%s", tc.path, sent)
+		}
+	}
+	if fm.count() != len(cases) {
+		t.Fatalf("记账笔数 = %d，期望 %d", fm.count(), len(cases))
+	}
+	fm.mu.Lock()
+	samples := append([]usage.Sample(nil), fm.samples...)
+	fm.mu.Unlock()
+	for _, sample := range samples {
+		if sample.Entry != usage.EntryImagineVideo || sample.ModelName != imagineVideoModel {
+			t.Fatalf("视频提交样本形态不对: %+v", sample)
+		}
+		if sample.TaskUsage.GeneratedVideos != 1 {
+			t.Fatalf("视频提交受理应记 1 个: %+v", sample.TaskUsage)
+		}
+		if got := sampleCost(t, sample); got != 0 {
+			t.Fatalf("视频提交金额 = %d，期望 0", got)
+		}
+	}
+}
+
+// 上游拒绝受理（非 2xx）时只记错误，不记受理个数——「个」是受理数，不是提交数。
+func TestGrokImagineVideoRejectedSubmitCountsNoVideo(t *testing.T) {
+	e := newGrokImagineEnv(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprint(w, `{"error":"bad prompt"}`)
+	}, issuerNever(t))
+	fm := &fakeMeter{}
+	e.srv.EnableMetering(fm)
+
+	body := fmt.Sprintf(`{"model":%q,"prompt":""}`, imagineVideoModel)
+	w := do(e.h, http.MethodPost, "/agents/grok/v1/videos/generations", grokClientHeaders, body)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("状态码 = %d，期望上游 400 原样透出；body: %s", w.Code, w.Body.String())
+	}
+	sample := fm.only(t)
+	if sample.Entry != usage.EntryImagineVideo || sample.Status != http.StatusBadRequest {
+		t.Fatalf("样本形态不对: %+v", sample)
+	}
+	if (sample.TaskUsage != usage.TaskUsage{}) {
+		t.Fatalf("未受理不该记个数: %+v", sample.TaskUsage)
 	}
 }
 
@@ -271,6 +343,8 @@ func TestGrokImagineGatesAndNotFound(t *testing.T) {
 			{http.MethodPost, "/agents/grok/v1/images/generations", imagineImageReq(imagineImageModel)},
 			{http.MethodPost, "/agents/grok/v1/images/edits", imagineImageReq(imagineImageModel)},
 			{http.MethodPost, "/agents/grok/v1/videos/generations", imagineImageReq(imagineVideoModel)},
+			{http.MethodPost, "/agents/grok/v1/videos/edits", imagineImageReq(imagineVideoModel)},
+			{http.MethodPost, "/agents/grok/v1/videos/extensions", imagineImageReq(imagineVideoModel)},
 			{http.MethodGet, "/agents/grok/v1/videos/req_1", ""},
 		} {
 			w := do(e.h, tc.method, tc.path, grokClientHeaders, tc.body)
@@ -286,8 +360,11 @@ func TestGrokImagineGatesAndNotFound(t *testing.T) {
 			t.Fatalf("被闸门拦下的请求不该出网，后端调用 = %d", e.backend.count())
 		}
 	})
-	t.Run("勾了 grok 但设备没连订阅 409", func(t *testing.T) {
-		e := newRouteEnv(t)
+	t.Run("钉了 grok 但账号被停用 409", func(t *testing.T) {
+		e := newGrokImagineEnv(t, imagineReply, issuerNever(t))
+		if err := e.st.SetAgentStatus(t.Context(), e.acctID, store.AgentStatusDisabled); err != nil {
+			t.Fatalf("SetAgentStatus: %v", err)
+		}
 		w := do(e.h, http.MethodPost, "/agents/grok/v1/images/generations", grokClientHeaders, imagineImageReq(imagineImageModel))
 		if w.Code != http.StatusConflict {
 			t.Fatalf("状态码 = %d，期望 409；body: %s", w.Code, w.Body.String())

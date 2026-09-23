@@ -86,13 +86,15 @@ function fmtEventClock(iso: string): string {
   return sameDay ? hms : `${p(d.getMonth() + 1)}-${p(d.getDate())} ${hms}`;
 }
 
-// 计费量是三种而不是一种：文本按 token，MiniMax H3 视频按秒，方舟 Seedream 按出图
-// 张数。表里只印 token 的话，每一行视频消费都显示「0」——金额看得见、金额背后的量
-// 看不见。单位跟着值走、零值不印（三项全零才是「—」）。
+// 计费量是四种而不是一种：文本按 token，MiniMax H3 视频按秒，方舟 Seedream 与 Grok
+// Imagine 按出图张数，Grok Imagine 视频按受理个数。表里只印 token 的话，每一行视频
+// 消费都显示「0」——金额看得见、金额背后的量看不见。单位跟着值走、零值不印
+// （全零才是「—」）。
 interface QuantityLike {
   total_tokens: number;
   video_seconds: number;
   image_count: number;
+  video_count: number;
 }
 
 function fmtQuantity(q: QuantityLike): string {
@@ -100,13 +102,15 @@ function fmtQuantity(q: QuantityLike): string {
   if (q.total_tokens > 0) parts.push(`${fmtInt(q.total_tokens)} Token`);
   if (q.video_seconds > 0) parts.push(t("{n} 秒", { n: fmtInt(q.video_seconds), count: q.video_seconds }));
   if (q.image_count > 0) parts.push(t("{n} 张", { n: fmtInt(q.image_count), count: q.image_count }));
+  if (q.video_count > 0) parts.push(t("{n} 个", { n: fmtInt(q.video_count), count: q.video_count }));
   return parts.length === 0 ? "—" : parts.join(" · ");
 }
 
 function nonTokenSuffix(q: QuantityLike): string {
   const out: string[] = [];
   if (q.video_seconds > 0) out.push(t("视频 {n} 秒", { n: fmtInt(q.video_seconds), count: q.video_seconds }));
-  if (q.image_count > 0) out.push(t("图片 {n} 张", { n: fmtInt(q.image_count), count: q.image_count }));
+  if (q.image_count > 0) out.push(t("图像 {n} 张", { n: fmtInt(q.image_count), count: q.image_count }));
+  if (q.video_count > 0) out.push(t("视频 {n} 个", { n: fmtInt(q.video_count), count: q.video_count }));
   return out.length === 0 ? "" : ` · ${out.join(" · ")}`;
 }
 
@@ -203,6 +207,7 @@ function zeroSummary(): api.UsageSummary {
     total_tokens: 0,
     video_seconds: 0,
     image_count: 0,
+    video_count: 0,
     duration_ms_sum: 0,
   };
 }
@@ -352,11 +357,31 @@ function keyLabel(label: string | undefined): string {
   return label === undefined || label === "" ? t("无标签") : label;
 }
 
-function KeyIdentity({ label, display }: { label: string | undefined; display: string }): React.ReactElement {
+// 已归档的 Key：凭据作废、行只为账留名。用量页照常归集，只在名字旁标一下。
+function ArchivedBadge(): React.ReactElement {
+  return (
+    <Badge variant="secondary" className="shrink-0 text-[10px]">
+      {t("已归档")}
+    </Badge>
+  );
+}
+
+function KeyIdentity({
+  label,
+  display,
+  archived = false,
+}: {
+  label: string | undefined;
+  display: string;
+  archived?: boolean | undefined;
+}): React.ReactElement {
   return (
     <div className="flex min-w-0 flex-col gap-0.5">
-      <span className={label === undefined || label === "" ? "text-muted-foreground text-xs" : "font-medium"}>
-        {keyLabel(label)}
+      <span className="flex min-w-0 items-center gap-1.5">
+        <span className={label === undefined || label === "" ? "text-muted-foreground text-xs" : "font-medium"}>
+          {keyLabel(label)}
+        </span>
+        {archived ? <ArchivedBadge /> : null}
       </span>
       {display === "" ? (
         <Dash title={t("这一行没有记到 Key 展示串，用量仍按它的 id 单独归集")} />
@@ -404,6 +429,7 @@ function UsageScopeBar({
               ) : (
                 <span className="flex min-w-0 items-center gap-2">
                   <span className="truncate">{keyLabel(selected?.label)}</span>
+                  {selected?.archived ? <ArchivedBadge /> : null}
                   <code className="text-muted-foreground truncate font-mono text-xs">
                     {selected?.display ?? `Key #${selectedID}`}
                   </code>
@@ -416,7 +442,10 @@ function UsageScopeBar({
             {keys.map((k) => (
               <SelectItem key={k.id} value={String(k.id)}>
                 <span className="flex min-w-0 flex-col items-start">
-                  <span className="max-w-72 truncate">{keyLabel(k.label)}</span>
+                  <span className="flex max-w-72 items-center gap-1.5">
+                    <span className="truncate">{keyLabel(k.label)}</span>
+                    {k.archived ? <ArchivedBadge /> : null}
+                  </span>
                   <code className="text-muted-foreground max-w-72 truncate font-mono text-xs">
                     {k.display === "" ? `Key #${k.id}` : k.display}
                   </code>
@@ -476,7 +505,7 @@ function KeyUsagePanel({
               return (
                 <TableRow key={`${r.id ?? 0}-${r.key}-${i}`}>
                   <TableCell>
-                    <KeyIdentity label={r.label} display={r.key} />
+                    <KeyIdentity label={r.label} display={r.key} archived={r.archived} />
                   </TableCell>
                   <TableCell className="font-mono tabular-nums">{api.fmtMoney(r.cost_micro)}</TableCell>
                   <TableCell className="font-mono tabular-nums">{fmtInt(r.requests)}</TableCell>
@@ -607,8 +636,18 @@ function DimPanel({
       total_tokens: a.total_tokens + r.total_tokens,
       video_seconds: a.video_seconds + r.video_seconds,
       image_count: a.image_count + r.image_count,
+      video_count: a.video_count + r.video_count,
     }),
-    { cost_micro: 0, requests: 0, errors: 0, rejected_requests: 0, total_tokens: 0, video_seconds: 0, image_count: 0 },
+    {
+      cost_micro: 0,
+      requests: 0,
+      errors: 0,
+      rejected_requests: 0,
+      total_tokens: 0,
+      video_seconds: 0,
+      image_count: 0,
+      video_count: 0,
+    },
   );
   return (
     <Card className="gap-3 p-5">
@@ -747,7 +786,11 @@ function RecentPanel({ events, keys }: { events: api.UsageEvent[]; keys: api.Usa
                   <TableRow key={i} className={ev.rejected === true ? "opacity-60" : undefined}>
                     <TableCell className="text-muted-foreground font-mono text-xs">{fmtEventClock(ev.at)}</TableCell>
                     <TableCell>
-                      <KeyIdentity label={key?.label} display={ev.key_display || key?.display || ""} />
+                      <KeyIdentity
+                        label={key?.label}
+                        display={ev.key_display || key?.display || ""}
+                        archived={key?.archived}
+                      />
                     </TableCell>
                     <TableCell>
                       {ev.model_name === "" ? <Dash title={t("没有记到模型名")} /> : ev.model_name}

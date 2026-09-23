@@ -1,6 +1,6 @@
 package officialsite
 
-// 可选第三方组件（当前只有 cloudflared）的两样官网只读物：
+// 可选第三方组件（cloudflared、mihomo、codex-app-server）的两样官网只读物：
 //
 //   - 签名组件清单 /updates/components/<组件>/stable.json 及其离线签名 stable.json.sig。
 //     官网只发布这份小型元数据，**不镜像 executable**；验签、版本防回退与条目筛选

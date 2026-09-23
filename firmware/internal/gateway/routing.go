@@ -6,7 +6,7 @@ package gateway
 //
 // 裁决口径（与 /v1/models 的 ListServableModels 对齐）：
 //
-//   - 模型的 kind 与入口所需不符（迭代 8 闸门：文本入口只收 text，视频/图片
+//   - 模型的 kind 与入口所需不符（迭代 8 闸门：文本入口只收 text，视频/图像
 //     入口同理）→ routeModelNotFound——对客户端与「不存在」完全同响应，
 //     不解释内部原因，kind 闸门因此双向（视频模型进不了 chat，反之亦然）；
 //   - 模型不存在、模型停用、或没有任何「启用来源且其上游启用」的候选
@@ -122,16 +122,17 @@ func (s *Server) resolveRoute(ctx context.Context, model, kind, protocol string)
 			continue
 		}
 		acct := upstream.Account{
-			Name:       c.Upstream.Name,
-			Type:       c.Upstream.Type,
-			APIKey:     c.Upstream.APIKey,
-			BaseURL:    c.Upstream.BaseURL,
-			EgressMode: c.Upstream.EgressMode,
+			Name:         c.Upstream.Name,
+			Type:         c.Upstream.Type,
+			APIKey:       c.Upstream.APIKey,
+			BaseURL:      c.Upstream.BaseURL,
+			ProtocolURLs: c.Upstream.ProtocolURLs,
+			EgressMode:   c.Upstream.EgressMode,
 		}
 		if kind == store.ModelKindText && !servableElsewhere {
 			for _, other := range []string{config.ProtocolOpenAIChat, config.ProtocolOpenAIResponses, config.ProtocolAnthropicMessages} {
 				if other != protocol && textEntryOn(route.Model, other) {
-					if _, ok := acct.ModelEndpoint(doc, c.Upstream.CatalogID, model, c.UpstreamModelID, upstream.CatalogWireProtocol(other)); ok {
+					if _, ok := acct.ModelEndpoint(doc, c.Upstream.CatalogID, model, c.UpstreamModelID, acct.WireProtocol(other)); ok {
 						servableElsewhere = true
 					}
 				}
@@ -141,7 +142,7 @@ func (s *Server) resolveRoute(ctx context.Context, model, kind, protocol string)
 		if !entryOn {
 			continue
 		}
-		if _, ok := acct.ModelEndpoint(doc, c.Upstream.CatalogID, model, c.UpstreamModelID, upstream.CatalogWireProtocol(protocol)); !ok {
+		if _, ok := acct.ModelEndpoint(doc, c.Upstream.CatalogID, model, c.UpstreamModelID, acct.WireProtocol(protocol)); !ok {
 			continue
 		}
 		cands = append(cands, candidate{account: acct, catalogID: c.Upstream.CatalogID, modelID: c.UpstreamModelID, sourceID: c.SourceID})
@@ -159,7 +160,7 @@ func (s *Server) resolveRoute(ctx context.Context, model, kind, protocol string)
 }
 
 // textEntryOn 读文本模型的调用入口开关（仅对 ModelKindText 调用；开关对
-// 视频/图片种类无语义）。
+// 视频/图像种类无语义）。
 func textEntryOn(m store.Model, protocol string) bool {
 	switch protocol {
 	case config.ProtocolOpenAIChat:
@@ -187,10 +188,11 @@ func (s *Server) listServableModels(ctx context.Context) ([]store.Model, error) 
 	doc := s.effectivePlatformModels(ctx)
 	available := make(map[int64]bool)
 	for _, src := range sources {
-		acct := upstream.Account{Type: src.UpstreamType, BaseURL: src.UpstreamBaseURL}
+		acct := upstream.Account{Type: src.UpstreamType, BaseURL: src.UpstreamBaseURL, ProtocolURLs: src.UpstreamProtocolURLs}
 		_, chatOK := acct.ModelEndpoint(doc, src.UpstreamCatalogID, src.ModelName, src.UpstreamModelID, config.ProtocolOpenAIChat)
 		_, messagesOK := acct.ModelEndpoint(doc, src.UpstreamCatalogID, src.ModelName, src.UpstreamModelID, config.ProtocolAnthropicMessages)
-		if (chatOK && (src.EntryOpenAI || src.EntryResponses)) || (messagesOK && src.EntryAnthropic) {
+		_, responsesOK := acct.ModelEndpoint(doc, src.UpstreamCatalogID, src.ModelName, src.UpstreamModelID, acct.WireProtocol(config.ProtocolOpenAIResponses))
+		if (chatOK && src.EntryOpenAI) || (responsesOK && src.EntryResponses) || (messagesOK && src.EntryAnthropic) {
 			available[src.ModelID] = true
 		}
 	}

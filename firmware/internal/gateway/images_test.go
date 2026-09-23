@@ -1,11 +1,11 @@
-// images_test.go 是 iteration-8 Phase 5 的验收：图片同步入口
+// images_test.go 是 iteration-8 Phase 5 的验收：图像同步入口
 // POST /api/v3/images/generations 的假上游出图全链路（请求体透传只改 model、响应
 // 顶层 model 回写、data/usage 原样透出、上游身份不泄露）、kind 闸门双向 404、
-// /v1/models 文本口径不受图片模型影响、上游错误体保真透传、种类内协议过滤
+// /v1/models 文本口径不受图像模型影响、上游错误体保真透传、种类内协议过滤
 // （minimax 型来源不服务 ark_image）、SSE 透传与请求体上限。
 //
 // 编排方式沿 video_test.go：httptest 假上游以真实类型 ark + base_url 覆盖挂进
-// 目录（mock 类型不服务图片协议），断言"客户端看到什么"与"厂商收到什么"。
+// 目录（mock 类型不服务图像协议），断言"客户端看到什么"与"厂商收到什么"。
 package gateway_test
 
 import (
@@ -33,7 +33,7 @@ const (
 		`"usage":{"generated_images":1,"output_tokens":16464,"total_tokens":16464}}`
 )
 
-// newImageEnv 装配图片入口用例环境：空目录网关 + 一个只认
+// newImageEnv 装配图像入口用例环境：空目录网关 + 一个只认
 // POST {base}/images/generations 的假方舟上游与 kind=image 模型。
 // 客户端入口是 /api/v3/images/generations（方舟站点根之后的官方那一段），
 // 而设备→厂商这一跳的路径不含 /api/v3——那一段在端点根里，用例的 base_url
@@ -109,8 +109,8 @@ func TestImagesGenerateFullPath(t *testing.T) {
 	}
 }
 
-// TestImagesKindGate：kind 闸门双向——图片模型进文本双入口、文本/视频模型与
-// 未知名字进图片入口，一律 404，且与「不存在」同响应（不解释内部原因）。
+// TestImagesKindGate：kind 闸门双向——图像模型进文本双入口、文本/视频模型与
+// 未知名字进图像入口，一律 404，且与「不存在」同响应（不解释内部原因）。
 func TestImagesKindGate(t *testing.T) {
 	e, stub := newImageEnv(t, jsonReply(http.StatusOK, imageOKBody))
 	// 文本与视频模型各一（上游可达性无所谓：kind 闸门在拨号之前裁决）。
@@ -122,15 +122,15 @@ func TestImagesKindGate(t *testing.T) {
 	cases := []struct {
 		name, method, path, body string
 	}{
-		{"图片模型进chat", "POST", "/v1/chat/completions",
+		{"图像模型进chat", "POST", "/v1/chat/completions",
 			fmt.Sprintf(`{"model":%q,"messages":[]}`, imageModel)},
-		{"图片模型进messages", "POST", "/v1/messages",
+		{"图像模型进messages", "POST", "/v1/messages",
 			fmt.Sprintf(`{"model":%q,"messages":[],"max_tokens":8}`, imageModel)},
-		{"文本模型进图片入口", "POST", "/ark/api/v3/images/generations",
+		{"文本模型进图像入口", "POST", "/ark/api/v3/images/generations",
 			`{"model":"plain-text","prompt":"p"}`},
-		{"视频模型进图片入口", "POST", "/ark/api/v3/images/generations",
+		{"视频模型进图像入口", "POST", "/ark/api/v3/images/generations",
 			`{"model":"seedance-side","prompt":"p"}`},
-		{"未知模型进图片入口", "POST", "/ark/api/v3/images/generations",
+		{"未知模型进图像入口", "POST", "/ark/api/v3/images/generations",
 			`{"model":"no-such","prompt":"p"}`},
 	}
 	for _, c := range cases {
@@ -154,7 +154,7 @@ func TestImagesKindGate(t *testing.T) {
 	}
 }
 
-// TestImagesModelsUnaffected：/v1/models 文本口径不变——可服务的图片模型不
+// TestImagesModelsUnaffected：/v1/models 文本口径不变——可服务的图像模型不
 // 出现，既有文本模型照常在列。
 func TestImagesModelsUnaffected(t *testing.T) {
 	e, _ := newImageEnv(t, jsonReply(http.StatusOK, imageOKBody))
@@ -178,7 +178,7 @@ func TestImagesModelsUnaffected(t *testing.T) {
 		ids = append(ids, m.ID)
 	}
 	if len(ids) != 1 || ids[0] != "plain-text" {
-		t.Errorf("/v1/models = %v，期望只有 [plain-text]（图片模型不入列）", ids)
+		t.Errorf("/v1/models = %v，期望只有 [plain-text]（图像模型不入列）", ids)
 	}
 }
 
@@ -198,7 +198,7 @@ func TestImagesUpstreamErrorPassthrough(t *testing.T) {
 	}
 }
 
-// TestImagesProtocolFilterWithinKind：种类内协议过滤——图片模型同时挂
+// TestImagesProtocolFilterWithinKind：种类内协议过滤——图像模型同时挂
 // minimax 与 ark 来源时，minimax（不服务 ark_image，优先级还更高）被静默
 // 跳过，请求落到 ark 来源。
 func TestImagesProtocolFilterWithinKind(t *testing.T) {
@@ -275,7 +275,7 @@ func (r *repeatReader) Read(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// TestImagesBodyLimit：图片入口与视频入口同一 80 MiB 上限（超限 413，不打
+// TestImagesBodyLimit：图像入口与视频入口同一 80 MiB 上限（超限 413，不打
 // 厂商）。上调 videoSubmitBodyLimit 时同步这里。
 func TestImagesBodyLimit(t *testing.T) {
 	e, stub := newImageEnv(t, jsonReply(http.StatusOK, imageOKBody))

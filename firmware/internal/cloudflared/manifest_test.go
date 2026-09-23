@@ -8,6 +8,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 // signer 是测试专用的清单签发器：自造一对密钥，模拟 tools/componentsign 的输出。
@@ -173,6 +174,25 @@ func TestSelectRelease(t *testing.T) {
 	}
 	if compareVersion("2026.8.2", "2026.10.1") >= 0 || compareVersion("2026.8.2", "2026.8.2") != 0 || compareVersion("2027.1.0", "2026.12.9") <= 0 {
 		t.Fatal("compareVersion 不对")
+	}
+}
+
+// 落盘清单没有接受时刻：零值的 CheckedAt 必须整项不出现在 JSON 里，否则界面会把它
+// 画成 0001-01-01。time.Time 是结构体，omitempty 对它无效，靠的是 omitzero。
+func TestAdvisoryOmitsZeroCheckedAt(t *testing.T) {
+	b, err := json.Marshal(Advisory{Revision: 1, Source: "stored"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), "checked_at") {
+		t.Fatalf("零值接受时刻不该出现在 JSON 里: %s", b)
+	}
+	b, err = json.Marshal(Advisory{Revision: 1, Source: "website", CheckedAt: time.Date(2026, 9, 15, 10, 0, 0, 0, time.UTC)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"checked_at":"2026-09-15T10:00:00Z"`) {
+		t.Fatalf("有接受时刻时应原样带上: %s", b)
 	}
 }
 

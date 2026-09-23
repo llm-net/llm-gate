@@ -97,7 +97,7 @@ type billState struct {
 	// text 累计输出侧文本的 rune 数（只累计计数，不留文本）。
 	text usage.TextCounter
 	// estimateInput 是输入侧估算器，由文本入口挂上；nil = 本入口不估算
-	// （count_tokens 只计请求，视频/图片按方案不估算）。estIn/estInDone 是
+	// （count_tokens 只计请求，视频/图像按方案不估算）。estIn/estInDone 是
 	// 它的一次性备忘——中间结算与收尾各要一次，而它要序列化 messages。
 	estimateInput func() int64
 	estIn         int64
@@ -281,9 +281,12 @@ func (s *Server) recordUsage(info *reqInfo, status int, elapsed time.Duration) {
 		sample.Tokens = usage.Tokens{Prompt: b.inputEstimate(), Completion: b.text.Tokens()}
 		sample.Estimated = true
 	}
+	if b.entry == usage.EntrySystemOne && status < http.StatusBadRequest && !b.rejected {
+		sample.UsageUnavailable = !b.usageSeen
+	}
 	if b.entry == usage.EntryImage && status < http.StatusBadRequest {
 		// 判据是 entry **精确等于** EntryImage，不是 kind==image：只有按量出图
-		// 入口有「厂商 usage 不可得」这回事，新增按量图片入口时才该进这个分支。
+		// 入口有「厂商 usage 不可得」这回事，新增按量图像入口时才该进这个分支。
 		//
 		// 视频侧这里根本没有分支：按量视频的账在任务清算时才结（settle.go），
 		// 提交这一步只记「1 次请求、0 元」。要给按量视频补「usage 不可得」处理
@@ -295,10 +298,10 @@ func (s *Server) recordUsage(info *reqInfo, status int, elapsed time.Duration) {
 		tu, ok := usage.ParseTaskUsage(info.imageUsage, usage.EntryKind(b.entry), b.upstreamType)
 		sample.TaskUsage = tu
 		if !ok {
-			// 图片不估算（张数与 token 猜不出来也不该猜）：记 0 元 + 打标 +
+			// 图像不估算（张数与 token 猜不出来也不该猜）：记 0 元 + 打标 +
 			// 告警，让这笔缺账在用量页与日志里都看得见。
 			sample.Estimated = true
-			s.log.Warn("图片调用未取得厂商 usage，本次记 0 元",
+			s.log.Warn("图像调用未取得厂商 usage，本次记 0 元",
 				"request_id", info.id, "model", b.model, "upstream", info.upstream)
 		}
 	}
@@ -307,6 +310,11 @@ func (s *Server) recordUsage(info *reqInfo, status int, elapsed time.Duration) {
 		// **不**打 estimated、不告警；张数从响应 data[] 数出来，只为报表读数与
 		// 名义价旋钮（image 行的 ark_image_each × 张数）。
 		sample.TaskUsage = usage.TaskUsage{GeneratedImages: int64(info.imageCount)}
+	}
+	if b.entry == usage.EntryImagineVideo && status < http.StatusBadRequest {
+		// Grok Imagine 视频提交门：异步任务只看到受理，秒数不可得也不轮询清算，
+		// 按受理个数记 1（落 video_count），0 元同样是真值。
+		sample.TaskUsage = usage.TaskUsage{GeneratedVideos: 1}
 	}
 	s.meter.Record(sample)
 }
@@ -608,7 +616,7 @@ func jsonArray(v any) []any {
 }
 
 // jsonObjectText 把载荷里的一个子对象重新序列化成原文 JSON（厂商 usage 原文
-// 要按形态原样留存：aigc_tasks.usage_json 与图片入口的内存点位都是这个口径）。
+// 要按形态原样留存：aigc_tasks.usage_json 与图像入口的内存点位都是这个口径）。
 // 取不到对象或序列化失败得空串。
 func jsonObjectText(v any) string {
 	m, ok := v.(map[string]any)

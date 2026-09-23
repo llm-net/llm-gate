@@ -1,4 +1,4 @@
-// images.go 实现图片入口（2026-08-10 接入，方舟 Seedream）。与视频任务面不同，
+// images.go 实现图像入口（2026-08-10 接入，方舟 Seedream）。与视频任务面不同，
 // 出图是**同步**调用——没有任务 id、没有任务行、没有查询与取消，整条路复用
 // chat 侧的选路透传核心 forward()（proxy.go）：
 //
@@ -9,7 +9,7 @@
 // 与视频面 /ark/api/v3/contents/generations/tasks 同段；出站不带 /ark。
 //
 //   - kind=image 选路 + 单协议 ark_image（内置端点表里方舟按量与订阅**都**
-//     服务它，端点根各自不同）。kind 闸门双向：图片模型进文本/视频入口、
+//     服务它，端点根各自不同）。kind 闸门双向：图像模型进文本/视频入口、
 //     文本/视频模型进本入口，一律 404 model_not_found，不解释内部原因；
 //   - 请求体字节保真透传，只改 model 为来源侧 ID。Seedream 与 OpenAI images
 //     形的参数差异（image 参考图单值/数组、sequential_image_generation 组图、
@@ -61,21 +61,28 @@ const arkImagesPath = "/images/generations"
 // （已过认证中间件）。
 func (s *Server) handleArkImagesGenerations(w http.ResponseWriter, r *http.Request) {
 	errStyle := entryErrorStyle(r)
-	// 图片体与视频体同一形态风险（base64 素材内嵌可到几十 MB）：同一上限
+	// 图像体与视频体同一形态风险（base64 素材内嵌可到几十 MB）：同一上限
 	// 硬拦（超限 413），解码直读 body 流式进行（entry.go）。
 	r.Body = http.MaxBytesReader(w, r.Body, videoSubmitBodyLimit)
 	payload, model, ok := decodeEntryPayload(w, r, errStyle)
 	if !ok {
 		return
 	}
-	// 自此本请求要入账（iteration-9）。图片**不估算**：厂商 usage 拿不到就
+	// 自此本请求要入账（iteration-9）。图像**不估算**：厂商 usage 拿不到就
 	// 记 0 元 + estimated 标 + 告警（recordUsage），所以这里不挂估算器。
 	info := beginEntry(r, usage.EntryImage, model)
 	// 预算准入（iteration-9）：鉴权之后、选路之前，与其余消费入口同一位置。
 	if !s.admit(w, r, errStyle) {
 		return
 	}
-	// kind=image 选路：种类不符与不可服务同回 404（闸门双向）。图片种类没有
+	s.forwardArkImage(w, r, info, payload, model)
+}
+
+// forwardArkImage 是过了准入闸之后的出图流程：选路、转发与用量观察。设备自己发起的媒体
+// 生成（mediagen_vendor.go）在受理时已经过同一道闸，从这里进。
+func (s *Server) forwardArkImage(w http.ResponseWriter, r *http.Request, info *reqInfo, payload map[string]any, model string) {
+	errStyle := entryErrorStyle(r)
+	// kind=image 选路：种类不符与不可服务同回 404（闸门双向）。图像种类没有
 	// protocol_mismatch 口径——resolveRoute 的互指提示只在文本种类内生效，
 	// 本入口的 status 只会是 OK / ModelNotFound / StoreError。
 	cands, status := s.resolveRoute(r.Context(), model, store.ModelKindImage, config.ProtocolArkImage)
@@ -101,7 +108,7 @@ func (s *Server) handleArkImagesGenerations(w http.ResponseWriter, r *http.Reque
 	})
 }
 
-// imageUsageObserver 构造图片入口的响应观察器：厂商 usage 原文、出图张数与
+// imageUsageObserver 构造图像入口的响应观察器：厂商 usage 原文、出图张数与
 // 请求 size 参数记入 reqInfo（账单事实内存记录点位，iteration-9 的计价输入）。
 // 只在 2xx 载荷上被调用（forwardSpec.observe 的契约），解析不出对象的响应
 // 根本到不了这里——观测是旁路，绝不影响透传，也绝不落日志。

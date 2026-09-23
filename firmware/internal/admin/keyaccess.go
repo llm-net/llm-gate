@@ -21,9 +21,10 @@ import (
 
 // keyAccessJSON 是凭 Key 读到的接入读数：与 endpointsResponse 同源，少 agents。
 type keyAccessJSON struct {
-	Endpoints  endpointsJSON       `json:"endpoints"`
-	Models     []servableModelJSON `json:"models"`
-	AIGCModels []aigcModelJSON     `json:"aigc_models,omitempty"`
+	Endpoints       endpointsJSON        `json:"endpoints"`
+	Models          []servableModelJSON  `json:"models"`
+	AIGCModels      []aigcModelJSON      `json:"aigc_models,omitempty"`
+	SystemOneModels []systemOneModelJSON `json:"systemone_models,omitempty"`
 	// FirmwareVersion / HardwareModel 与管理员视角同一份（登录页铭牌也印它们，
 	// 免会话可读）。
 	FirmwareVersion string `json:"firmware_version"`
@@ -42,6 +43,7 @@ func (s *Server) KeyAccessSnapshot(r *http.Request, keyID int64) (any, error) {
 		Endpoints:       s.endpointsSnapshot(r),
 		Models:          s.servableModels(r.Context(), scope),
 		AIGCModels:      s.aigcModels(r.Context(), scope),
+		SystemOneModels: s.systemOneModels(r.Context(), scope),
 		FirmwareVersion: buildinfo.Version,
 		HardwareModel:   s.hardwareModel,
 	}, nil

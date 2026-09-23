@@ -1,13 +1,14 @@
-// fetch.go 把大制品的取回收成一条公共路径：带进度、可续传。
+// fetch.go 把大制品的取回收成一条公共路径：带进度、可续传。来源顺序（先官方
+// 地址、再盒子）由 source.go 决定，这里只管把一个 URL 的正文安全落盘。
 //
-// 盒子那头 /{tool}-helper/cli/* 是白名单透传，字节从官方源经设备中继过来，
+// 经盒子时 /{tool}-helper/cli/* 是白名单透传，字节从官方源经设备中继过来，
 // 每个字节都要过一遍设备的出网口。真机上 159 MiB 的 grok 制品按分钟计，
 // 期间 io.Copy 一声不吭，跟卡死分不出来；设备侧中继又有分钟级的正文上限，
 // 被掐一次就把已经收下的一百多兆全丢了。
 //
-// 所以这里做两件事：按固定间隔把已收字节写给用户；把落点定成按 URL 定名的
-// 续传件，重试或重跑时用 Range 从断点接着传。五个 helper 的透传面本来就转发
-// Range/Accept-Ranges/Content-Range 并认 206，续传不需要盒子那边改动。
+// 所以这里做两件事：按固定间隔把已收字节写给用户；把落点定成按制品定名的
+// 续传件，重试、重跑或换来源时用 Range 从断点接着传。官方源与五个 helper 的
+// 透传面都转发 Range/Accept-Ranges/Content-Range 并认 206，续传不需要盒子那边改动。
 package main
 
 import (
@@ -61,6 +62,9 @@ func isRetryableFetch(err error) bool {
 type artifactFetch struct {
 	client *http.Client
 	url    string
+	// key 非空时是续传件的定名依据（如 "Grok/grok-1.2.3-linux-x86_64"），
+	// 让同一制品从不同来源接着传；空则按 url 定名。
+	key string
 	// label 是进度行里的人读名字，例如 "Grok"。具体版本由调用方在开始前
 	// 单独打印，这里保持短，窄终端上 \r 刷新才不折行。
 	label string
@@ -79,10 +83,15 @@ type artifactFetch struct {
 	mode os.FileMode
 }
 
-// partPath 把续传件定名到 URL 上：制品名恒带版本，所以同一个 URL 的半截文件
-// 可以安全接着传，换了版本自然换文件，不会把两个版本的字节接到一起。
+// partPath 把续传件定名到 key（缺省 URL）上：制品名恒带版本，所以同一个
+// 制品的半截文件可以安全接着传，换了版本自然换文件，不会把两个版本的字节
+// 接到一起。
 func (f artifactFetch) partPath() string {
-	sum := sha256.Sum256([]byte(f.url))
+	key := f.key
+	if key == "" {
+		key = f.url
+	}
+	sum := sha256.Sum256([]byte(key))
 	return filepath.Join(f.dir, fmt.Sprintf("%s-%x.part", f.prefix, sum[:6]))
 }
 
@@ -104,7 +113,7 @@ func (f artifactFetch) cleanStalePart(keep string) {
 	}
 }
 
-// fetchArtifact 把 f.url 的正文取进按 URL 定名的续传件并校验，返回该文件路径；
+// fetchArtifact 把 f.url 的正文取进按制品定名的续传件并校验，返回该文件路径；
 // 调用方负责改名或解包。链路失败时续传件**保留**，下次接着传；校验不符时清空，
 // 免得毒到下一次。
 func (a *app) fetchArtifact(f artifactFetch) (string, error) {

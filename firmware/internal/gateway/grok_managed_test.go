@@ -228,11 +228,11 @@ func TestManagedConfigDegraded(t *testing.T) {
 		return grokhelper.RenderManagedRegion(managedTestBase, testKey, defModel, nil)
 	}
 
-	t.Run("未连接订阅", func(t *testing.T) {
-		e := newRouteEnv(t) // 没有 agent_accounts 行
+	t.Run("未钉订阅账号", func(t *testing.T) {
+		e := newRouteEnv(t) // 没有 agent_accounts 行，这把 Key 也就没钉 grok 账号
 		w := do(e.h, "GET", managedPath, managedHeaders, "")
-		if w.Code != http.StatusConflict {
-			t.Fatalf("状态码 = %d，期望 409；body: %s", w.Code, w.Body.String())
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("状态码 = %d，期望 403；body: %s", w.Code, w.Body.String())
 		}
 	})
 

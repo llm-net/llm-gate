@@ -12,7 +12,7 @@
 // 覆盖值对该 type 服务的全部协议共用，端点白名单硬化在部署迭代收敛。
 // mock 与 openai_compat 没有内置端点，必须显式配置 base_url，可服务协议由
 // [baseURLProtocols] 圈定（mock 文本双协议；openai_compat 仅 openai_chat）——
-// 视频/图片协议的假上游测试用真实类型 + base_url 覆盖表达（选路按 type 选
+// 视频/图像协议的假上游测试用真实类型 + base_url 覆盖表达（选路按 type 选
 // 适配器，泛型行说不清自己该被当哪家厂商对待）。
 //
 // 特化平台能力（2026-08-09）：内置端点表之上，特定平台还有协议转发之外的
@@ -36,6 +36,7 @@ package upstream
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"net"
 	"net/http"
@@ -102,7 +103,7 @@ var builtinEndpoints = map[string]map[string]string{
 	// 是「拼 /messages 前」的端点根，故要带上 /v1——与 deepseek 的
 	// /anthropic/v1 同一口径。2026-08-09 无凭证实探证实：带 /v1 的
 	// /messages、/messages/count_tokens 与 /chat/completions 均回 401
-	// （路由在），不带 /v1 回 404。视频/图片无此类端点。
+	// （路由在），不带 /v1 回 404。视频/图像无此类端点。
 	config.UpstreamQwenPlan: {
 		config.ProtocolOpenAIChat:        "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
 		config.ProtocolAnthropicMessages: "https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic/v1",
@@ -132,6 +133,7 @@ var builtinEndpoints = map[string]map[string]string{
 // **不在候选**：一条泛型行说不清自己该被当哪家厂商适配。
 // anthropic_compat 只服务 Anthropic Messages，并使用 x-api-key 鉴权。
 var baseURLProtocols = map[string]map[string]bool{
+	config.UpstreamSystemOne: {config.ProtocolSystemOne: true},
 	config.UpstreamMock: {
 		config.ProtocolOpenAIChat:        true,
 		config.ProtocolAnthropicMessages: true,
@@ -161,7 +163,8 @@ type Account struct {
 	// APIKey 是上游凭证明文：绝不进日志、审计 detail 或管理 API 响应（§15.1）。
 	APIKey string
 	// BaseURL 覆盖内置端点表，仅 dev/mock 用；两协议共用该值。
-	BaseURL string
+	BaseURL      string
+	ProtocolURLs string
 	// EgressMode 是该账号的出站方式覆盖（inherit|direct|proxy，internal/egress）：
 	// 装配上游请求时经 [Account.EgressContext] 进 ctx，由出站 Transport 按它选路。
 	EgressMode string
@@ -185,6 +188,19 @@ func (a Account) EgressContext(ctx context.Context) context.Context {
 // baseURLProtocols 圈定协议；没给 base_url 的行什么都不服务，选路把它筛掉
 // 而不是拼出半截地址去拨号（写入侧的 base_url 必填校验就是为堵住这种行）。
 func (a Account) Endpoint(protocol string) (string, bool) {
+	if a.Type == config.UpstreamGeneric {
+		switch protocol {
+		case config.ProtocolOpenAIChat, config.ProtocolOpenAIResponses, config.ProtocolAnthropicMessages, config.ProtocolSystemOne:
+		default:
+			return "", false
+		}
+		var urls map[string]string
+		if json.Unmarshal([]byte(a.ProtocolURLs), &urls) != nil {
+			return "", false
+		}
+		base := strings.TrimRight(urls[protocol], "/")
+		return base, base != ""
+	}
 	builtin, hasBuiltin := EndpointFor(a.Type, protocol)
 	if _, known := builtinEndpoints[a.Type]; known {
 		if !hasBuiltin {
@@ -229,7 +245,7 @@ func (a Account) Authorize(h http.Header, protocol string) {
 	if a.Type == config.UpstreamOpenCodeGo {
 		deriveOpenCodeSession(h)
 	}
-	if a.Type == config.UpstreamAnthropicCompat || (a.Type == config.UpstreamOpenCodeGo && protocol == config.ProtocolAnthropicMessages) {
+	if a.Type == config.UpstreamAnthropicCompat || ((a.Type == config.UpstreamOpenCodeGo || a.Type == config.UpstreamGeneric) && protocol == config.ProtocolAnthropicMessages) {
 		h.Del("Authorization")
 		h.Set("x-api-key", a.APIKey)
 		if h.Get("anthropic-version") == "" {
@@ -314,4 +330,12 @@ func CatalogWireProtocol(surface string) string {
 		return config.ProtocolOpenAIChat
 	}
 	return surface
+}
+
+// WireProtocol keeps explicitly selected generic protocols independent.
+func (a Account) WireProtocol(surface string) string {
+	if a.Type == config.UpstreamGeneric {
+		return surface
+	}
+	return CatalogWireProtocol(surface)
 }

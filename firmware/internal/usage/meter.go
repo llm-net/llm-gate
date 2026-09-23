@@ -262,7 +262,7 @@ func (m *Meter) observe(s Sample, cost int64, addDelta bool) {
 		Entry: s.Entry, Kind: kind,
 		Status: s.Status, Attempts: s.Attempts,
 		PromptTokens: q.tokens.Prompt, CompletionTokens: q.tokens.Completion,
-		TotalTokens: q.total, VideoSeconds: q.seconds, ImageCount: q.images,
+		TotalTokens: q.total, VideoSeconds: q.seconds, ImageCount: q.images, VideoCount: q.videos,
 		CacheReadTokens: q.tokens.CacheRead, CacheWriteTokens: q.tokens.CacheWrite, UsageUnavailable: s.UsageUnavailable,
 		CostMicro:  cost,
 		DurationMs: s.DurationMs, Estimated: s.Estimated,
@@ -314,7 +314,7 @@ func (m *Meter) drainMeteredAllowanceLocked(keyID, cost int64, dayKey, weekKey, 
 //     RejectedRequests，混进 errors 会把「用户超限」误读成「上游故障」。
 //   - 被拒样本没到上游，token 与金额恒为 0（调用方也不该给），维度里的
 //     upstream_name 为空串。
-//   - 量取 Sample.quantities()：文本面来自 Tokens，视频/图片面来自厂商 usage
+//   - 量取 Sample.quantities()：文本面来自 Tokens，视频/图像面来自厂商 usage
 //     （token / 秒 / 张各自落位）——**别直接读 s.Tokens**，那正是视频行整片
 //     显示「Token 0」的来路。
 func (m *Meter) addDeltaLocked(s Sample, at time.Time, kind string, q quantities, cost int64) {
@@ -355,6 +355,7 @@ func (m *Meter) addDeltaLocked(s Sample, at time.Time, kind string, q quantities
 	d.TotalTokens += q.total
 	d.VideoSeconds += q.seconds
 	d.ImageCount += q.images
+	d.VideoCount += q.videos
 	d.CostMicro += cost
 	d.DurationMsSum += s.DurationMs
 }
@@ -703,6 +704,11 @@ func (m *Meter) Run(ctx context.Context) {
 	}
 }
 
+// Flush 立刻把内存里的账本增量与按量额度待扣落库，不等五分钟一轮的定时冲刷。
+// 给「删除 Key 前先判它有没有使用记录」这类要读库里最新账的调用方用；失败与
+// 定时路径同规——增量原样留在内存等下一轮，调用方不必也不能据此报错。
+func (m *Meter) Flush(ctx context.Context) { m.flush(ctx) }
+
 // flush 把内存里的两类待落盘状态批量落库：账本增量与按量额度待扣。
 // 两条写入互相独立（各自整批事务、各自失败回填），一类失败不拖住另一类。
 func (m *Meter) flush(ctx context.Context) {
@@ -852,6 +858,7 @@ func mergeDelta(dst *store.UsageDelta, src store.UsageDelta) {
 	dst.TotalTokens += src.TotalTokens
 	dst.VideoSeconds += src.VideoSeconds
 	dst.ImageCount += src.ImageCount
+	dst.VideoCount += src.VideoCount
 	dst.CostMicro += src.CostMicro
 	dst.DurationMsSum += src.DurationMsSum
 }

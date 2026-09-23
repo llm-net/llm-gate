@@ -1,12 +1,14 @@
-// 第三方组件卡（「第三方组件」页，每个组件一张）。
+// 组件详情（「组件管理」页右栏：左栏选中哪个组件，这里就是那一个的读数与全部管理动作）。
 //
 // 组件不随固件发布：签名清单（官网在线检查或离线粘贴导入）→ 从上游官方 release 拉取精确制品
 // （或把同一文件上传）→ 升级引擎核对摘要、架构与自述版本后装进 A/B 槽位 → 可回退到上一槽位。
-// 两个组件（cloudflared、Mihomo 内核）走的是同一条链，差异全部收在 `ComponentSpec` 里：
-// 名字、上游与许可证、清单路径、各自的 API 调用、被哪项功能使用。
+// 三个组件（cloudflared、Mihomo 内核、Codex App Server）走的是同一条链，差异全部收在
+// `ComponentSpec` 里：名字、上游与许可证、清单路径、组件层读数、各自的 API 调用、被哪项
+// 功能使用。
 //
 // 卸载只管组件本身，**从不替管理员停用功能**：使用它的功能启用中时按钮置灰并指回功能页，
-// 服务端同样以 409 component_in_use 拒绝。
+// 服务端同样以 409 component_in_use 拒绝。没有常驻进程、没有对应功能的组件（Codex App
+// Server）不带 `process` / `usedBy`：安装与回退只切 current 软链，卸载没有守卫。
 //
 // 零轮询：读数只在进页/刷新/动作后重取一次。
 
@@ -38,11 +40,20 @@ export type Run = (name: string, fn: () => Promise<unknown>, after?: () => void)
 
 type ComponentReply = { component: api.ComponentStatus };
 
+/** 一个组件的当前读数：组件层状态，加上「使用它的功能是否启用中」（卸载守卫的判据）。 */
+export interface ComponentReading {
+  comp: api.ComponentStatus;
+  /** 使用它的功能是否启用中（启用中不能卸载）；没有对应功能的组件恒 false。 */
+  inUse: boolean;
+}
+
 /** 一个第三方组件的全部差异点；页面与先决条件卡都只认它。 */
 export interface ComponentSpec {
-  id: "cloudflared" | "mihomo";
+  id: "cloudflared" | "mihomo" | "codex-app-server";
   /** 组件名（界面标题）。 */
   name: string;
+  /** 一句话说清它是什么、给哪项功能用（左栏列表里那行小字）。 */
+  tagline: string;
   /** 上游名字：清单、拉取提示与许可证说明都用它。 */
   upstream: string;
   /** 这个组件在设备上做什么（一句话）。 */
@@ -55,12 +66,14 @@ export interface ComponentSpec {
   manifestPath: string;
   /** 版本号展示：Mihomo 清单里是裸三段号，界面加 v。 */
   versionLabel: (version: string) => string;
-  /** 安装 / 回退时受影响的进程名（「connector 运行中会切到新版本」那句）。 */
-  process: string;
-  /** 使用该组件的功能：名字与页面。 */
-  usedBy: { label: string; route: BusinessRoute };
+  /** 安装 / 回退时受影响的进程名（「connector 运行中会切到新版本」那句）；没有常驻进程的组件省略。 */
+  process?: string;
+  /** 使用该组件的功能：名字与页面；没有对应功能的组件省略（卸载无守卫）。 */
+  usedBy?: { label: string; route: BusinessRoute };
   /** 卸载时保留的东西（确认框一句话）。 */
   keepsOnRemove: string;
+  /** 取组件层读数与「使用它的功能是否启用中」；失败由页面按组件单独降级，不拖垮整页。 */
+  status: () => Promise<ComponentReading>;
   api: {
     check: () => Promise<ComponentReply>;
     importManifest: (index: string, signature: string) => Promise<ComponentReply>;
@@ -126,7 +139,7 @@ export function useRun(reload: () => void): { busy: string | null; run: Run } {
   return { busy, run };
 }
 
-export function ComponentCard({
+export function ComponentDetail({
   spec,
   comp,
   inUse,
@@ -153,7 +166,7 @@ export function ComponentCard({
   return (
     <Card className="gap-3 p-5">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="font-medium">{spec.name}</span>
+        <h2 className="text-base font-semibold">{spec.name}</h2>
         <Badge variant={badge.tone === "off" ? "secondary" : "outline"} className={toneClass(badge.tone)}>
           {badge.label}
         </Badge>
@@ -163,12 +176,14 @@ export function ComponentCard({
           </Badge>
         ) : null}
         <HelpTip label={t("组件来源说明")}>{spec.sourceNote}</HelpTip>
-        <span className="text-muted-foreground ml-auto text-xs">
-          {t("用于：")}
-          <Link to={spec.usedBy.route} className="underline">
-            {spec.usedBy.label}
-          </Link>
-        </span>
+        {spec.usedBy === undefined ? null : (
+          <span className="text-muted-foreground ml-auto text-xs">
+            {t("用于：")}
+            <Link to={spec.usedBy.route} className="underline">
+              {spec.usedBy.label}
+            </Link>
+          </span>
+        )}
       </div>
       <p className="text-muted-foreground text-xs">{spec.purpose}</p>
       <dl className="grid grid-cols-[6rem_1fr] gap-y-1 text-xs">
@@ -309,9 +324,11 @@ export function ComponentCard({
                 body: (
                   <>
                     <p>
-                      {t("升级引擎核对摘要、架构与自述版本后装进非活动 slot；{process}运行中会切到新版本，未就绪自动切回旧版本。", {
-                        process: spec.process,
-                      })}
+                      {spec.process === undefined
+                        ? t("升级引擎核对摘要、架构与自述版本后装进非活动 slot，再把 current 切到新版本；该组件没有常驻进程，不会重启任何服务。")
+                        : t("升级引擎核对摘要、架构与自述版本后装进非活动 slot；{process}运行中会切到新版本，未就绪自动切回旧版本。", {
+                            process: spec.process,
+                          })}
                     </p>
                     <p className="text-muted-foreground text-xs">{spec.licenseNote}</p>
                   </>
@@ -340,7 +357,10 @@ export function ComponentCard({
               const prev = comp.previous_version ?? "";
               void confirm({
                 title: t("回退到 {version}", { version: v(prev) }),
-                body: t("把 current 切回上一个 slot；{process}运行中会重启。", { process: spec.process }),
+                body:
+                  spec.process === undefined
+                    ? t("把 current 切回上一个 slot；该组件没有常驻进程，不会重启任何服务。")
+                    : t("把 current 切回上一个 slot；{process}运行中会重启。", { process: spec.process }),
                 confirmText: t("回退"),
                 danger: true,
               }).then((ok) => {
@@ -363,14 +383,14 @@ export function ComponentCard({
             variant="outline"
             className="text-destructive ml-auto"
             disabled={busy !== null || inUse || !comp.engine_available}
-            title={inUse ? t("「{feature}」启用中，先到该页停用再卸载", { feature: spec.usedBy.label }) : undefined}
+            title={inUse && spec.usedBy !== undefined ? t("「{feature}」启用中，先到该页停用再卸载", { feature: spec.usedBy.label }) : undefined}
             onClick={() => {
               void confirm({
                 title: t("卸载 {name}", { name: spec.name }),
                 body: (
                   <>
                     <p>{t("删除设备上该组件的全部 slot（含上一版本）与已就绪制品；{keeps}保留，需要时可重新安装。", { keeps: spec.keepsOnRemove })}</p>
-                    <p className="text-muted-foreground text-xs">{t("使用它的功能须已停用；本页不会替你停用功能。")}</p>
+                    {spec.usedBy === undefined ? null : <p className="text-muted-foreground text-xs">{t("使用它的功能须已停用；本页不会替你停用功能。")}</p>}
                   </>
                 ),
                 confirmText: t("卸载"),
@@ -390,7 +410,7 @@ export function ComponentCard({
           </Button>
         ) : null}
       </div>
-      {inUse ? (
+      {inUse && spec.usedBy !== undefined ? (
         <p className="text-muted-foreground text-xs">
           {t("「{feature}」启用中：可以升级或回退（进程会随之重启），卸载前先到该页停用。", { feature: spec.usedBy.label })}
         </p>

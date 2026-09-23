@@ -52,11 +52,11 @@ func TestKeyAPIModelsScopeAndSubscriptionGuard(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	model, err := e.st.CreateModel(t.Context(), "deepseek-v4-flash", store.ModelKindText, "")
+	model, err := e.st.CreateModel(t.Context(), "deepseek-v4-pro", store.ModelKindText, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.st.CreateModelSource(t.Context(), model.ID, up.ID, "deepseek-v4-flash", 10); err != nil {
+	if _, err := e.st.CreateModelSource(t.Context(), model.ID, up.ID, "deepseek-v4-pro", 10); err != nil {
 		t.Fatal(err)
 	}
 	// 订阅接入的文本计价行：名字在内置目录 agents 段里且一条来源都没挂。
@@ -84,7 +84,7 @@ func TestKeyAPIModelsScopeAndSubscriptionGuard(t *testing.T) {
 		!got.Models[0].Servable || !got.Models[0].Selectable || len(got.Models[0].Platforms) != 1 {
 		t.Fatalf("候选清单不符（订阅行不该在内）: %+v", got.Models)
 	}
-	if !slices.Equal(got.Models[0].DevTools, []string{"codex", "opencode", "claude"}) || got.Models[0].DevToolSelected {
+	if !slices.Equal(got.Models[0].DevTools, []string{"codex", "opencode", "mcode", "claude"}) || got.Models[0].DevToolSelected {
 		t.Fatalf("开发工具投影读数不符: %+v", got.Models[0])
 	}
 
@@ -122,7 +122,7 @@ func TestKeyAPIModelsScopeAndSubscriptionGuard(t *testing.T) {
 	}
 
 	wantDetail := "restricted=true model_ids=[" + jsonNumber(model.ID) + "] revision=1"
-	wantDevDetail := "codex=false grok=false claude=false cursor=false model_ids=[" + jsonNumber(model.ID) + "] revision=1"
+	wantDevDetail := "codex=0 grok=0 claude=0 cursor=0 model_ids=[" + jsonNumber(model.ID) + "] revision=1"
 	var audited, devAudited bool
 	for _, row := range auditRows(t, e.dir) {
 		switch row.event {
@@ -220,15 +220,23 @@ func TestKeyAPIModelsPreservesSubscriptions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	model, err := e.st.CreateModel(t.Context(), "deepseek-v4-flash", store.ModelKindText, "")
+	model, err := e.st.CreateModel(t.Context(), "deepseek-v4-pro", store.ModelKindText, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.st.CreateModelSource(t.Context(), model.ID, up.ID, "deepseek-v4-flash", 10); err != nil {
+	if _, err := e.st.CreateModelSource(t.Context(), model.ID, up.ID, "deepseek-v4-pro", 10); err != nil {
+		t.Fatal(err)
+	}
+	codex, err := e.st.UpsertAgentAccount(t.Context(), store.NewAgentAccount{Provider: store.AgentProviderCodex, AuthJSON: `{"tokens":{"access_token":"fake"}}`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cursor, err := e.st.UpsertAgentAccount(t.Context(), store.NewAgentAccount{Provider: store.AgentProviderCursor, AuthJSON: `{"api_key":"fake"}`})
+	if err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := e.st.ReplaceDevToolConfig(t.Context(), store.DevToolConfig{
-		KeyID: key.ID, AllowCodexSubscription: true, AllowCursorSubscription: true,
+		KeyID: key.ID, CodexAccountID: codex.ID, CursorAccountID: cursor.ID,
 		CatalogModelIDs: []int64{model.ID},
 	}); err != nil {
 		t.Fatal(err)
@@ -245,9 +253,9 @@ func TestKeyAPIModelsPreservesSubscriptions(t *testing.T) {
 		t.Fatalf("PUT=%d", resp.StatusCode)
 	}
 	devCfg, err := e.st.GetDevToolConfig(t.Context(), key.ID)
-	if err != nil || len(devCfg.CatalogModelIDs) != 0 || !devCfg.AllowCodexSubscription ||
-		devCfg.AllowGrokSubscription || devCfg.AllowClaudeSubscription || !devCfg.AllowCursorSubscription {
-		t.Fatalf("订阅开关不该被 api-models PUT 改动: %+v err=%v", devCfg, err)
+	if err != nil || len(devCfg.CatalogModelIDs) != 0 || devCfg.CodexAccountID != codex.ID ||
+		devCfg.GrokAccountID != 0 || devCfg.ClaudeAccountID != 0 || devCfg.CursorAccountID != cursor.ID {
+		t.Fatalf("钉死的订阅账号不该被 api-models PUT 改动: %+v err=%v", devCfg, err)
 	}
 }
 

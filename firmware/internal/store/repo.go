@@ -21,7 +21,7 @@ import (
 // 本体不进 APIKey 结构体——解封走 GetAPIKeyPlaintext 的专用点查。
 const apiKeyColumns = `id, label, key_digest, display_prefix, display_last4, project_id,
 	disabled, created_at, last_used_at, budget_day_micro, budget_week_micro, budget_month_micro, rpm_limit,
-	metered_allowance_micro, plaintext_sealed <> ''`
+	metered_allowance_micro, plaintext_sealed <> '', archived_at`
 
 // SettingAdminPasswordHash 是设备登录口令的 Argon2id PHC 串在 settings 表里的
 // 键名。设备只有一个管理员，「用户」这个概念 0019 起整个退场——口令因此是一条
@@ -54,7 +54,14 @@ type APIKey struct {
 	MeteredAllowanceMicro int64
 	CreatedAt             time.Time
 	LastUsedAt            time.Time
+	// ArchivedAt 非零表示这把 Key 已归档（0048）：凭据已作废（摘要换成哨兵、
+	// 封存明文清空、禁用位为 1），行与标签只为账本、AIGC 任务与媒体生成里的
+	// key_id 保留一个有名字的对象。归档不可逆，ListAPIKeys 缺省不列。
+	ArchivedAt time.Time
 }
+
+// Archived 报告这把 Key 是否已归档。
+func (k *APIKey) Archived() bool { return !k.ArchivedAt.IsZero() }
 
 // Session 是 sessions 表的一行。令牌只存摘要；过期判定由调用方
 // （internal/auth）拿 ExpiresAt 做，Get 不隐式过滤过期行。会话不指向任何主体
@@ -162,9 +169,20 @@ func (s *Store) GetAPIKeyPlaintext(ctx context.Context, id int64) (string, error
 	return plaintext, nil
 }
 
-// ListAPIKeys 按 id 升序返回全部 Key。
+// ListAPIKeys 按 id 升序返回全部**在用**（未归档）Key。已归档的行只为历史账
+// 留名，管理列表、媒体生成与 Agent远控的密钥选择器都不该看到它们。
 func (s *Store) ListAPIKeys(ctx context.Context) ([]APIKey, error) {
-	rows, err := s.stmtListAPIKeys.QueryContext(ctx)
+	return s.listAPIKeys(ctx, s.stmtListAPIKeys)
+}
+
+// ListAllAPIKeys 按 id 升序返回全部 Key，含已归档的。给需要把历史 key_id
+// 对回标签的读数端（用量报表、显式要看归档项的管理列表）用。
+func (s *Store) ListAllAPIKeys(ctx context.Context) ([]APIKey, error) {
+	return s.listAPIKeys(ctx, s.stmtListAllAPIKeys)
+}
+
+func (s *Store) listAPIKeys(ctx context.Context, stmt *sql.Stmt) ([]APIKey, error) {
+	rows, err := stmt.QueryContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("列出 API密钥: %w", err)
 	}
@@ -273,12 +291,79 @@ func (s *Store) DrainAPIKeyMeteredAllowances(ctx context.Context, drains map[int
 	return nil
 }
 
-// DeleteAPIKey 删除 Key 行；目标不存在返回 ErrNotFound。删除即摘要点查落空，
-// 数据面下一个请求就是 401（决策 5：无缓存层）。封存明文随行一并删除，这把
-// Key 再无恢复可能。
+// ErrKeyHasHistory 表示这把 Key 在用量账本、AIGC 任务或媒体生成任务里已有
+// 归属行，不能物理删除——删了这些行就只剩一个无名的 key_id。出路是归档。
+var ErrKeyHasHistory = errors.New("store: Key 已有使用记录")
+
+// ErrKeyArchived 表示目标 Key 已归档：凭据已作废、行只为历史留名，启停、限额、
+// 复制明文这类改凭据或改准入的动作一律不再接受。
+var ErrKeyArchived = errors.New("store: Key 已归档")
+
+// DeleteAPIKey 物理删除一把**没有使用记录**的 Key 行；目标不存在返回
+// ErrNotFound，账本 / AIGC 任务 / 媒体生成任务里有它的归属行则返回
+// ErrKeyHasHistory 且分文不动（该走 ArchiveAPIKey）。删除即摘要点查落空，数据面
+// 下一个请求就是 401（决策 5：无缓存层）。封存明文随行一并删除，这把 Key 再无
+// 恢复可能。检查与删除在同一事务里，中间落下的账本行不会变成孤儿。
 func (s *Store) DeleteAPIKey(ctx context.Context, id int64) error {
-	res, err := s.stmtDeleteAPIKey.ExecContext(ctx, id)
-	return execOneRow(res, err, "删除 API密钥")
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("删除 API密钥: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck // Commit 成功后 Rollback 是空操作
+	var used int
+	if err := tx.QueryRowContext(ctx, `
+		SELECT EXISTS (SELECT 1 FROM usage_hourly  WHERE key_id = ?)
+		    OR EXISTS (SELECT 1 FROM aigc_tasks    WHERE key_id = ?)
+		    OR EXISTS (SELECT 1 FROM media_jobs    WHERE key_id = ?)`,
+		id, id, id).Scan(&used); err != nil {
+		return fmt.Errorf("删除 API密钥: 检查使用记录: %w", err)
+	}
+	if used != 0 {
+		// 先确认目标存在：不存在的 id 若恰好留有历史行（早年物理删除的密钥），
+		// 也照旧答 ErrNotFound——对管理员来说它本来就不在列表里。
+		var exists int
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM api_keys WHERE id = ?)`, id).Scan(&exists); err != nil {
+			return fmt.Errorf("删除 API密钥: %w", err)
+		}
+		if exists == 0 {
+			return fmt.Errorf("删除 API密钥: %w", ErrNotFound)
+		}
+		return fmt.Errorf("删除 API密钥: %w", ErrKeyHasHistory)
+	}
+	res, err := tx.StmtContext(ctx, s.stmtDeleteAPIKey).ExecContext(ctx, id)
+	if err := execOneRow(res, err, "删除 API密钥"); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("删除 API密钥: %w", err)
+	}
+	return nil
+}
+
+// ArchiveAPIKey 归档一把 Key：一条 UPDATE 同时把摘要换成不可命中的哨兵
+// （`archived:<id>`，保持 UNIQUE）、清空封存明文、置禁用位并记归档时刻。
+// 摘要点查从此落空（数据面 401），复制端点再也解不出明文；标签、展示串、限额与
+// 历史账全部保留。目标不存在返回 ErrNotFound，已归档返回 ErrKeyArchived。
+func (s *Store) ArchiveAPIKey(ctx context.Context, id int64) error {
+	res, err := s.stmtArchiveAPIKey.ExecContext(ctx, fmtTime(time.Now()), id)
+	if err != nil {
+		return fmt.Errorf("归档 API密钥: %w", mapErr(err))
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("归档 API密钥: %w", err)
+	}
+	if n == 1 {
+		return nil
+	}
+	k, err := s.GetAPIKeyByID(ctx, id)
+	if err != nil {
+		return fmt.Errorf("归档 API密钥: %w", err)
+	}
+	if k.Archived() {
+		return fmt.Errorf("归档 API密钥: %w", ErrKeyArchived)
+	}
+	return fmt.Errorf("归档 API密钥: %w", ErrNotFound)
 }
 
 // LookupKeyByDigest 是数据面鉴权热路径的摘要点查。未命中返回 ErrNotFound；
@@ -302,7 +387,7 @@ func (s *Store) LookupKeyByDigest(ctx context.Context, keyDigest string) (*KeyAu
 	if err != nil {
 		return nil, fmt.Errorf("查询 Key 摘要: %w", err)
 	}
-	a.KeyDisplay = keyDisplay(prefix, last4)
+	a.KeyDisplay = KeyDisplay(prefix, last4)
 	a.KeyDisabled = keyDisabled != 0
 	a.KeyBudgetDayMicro = nullableInt64(keyDay)
 	a.KeyBudgetWeekMicro = nullableInt64(keyWeek)
@@ -311,13 +396,13 @@ func (s *Store) LookupKeyByDigest(ctx context.Context, keyDigest string) (*KeyAu
 	return &a, nil
 }
 
-// keyDisplay 拼出密钥的展示串（形如 sk_abcdefghi…wxyz）。两段都空
+// KeyDisplay 拼出密钥的展示串（形如 sk_abcdefghi…wxyz）。两段都空
 // （YAML 导入的历史 Key 没有展示字段）时返回空串，而不是一个只有省略号的怪串。
 //
 // aigc_tasks.key_display 的任务行快照与账本的密钥维度都取 KeyAuth.KeyDisplay
 // （即本函数的产出）：两张表的密钥维度必须能对上。gateway 侧曾有一份逐字相同
 // 的副本，2026-08-14 已退役。
-func keyDisplay(prefix, last4 string) string {
+func KeyDisplay(prefix, last4 string) string {
 	if prefix == "" && last4 == "" {
 		return ""
 	}
@@ -433,7 +518,7 @@ func scanAPIKey(r rowScanner) (*APIKey, error) {
 		k                                  APIKey
 		project                            sql.NullInt64
 		created                            string
-		lastUsed                           sql.NullString
+		lastUsed, archived                 sql.NullString
 		disabled, plaintextAvail           int
 		budgetDay, budgetWeek, budgetMonth sql.NullInt64
 		rpmLimit                           sql.NullInt64
@@ -441,7 +526,7 @@ func scanAPIKey(r rowScanner) (*APIKey, error) {
 	err := r.Scan(&k.ID, &k.Label, &k.KeyDigest, &k.DisplayPrefix,
 		&k.DisplayLast4, &project, &disabled, &created, &lastUsed,
 		&budgetDay, &budgetWeek, &budgetMonth, &rpmLimit,
-		&k.MeteredAllowanceMicro, &plaintextAvail)
+		&k.MeteredAllowanceMicro, &plaintextAvail, &archived)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -461,6 +546,11 @@ func scanAPIKey(r rowScanner) (*APIKey, error) {
 	if lastUsed.Valid {
 		if k.LastUsedAt, err = parseTime(lastUsed.String); err != nil {
 			return nil, fmt.Errorf("last_used_at 非法: %w", err)
+		}
+	}
+	if archived.Valid {
+		if k.ArchivedAt, err = parseTime(archived.String); err != nil {
+			return nil, fmt.Errorf("archived_at 非法: %w", err)
 		}
 	}
 	return &k, nil

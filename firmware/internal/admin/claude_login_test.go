@@ -78,11 +78,11 @@ func TestClaudeManualLoginSealsAndConsumesOnce(t *testing.T) {
 	if bad.Code != 400 || calls.Load() != 0 {
 		t.Fatal("state validation failed")
 	}
-	w := claudeFlowRequest(s.handleClaudeLoginCallback, map[string]string{"code": code, "label": "Claude", "default_model": "claude-test"})
+	w := claudeFlowRequest(s.handleClaudeLoginCallback, map[string]any{"code": code, "label": "Claude", "default_model": "claude-test", "account_id": old.ID})
 	if w.Code != 200 || calls.Load() != 1 {
 		t.Fatalf("callback failed: %d", w.Code)
 	}
-	current, raw, err := s.st.GetAgentCredential(t.Context(), "claude")
+	current, raw, err := s.st.GetAgentCredential(t.Context(), old.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +118,7 @@ func TestClaudeManualLoginLateExchangeCannotOverride(t *testing.T) {
 			}
 			code := startClaudeFlow(t, s)
 			done := make(chan *httptest.ResponseRecorder, 1)
-			go func() { done <- claudeFlowRequest(s.handleClaudeLoginCallback, map[string]string{"code": code}) }()
+			go func() { done <- claudeFlowRequest(s.handleClaudeLoginCallback, map[string]any{"code": code, "account_id": old.ID}) }()
 			<-entered
 			if w := claudeFlowRequest(s.handleClaudeLoginCallback, map[string]string{"code": code}); w.Code != 400 {
 				t.Error("concurrent code replay accepted")
@@ -128,7 +128,7 @@ func TestClaudeManualLoginLateExchangeCannotOverride(t *testing.T) {
 			case "start":
 				newer = startClaudeFlow(t, s)
 			case "setup":
-				w := claudeFlowRequest(s.handleConnectClaudeSetupToken, map[string]string{"setup_token": "fake-replacement"})
+				w := claudeFlowRequest(s.handleConnectClaudeSetupToken, map[string]any{"setup_token": "fake-replacement", "account_id": old.ID})
 				if w.Code != 200 {
 					t.Errorf("setup failed: %d", w.Code)
 				}
@@ -149,7 +149,7 @@ func TestClaudeManualLoginLateExchangeCannotOverride(t *testing.T) {
 			if w := <-done; w.Code != wantStatus {
 				t.Fatalf("late callback status %d", w.Code)
 			}
-			_, blob, err := s.st.GetAgentCredential(t.Context(), "claude")
+			_, blob, err := s.st.GetAgentCredential(t.Context(), old.ID)
 			if action == "delete" {
 				if err == nil {
 					t.Fatal("deleted connection resurrected")
@@ -169,12 +169,12 @@ func TestClaudeManualLoginIssuerFailureKeepsConnection(t *testing.T) {
 		return &http.Response{StatusCode: 400, Body: io.NopCloser(strings.NewReader(`{"error":"invalid_grant","error_description":"fake-manual-code"}`))}, nil
 	})
 	const original = `{"setup_token":"fake-old-token"}`
-	_, err := s.st.UpsertAgentAccount(t.Context(), store.NewAgentAccount{Provider: "claude", AuthJSON: original})
+	old, err := s.st.UpsertAgentAccount(t.Context(), store.NewAgentAccount{Provider: "claude", AuthJSON: original})
 	if err != nil {
 		t.Fatal(err)
 	}
-	w := claudeFlowRequest(s.handleClaudeLoginCallback, map[string]string{"code": startClaudeFlow(t, s)})
-	_, blob, err := s.st.GetAgentCredential(t.Context(), "claude")
+	w := claudeFlowRequest(s.handleClaudeLoginCallback, map[string]any{"code": startClaudeFlow(t, s), "account_id": old.ID})
+	_, blob, err := s.st.GetAgentCredential(t.Context(), old.ID)
 	if w.Code != 502 || err != nil || blob != original || strings.Contains(w.Body.String()+logs.String(), "fake-manual-code") {
 		t.Fatal("failed exchange altered connection or exposed code")
 	}
@@ -202,11 +202,11 @@ func TestClaudeCredentialUpdatesPreserveOtherComponentAndStatus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	w := claudeFlowRequest(s.handleConnectClaudeSetupToken, map[string]string{"setup_token": "fake-setup"})
+	w := claudeFlowRequest(s.handleConnectClaudeSetupToken, map[string]any{"setup_token": "fake-setup", "account_id": a.ID})
 	if w.Code != 200 {
 		t.Fatalf("setup update failed: %d", w.Code)
 	}
-	current, blob, err := s.st.GetAgentCredential(t.Context(), "claude")
+	current, blob, err := s.st.GetAgentCredential(t.Context(), a.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,7 +218,7 @@ func TestClaudeCredentialUpdatesPreserveOtherComponentAndStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	// New quota authorization clears only the quota latch, not setup-token failure.
-	current, err = s.saveClaudeCredential(t.Context(), store.NewAgentAccount{Provider: "claude", AuthJSON: oauth})
+	current, err = s.saveClaudeCredential(t.Context(), store.NewAgentAccount{ID: a.ID, Provider: "claude", AuthJSON: oauth})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,11 +226,11 @@ func TestClaudeCredentialUpdatesPreserveOtherComponentAndStatus(t *testing.T) {
 	if current.Status != store.AgentStatusAuthExpired || !out.SetupTokenConfigured || !out.QuotaOAuthConfigured || out.QuotaOAuthExpired || out.CredentialKind != "setup_token+oauth" {
 		t.Fatal("quota reconnect changed inference status")
 	}
-	w = claudeFlowRequest(s.handleConnectClaudeSetupToken, map[string]string{"setup_token": "fake-new-setup"})
+	w = claudeFlowRequest(s.handleConnectClaudeSetupToken, map[string]any{"setup_token": "fake-new-setup", "account_id": a.ID})
 	if w.Code != 200 {
 		t.Fatal("replacement setup failed")
 	}
-	current, blob, err = s.st.GetAgentCredential(t.Context(), "claude")
+	current, blob, err = s.st.GetAgentCredential(t.Context(), a.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

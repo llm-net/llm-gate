@@ -26,12 +26,19 @@ func connectCursor(t *testing.T, e *agentEnv, key, label string) *http.Response 
 	return e.do(http.MethodPost, "/admin/v1/agent-accounts/cursor/api-key", e.cookie, body)
 }
 
-// providerAt 取第 n 次委托刷新时传给数据面的 provider（断言分流正确用）。
-func (f *fakeAgentTokens) providerAt(n int) string {
+// reconnectCursor 把新 Key 覆盖进既有账号行（account_id 非零）。
+func reconnectCursor(t *testing.T, e *agentEnv, accountID int64, key, label string) *http.Response {
+	t.Helper()
+	body := fmt.Sprintf(`{"api_key":%q,"label":%q,"account_id":%d}`, key, label, accountID)
+	return e.do(http.MethodPost, "/admin/v1/agent-accounts/cursor/api-key", e.cookie, body)
+}
+
+// idAt 取第 n 次委托刷新时传给数据面的账号行 id（断言分流正确用）。
+func (f *fakeAgentTokens) idAt(n int) int64 {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if n >= len(f.calls) {
-		return ""
+		return 0
 	}
 	return f.calls[n]
 }
@@ -51,7 +58,7 @@ func TestCursorAPIKeyConnectIsSealedOffline(t *testing.T) {
 	if e.issuer.count() != 0 {
 		t.Fatal("粘贴连接不该出网：exchange 验证是自检与数据面的事")
 	}
-	acct, blob, err := e.st.GetAgentCredential(t.Context(), store.AgentProviderCursor)
+	acct, blob, err := e.st.GetAgentCredential(t.Context(), e.list()[0].ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,18 +117,20 @@ func TestCursorRejectsDefaultModel(t *testing.T) {
 	}
 }
 
-// TestCursorReconnectReplacesCredential 钉住单账户语义：重复连接是整体替换
-// 而不是增行，且不带 label 时保持管理员配置（Upsert 的「空即保持」）。
+// TestCursorReconnectReplacesCredential 钉住重新连接语义：带 account_id 的连接
+// 是整体替换那一行而不是增行，且不带 label 时保持管理员配置（Upsert 的
+// 「空即保持」）；不带 account_id 则是第二个 Cursor 账号。
 func TestCursorReconnectReplacesCredential(t *testing.T) {
 	e := newAgentAdminEnv(t, issuerGrants(agentAccess, agentRefresh))
 	wantStatus(t, connectCursor(t, e, cursorKeyFake, "Cursor"), http.StatusOK)
+	id := e.list()[0].ID
 	const replacement = "fake-cursor-replacement-api-key-never-real-9876543210"
-	wantStatus(t, connectCursor(t, e, replacement, ""), http.StatusOK)
+	wantStatus(t, reconnectCursor(t, e, id, replacement, ""), http.StatusOK)
 
 	if accounts := e.list(); len(accounts) != 1 {
-		t.Fatalf("重复连接后 = %d 行，期望 1（同 provider 覆盖）", len(accounts))
+		t.Fatalf("重新连接后 = %d 行，期望 1（按 id 覆盖）", len(accounts))
 	}
-	acct, blob, err := e.st.GetAgentCredential(t.Context(), store.AgentProviderCursor)
+	acct, blob, err := e.st.GetAgentCredential(t.Context(), id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,6 +140,10 @@ func TestCursorReconnectReplacesCredential(t *testing.T) {
 	}
 	if acct.Label != "Cursor" {
 		t.Fatalf("空名称应保留旧值，得到 %q", acct.Label)
+	}
+	wantStatus(t, connectCursor(t, e, "fake-cursor-second-api-key-never-real-0000000000", "第二个"), http.StatusOK)
+	if accounts := e.list(); len(accounts) != 2 {
+		t.Fatalf("不带 account_id 的连接应新建一行，得到 %d 行", len(accounts))
 	}
 }
 
@@ -182,8 +195,8 @@ func TestCursorRefreshDelegatesToDataPlane(t *testing.T) {
 	if out.Account.Status != store.AgentStatusActive {
 		t.Fatalf("自检成功后 status = %q，期望 active", out.Account.Status)
 	}
-	if tokens.count() != 1 || tokens.providerAt(0) != store.AgentProviderCursor {
-		t.Fatalf("委托次数 = %d，provider = %q，期望 1 次 cursor", tokens.count(), tokens.providerAt(0))
+	if tokens.count() != 1 || tokens.idAt(0) != id {
+		t.Fatalf("委托次数 = %d，账号 = %d，期望 1 次、账号 %d", tokens.count(), tokens.idAt(0), id)
 	}
 
 	// 被上游确定性拒绝（exchange 401/403 → agentauth.ErrAuthExpired 一族）：

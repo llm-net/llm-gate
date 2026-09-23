@@ -10,6 +10,11 @@ import { Pill } from "./card-parts";
 /** 四种订阅的固定顺序：左列铺位、右列分组都按它排。 */
 export const PROVIDERS: api.AgentProvider[] = ["codex", "grok", "claude", "cursor"];
 
+/** 账号在界面上的称呼：管理员起的名字，没起就按行 id 称「账号 #n」（同一种订阅可有多个账号）。 */
+export function accountName(a: Pick<api.AgentAccount, "id" | "label">): string {
+  return a.label === "" ? t("账号 #{id}", { id: a.id }) : a.label;
+}
+
 // 修复动作的名字：claude / cursor 的凭据是管理员粘贴封存的固定值，没有「登录」
 // 可重来——状态灯与修复按钮都说「重新连接」（走各自的粘贴流）；codex / grok 说
 // 「重新登录」（走浏览器登录流）。

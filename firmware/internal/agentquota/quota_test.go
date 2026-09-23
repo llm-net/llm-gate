@@ -21,6 +21,9 @@ func TestProviderWindows(t *testing.T) {
 		{"claude", "claude", `{"five_hour":{"utilization":23.45,"resets_at":"2026-09-08T12:00:00Z"},"seven_day":{"utilization":90,"resets_at":null},"seven_day_opus":null,"extra_usage":{"is_enabled":true,"utilization":12.5}}`, []string{"session", "week", "month"}, []int64{2345, 9000, 1250}},
 		{"cursor separate pools", "cursor", `{"billingCycleEnd":"1789573713000","planUsage":{"totalSpend":26999,"limit":40000,"autoPercentUsed":0.18966666666666668,"apiPercentUsed":52.86,"totalPercentUsed":7.714}}`, []string{"month", "month", "month"}, []int64{18, 5286, 771}},
 		{"grok unified weekly", "grok", `{"config":{"creditUsagePercent":15,"isUnifiedBillingUser":true,"currentPeriod":{"start":"2026-09-06T15:33:03.703867+00:00","end":"2026-09-13T15:33:03.703867+00:00"}}}`, []string{"week"}, []int64{1500}},
+		// Protobuf JSON omits the zero-valued percent right after the weekly reset.
+		{"grok after reset", "grok", `{"config":{"billingPeriodEnd":"2026-09-20T15:33:03.703867+00:00","billingPeriodStart":"2026-09-13T15:33:03.703867+00:00","currentPeriod":{"end":"2026-09-20T15:33:03.703867+00:00","start":"2026-09-13T15:33:03.703867+00:00","type":"USAGE_PERIOD_TYPE_WEEKLY"},"isUnifiedBillingUser":true,"onDemandCap":{"val":0},"onDemandUsed":{"val":0},"prepaidBalance":{"val":0},"topUpMethod":"TOP_UP_METHOD_SAVED_PAYMENT_METHOD"}}`, []string{"week"}, []int64{0}},
+		{"grok monthly enum", "grok", `{"config":{"creditUsagePercent":"2.5","currentPeriod":{"type":"USAGE_PERIOD_TYPE_MONTHLY","start":"2026-09-01T00:00:00Z","end":"2026-10-01T00:00:00Z"}}}`, []string{"month"}, []int64{250}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			d, err := Parse(tc.provider, []byte(tc.body))
@@ -41,7 +44,7 @@ func TestProviderWindows(t *testing.T) {
 
 func TestUnknownIsNotZero(t *testing.T) {
 	for _, p := range []string{"codex", "claude", "cursor", "grok"} {
-		for _, body := range []string{`{}`, `null`, `{"error":"fake-secret-body"}`, `{"five_hour":null}`, `{"planUsage":{}}`} {
+		for _, body := range []string{`{}`, `null`, `{"error":"fake-secret-body"}`, `{"five_hour":null}`, `{"planUsage":{}}`, `{"config":{}}`, `{"config":{"isUnifiedBillingUser":true}}`, `{"config":{"creditUsagePercent":null,"currentPeriod":{"start":"2026-09-13T15:33:03Z","end":"2026-09-20T15:33:03Z"}}}`, `{"config":{"creditUsagePercent":"x","currentPeriod":{"start":"2026-09-13T15:33:03Z","end":"2026-09-20T15:33:03Z"}}}`} {
 			if _, err := Parse(p, []byte(body)); err == nil {
 				t.Fatalf("%s accepted unknown %s", p, body)
 			}

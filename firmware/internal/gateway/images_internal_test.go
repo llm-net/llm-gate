@@ -1,4 +1,4 @@
-// images_internal_test.go 钉死图片入口的包内口径：观察器把厂商 usage 原文、
+// images_internal_test.go 钉死图像入口的包内口径：观察器把厂商 usage 原文、
 // 出图张数与请求 size 参数记进 reqInfo 内存点位（账单事实，iteration-9 消费），
 // 非流式与流式两种形态都覆盖；observe 挂在 forward→commitResponse 的 2xx 载荷
 // 解析处（接线由 TestImageObserverWiring 走真实 handler 证实，"非 2xx 不观测"
@@ -87,7 +87,7 @@ func TestImageUsageObserver(t *testing.T) {
 	}
 }
 
-// runImageWire 走真实 handler 的图片全路径：假上游按 respond 回话，
+// runImageWire 走真实 handler 的图像全路径：假上游按 respond 回话，
 // 直调 handler（绕过认证中间件，reqInfo 手工注入）后交回本请求的 reqInfo
 // 与响应记录器。
 func runImageWire(t *testing.T, respond http.HandlerFunc) (*reqInfo, *httptest.ResponseRecorder) {
@@ -149,7 +149,7 @@ func TestImageObserverWiring(t *testing.T) {
 	if info.attempts != 1 || info.upstream != "ark-img" {
 		t.Errorf("选路字段未记: attempts=%d upstream=%q", info.attempts, info.upstream)
 	}
-	// 记账维度：图片入口 + 模型 kind 与目录价（选路时回填的记账时点价）。
+	// 记账维度：图像入口 + 模型 kind 与目录价（选路时回填的记账时点价）。
 	if info.bill.entry != "image" || info.bill.model != "seedream-wire" ||
 		info.bill.kind != store.ModelKindImage || info.bill.upstreamType != config.UpstreamArk {
 		t.Errorf("记账维度未记全: %+v", info.bill)

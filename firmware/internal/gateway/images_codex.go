@@ -15,11 +15,18 @@
 //
 //	prompt        必填
 //	model         可选；只有 gpt-image* 系列才作为工具的 model 转发
-//	n/size/quality/background   可选，逐字放进工具对象
+//	n/size/quality/background/output_format/output_compression
+//	              可选，逐字放进工具对象。真机验证（docs-dev/gpt-image-25-model-selection.md）：
+//	              订阅后端只可靠地采用 output_format（与 output_compression），size / quality
+//	              静默忽略、transparent 背景答 400；这里照样逐字转发，由后端裁决。
+//	              后端认提示词里的比例与透明背景指令：size 是 WxH 时另把化简后的长宽比
+//	              折成提示词尾部的 "Aspect ratio: W:H."，background=transparent 不进工具
+//	              对象（后端答 400）、改折成透明背景指令（codexPromptWithHints），像素
+//	              总量仍由后端定
 //	images[].image_url          仅 edits：作为 input_image 跟在文本之后
 //
 // 计量搭订阅面同一班车：handleAgentResponsesFor 已 beginEntry 到
-// usage.EntryResponsesAgents，这里不再另起账。§15.1：提示词、图片 URL/字节
+// usage.EntryResponsesAgents，这里不再另起账。§15.1：提示词、图像 URL/字节
 // 与 base64 结果一概不进日志，只记长度与条目数。
 package gateway
 
@@ -27,6 +34,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -81,7 +89,12 @@ func (s *Server) handleCodexImages(w http.ResponseWriter, r *http.Request, edit 
 		writeAgentNotConfigured(w, store.AgentProviderCodex)
 		return
 	}
-	payload := codexImagePayload(req, carrier, prompt, edit)
+	transparent := false
+	if bg, _ := req["background"].(string); strings.EqualFold(strings.TrimSpace(bg), "transparent") {
+		transparent = true
+		delete(req, "background")
+	}
+	payload := codexImagePayload(req, carrier, codexPromptWithHints(prompt, codexSizeAspect(req["size"]), transparent), edit)
 
 	// 把订阅代理的整个应答收进内存：成功流里只需要那一个 image_generation_call
 	// 条目；非 2xx 按原样转给客户端（错误体不改写）。
@@ -101,7 +114,7 @@ func (s *Server) handleCodexImages(w http.ResponseWriter, r *http.Request, edit 
 	item, failure := parseImageGenerationStream(rec.body.Bytes())
 	if item == nil {
 		info := infoFrom(r.Context())
-		s.log.Warn("Codex 画图：订阅后端应答里没有图片条目",
+		s.log.Warn("Codex 画图：订阅后端应答里没有图像条目",
 			"request_id", info.id, "model", carrier, "bytes", rec.body.Len(), "failed", failure != "")
 		msg := "The Codex subscription backend produced no image."
 		if failure != "" {
@@ -152,7 +165,7 @@ func codexImageCarrier(snapshot devtoolpolicy.Snapshot) string {
 // codexImagePayload 把 images API 形态的请求翻成一条 Responses 调用。
 func codexImagePayload(req map[string]any, carrier, prompt string, edit bool) map[string]any {
 	tool := map[string]any{"type": "image_generation"}
-	for _, k := range []string{"background", "n", "quality", "size"} {
+	for _, k := range []string{"background", "n", "quality", "size", "output_format", "output_compression"} {
 		if v, ok := req[k]; ok && v != nil {
 			tool[k] = v
 		}
@@ -182,6 +195,54 @@ func codexImagePayload(req map[string]any, carrier, prompt string, edit bool) ma
 			"type": "message", "role": "user", "content": content,
 		}},
 	}
+}
+
+// codexTransparentHint 是透明背景的提示词指令：订阅后端不认 background=transparent 参数
+// （答 400），却按这句话出带 alpha 通道的 PNG，并在条目里回报 background=transparent。
+const codexTransparentHint = "Transparent background: the background must be fully transparent (alpha channel), not white."
+
+// codexPromptWithHints 在提示词尾部追加比例指令（"Aspect ratio: 16:9."）与透明背景指令。
+// 订阅后端的画图工具不认 size，却按提示词里的比例出图（真机验证 9 种比例全部生效，
+// 像素总量恒约 157 万）；两项都为空原样返回。
+func codexPromptWithHints(prompt, ratio string, transparent bool) string {
+	if ratio == "" && !transparent {
+		return prompt
+	}
+	prompt = strings.TrimRight(strings.TrimSpace(prompt), ".。") + "."
+	if ratio != "" {
+		prompt += " Aspect ratio: " + ratio + "."
+	}
+	if transparent {
+		prompt += " " + codexTransparentHint
+	}
+	return prompt
+}
+
+// codexSizeAspect 把 images API 的 size（"1536x1024"）化简成比例（"3:2"）；auto、非
+// WxH 形状、任一边为 0 或正方形（后端缺省即 1:1）返回空串（不追加指令）。
+func codexSizeAspect(v any) string {
+	size, _ := v.(string)
+	w, h, ok := strings.Cut(strings.ToLower(strings.TrimSpace(size)), "x")
+	if !ok {
+		return ""
+	}
+	wi, err1 := strconv.Atoi(w)
+	hi, err2 := strconv.Atoi(h)
+	if err1 != nil || err2 != nil || wi <= 0 || hi <= 0 {
+		return ""
+	}
+	if wi == hi {
+		return ""
+	}
+	g := gcd(wi, hi)
+	return strconv.Itoa(wi/g) + ":" + strconv.Itoa(hi/g)
+}
+
+func gcd(a, b int) int {
+	for b != 0 {
+		a, b = b, a%b
+	}
+	return a
 }
 
 // parseImageGenerationStream 在订阅代理回放的 SSE 里找最后一个带 result 的

@@ -12,6 +12,10 @@ package updated
 //	<components_dir>/cloudflared/current -> slots/a|slots/b（相对符号链接，原子换）
 //	<tunnel_runtime_dir>/token                            0600 llmgate-tunnel，tmpfs
 //
+// codex-app-server 是**目录包**：槽位里是官方包整棵树，入口在 slots/x/bin/codex-app-server，
+// 旁边是它运行时按自身目录寻找的 bin/codex-code-mode-host、codex-resources/、codex-path/。
+// gatewayd 交来的 Path 是解好包的目录；引擎复核入口文件的摘要 / ELF / 自述版本后整棵拷进槽位。
+//
 // 引擎不盲信调用方：安装前对收到的文件**重算 SHA-256、重跑 ELF 架构校验**，再以
 // `llmgate-tunnel` 用户跑一次 `--version` 核对自述版本，之后才写进非活动 slot、
 // 切换 current。connector 在跑时切换后会重启并等就绪；不就绪就切回旧 slot 重启，
@@ -45,6 +49,21 @@ const (
 	// ComponentMihomo 是板上代理内核（docs-dev/firmware-egress-proxy.md §8）：与 cloudflared
 	// 共用 A/B 槽位与安装校验，服务 unit、运行期目录与就绪探针见 proxycore.go。
 	ComponentMihomo = "mihomo"
+	// ComponentCodexAppServer 是 OpenAI Codex 的 app-server 目录包（internal/codexappserver）：
+	// 只有 A/B 槽位的安装/升级/回退/卸载，**没有常驻 unit**——引擎不启停任何服务，安装后
+	// 也不等就绪。自述版本以入口文件 `--version` 读取，输出形如 `codex-app-server 0.154.0`。
+	ComponentCodexAppServer = "codex-app-server"
+	// CodexAppServerEntrypoint 是该目录包在槽位里的入口文件相对路径。
+	CodexAppServerEntrypoint = "bin/codex-app-server"
+	// CodexAppServerCodeModeHost 是入口运行时按自身目录寻找的工具执行宿主：没有它 app-server
+	// 起得来但一条命令都执行不了，所以槽位缺它就不算已安装。
+	CodexAppServerCodeModeHost = "bin/codex-code-mode-host"
+	// CodexAppServerPackageMeta 是包自述文件。
+	CodexAppServerPackageMeta = "codex-package.json"
+
+	// DefaultAppServerUser 是 codex-app-server 自述版本探针的受限身份：组件当前没有专用
+	// 服务用户，借 gatewayd 的服务用户跑一次 `--version`（它在每台部署上都存在）。
+	DefaultAppServerUser = "llmgate"
 
 	DefaultComponentsDir    = "/opt/llmgate/components"
 	DefaultTunnelUnit       = "llmgate-cloudflared.service"
@@ -86,7 +105,8 @@ type ComponentStatus struct {
 }
 
 // ComponentInstallRequest 是 UDS POST /components/{name}/install 的载荷：gatewayd
-// staging 出来的本地文件路径、声明版本与摘要。引擎重算摘要、重跑校验，不盲信。
+// staging 出来的本地路径（单文件组件是文件；目录包组件是解好的目录，入口在
+// entrypointRel(name)）、声明版本与入口文件摘要。引擎重算摘要、重跑校验，不盲信。
 type ComponentInstallRequest struct {
 	Path    string `json:"path"`
 	Version string `json:"version"`
@@ -121,8 +141,19 @@ func (e *Engine) slotDir(name, slot string) string {
 	return filepath.Join(e.componentDir(name), "slots", slot)
 }
 
+// packageLayout 报告该组件是否以目录包形态安装（Path 是目录、槽位是整棵树）。
+func packageLayout(name string) bool { return name == ComponentCodexAppServer }
+
+// entrypointRel 是组件可执行文件在槽位（或 staging 目录）里的相对路径：单文件组件就是组件名。
+func entrypointRel(name string) string {
+	if packageLayout(name) {
+		return filepath.FromSlash(CodexAppServerEntrypoint)
+	}
+	return name
+}
+
 func (e *Engine) slotBinary(name, slot string) string {
-	return filepath.Join(e.slotDir(name, slot), name)
+	return filepath.Join(e.slotDir(name, slot), entrypointRel(name))
 }
 
 func (e *Engine) slotManifest(name, slot string) string {
@@ -150,7 +181,8 @@ func (e *Engine) currentSlot(name string) string {
 	return ""
 }
 
-// readSlot 读一个 slot 的清单并确认可执行文件在场。
+// readSlot 读一个 slot 的清单并确认可执行文件在场；目录包组件还要求运行伴侣在场
+// （packageCompanions），否则这个槽位不算已安装、也不算可回退的上一版本。
 func (e *Engine) readSlot(name, slot string) (*ComponentSlot, error) {
 	raw, err := os.ReadFile(e.slotManifest(name, slot))
 	if err != nil {
@@ -167,7 +199,21 @@ func (e *Engine) readSlot(name, slot string) (*ComponentSlot, error) {
 	if st.Size() != m.SizeBytes {
 		return nil, errors.New("slot 清单与文件长度不符")
 	}
+	for _, rel := range packageCompanions(name) {
+		info, err := os.Stat(filepath.Join(e.slotDir(name, slot), filepath.FromSlash(rel)))
+		if err != nil || !info.Mode().IsRegular() {
+			return nil, fmt.Errorf("slot 缺 %s", rel)
+		}
+	}
 	return &m, nil
+}
+
+// packageCompanions 是目录包组件除入口外必须在场的文件。
+func packageCompanions(name string) []string {
+	if packageLayout(name) {
+		return []string{CodexAppServerCodeModeHost, CodexAppServerPackageMeta}
+	}
+	return nil
 }
 
 func otherSlot(slot string) string {
@@ -179,13 +225,14 @@ func otherSlot(slot string) string {
 
 func checkComponentName(name string) error {
 	switch name {
-	case ComponentCloudflared, ComponentMihomo:
+	case ComponentCloudflared, ComponentMihomo, ComponentCodexAppServer:
 		return nil
 	}
 	return ErrUnknownComponent
 }
 
 // componentService 是一个组件背后的 systemd 服务：安装/回退/卸载时按它重启、等就绪或停掉。
+// 没有常驻服务的组件（codex-app-server）用 noService：恒不在跑、无需清理。
 type componentService struct {
 	unit           string
 	active         func(ctx context.Context) bool
@@ -194,14 +241,23 @@ type componentService struct {
 	cleanup func()
 }
 
+var noService = componentService{
+	active:         func(context.Context) bool { return false },
+	restartAndWait: func(context.Context) error { return nil },
+	cleanup:        func() {},
+}
+
 func (e *Engine) serviceFor(name string) componentService {
-	if name == ComponentMihomo {
+	switch name {
+	case ComponentMihomo:
 		return componentService{
 			unit:           e.opt.ProxyUnit,
 			active:         e.proxyActive,
 			restartAndWait: e.restartProxyAndWait,
 			cleanup:        e.removeProxyConfig,
 		}
+	case ComponentCodexAppServer:
+		return noService
 	}
 	return componentService{
 		unit:           e.opt.TunnelUnit,
@@ -258,17 +314,36 @@ func (e *Engine) ComponentInstall(ctx context.Context, name string, req Componen
 	e.compMu.Lock()
 	defer e.compMu.Unlock()
 
-	sum, err := fileSHA256(req.Path)
+	srcInfo, err := os.Stat(req.Path)
+	if err != nil {
+		return nil, errors.New("读取组件制品失败")
+	}
+	if packageLayout(name) != srcInfo.IsDir() {
+		if packageLayout(name) {
+			return nil, errors.New("该组件是目录包，安装请求的 path 必须是解好的目录")
+		}
+		return nil, errors.New("该组件是单个可执行文件，安装请求的 path 不能是目录")
+	}
+	entry := req.Path
+	if packageLayout(name) {
+		entry = filepath.Join(req.Path, entrypointRel(name))
+		for _, rel := range packageCompanions(name) {
+			if info, err := os.Stat(filepath.Join(req.Path, filepath.FromSlash(rel))); err != nil || !info.Mode().IsRegular() {
+				return nil, fmt.Errorf("组件目录包缺 %s", rel)
+			}
+		}
+	}
+	sum, err := fileSHA256(entry)
 	if err != nil {
 		return nil, errors.New("读取组件制品失败")
 	}
 	if sum != strings.ToLower(req.SHA256) {
 		return nil, errors.New("组件制品摘要与声明不符")
 	}
-	if err := e.opt.VerifyComponent(req.Path); err != nil {
+	if err := e.opt.VerifyComponent(entry); err != nil {
 		return nil, err
 	}
-	st, err := os.Stat(req.Path)
+	st, err := os.Stat(entry)
 	if err != nil {
 		return nil, errors.New("读取组件制品失败")
 	}
@@ -278,32 +353,12 @@ func (e *Engine) ComponentInstall(ctx context.Context, name string, req Componen
 	if cur == "" {
 		target = "a"
 	}
-	dir := e.slotDir(name, target)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return nil, fmt.Errorf("创建组件目录失败: %w", err)
-	}
-	bin := e.slotBinary(name, target)
-	tmp := bin + ".next"
-	if err := copyFile(req.Path, tmp, 0o755); err != nil {
-		return nil, fmt.Errorf("写入组件文件失败: %w", err)
-	}
-	if os.Geteuid() == 0 {
-		_ = os.Chown(tmp, 0, 0)
-		_ = os.Chmod(tmp, 0o755)
-	}
-	// 自述版本：以受限身份跑一次版本命令，输出里必须出现声明的版本串。
-	ver, err := e.opt.ComponentVersion(ctx, name, tmp)
-	if err != nil {
-		os.Remove(tmp)
-		return nil, fmt.Errorf("组件自述版本读取失败: %w", err)
-	}
-	if !strings.Contains(ver, req.Version) {
-		os.Remove(tmp)
-		return nil, errors.New("组件自述版本与清单声明不符")
-	}
-	if err := os.Rename(tmp, bin); err != nil {
-		os.Remove(tmp)
-		return nil, fmt.Errorf("组件文件落位失败: %w", err)
+	if packageLayout(name) {
+		if err := e.installPackageSlot(ctx, name, target, req); err != nil {
+			return nil, err
+		}
+	} else if err := e.installFileSlot(ctx, name, target, req); err != nil {
+		return nil, err
 	}
 	slot := ComponentSlot{Version: req.Version, SHA256: sum, SizeBytes: st.Size(), InstalledAt: e.opt.Now()}
 	raw, _ := json.Marshal(slot)
@@ -329,6 +384,120 @@ func (e *Engine) ComponentInstall(ctx context.Context, name string, req Componen
 		}
 	}
 	return e.componentStatus(name), nil
+}
+
+// installFileSlot 把单文件组件写进目标槽位：先写 <bin>.next、以受限身份核对自述版本，再
+// rename 到位。
+func (e *Engine) installFileSlot(ctx context.Context, name, target string, req ComponentInstallRequest) error {
+	dir := e.slotDir(name, target)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("创建组件目录失败: %w", err)
+	}
+	bin := e.slotBinary(name, target)
+	tmp := bin + ".next"
+	if err := copyFile(req.Path, tmp, 0o755); err != nil {
+		return fmt.Errorf("写入组件文件失败: %w", err)
+	}
+	if os.Geteuid() == 0 {
+		_ = os.Chown(tmp, 0, 0)
+		_ = os.Chmod(tmp, 0o755)
+	}
+	if err := e.checkSelfVersion(ctx, name, tmp, req.Version); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	if err := os.Rename(tmp, bin); err != nil {
+		os.Remove(tmp)
+		return fmt.Errorf("组件文件落位失败: %w", err)
+	}
+	return nil
+}
+
+// installPackageSlot 把目录包整棵拷到 <slot>.next（root:root，目录 0755，文件按源的执行位
+// 0755/0644），在那里以受限身份核对入口文件的自述版本，然后整目录换掉目标槽位。目标槽位
+// 是非活动槽：里面若有上上个版本（或旧固件装的单文件残件）一并清掉。
+func (e *Engine) installPackageSlot(ctx context.Context, name, target string, req ComponentInstallRequest) error {
+	dir := e.slotDir(name, target)
+	if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
+		return fmt.Errorf("创建组件目录失败: %w", err)
+	}
+	next := dir + ".next"
+	_ = os.RemoveAll(next)
+	if err := copyTree(req.Path, next); err != nil {
+		os.RemoveAll(next)
+		return fmt.Errorf("写入组件目录失败: %w", err)
+	}
+	if err := e.checkSelfVersion(ctx, name, filepath.Join(next, entrypointRel(name)), req.Version); err != nil {
+		os.RemoveAll(next)
+		return err
+	}
+	if err := os.RemoveAll(dir); err != nil {
+		os.RemoveAll(next)
+		return fmt.Errorf("清理旧槽位失败: %w", err)
+	}
+	if err := os.Rename(next, dir); err != nil {
+		os.RemoveAll(next)
+		return fmt.Errorf("组件目录落位失败: %w", err)
+	}
+	return nil
+}
+
+// checkSelfVersion 以受限身份跑一次版本命令，输出里必须出现声明的版本串。
+func (e *Engine) checkSelfVersion(ctx context.Context, name, bin, version string) error {
+	ver, err := e.opt.ComponentVersion(ctx, name, bin)
+	if err != nil {
+		return fmt.Errorf("组件自述版本读取失败: %w", err)
+	}
+	if !strings.Contains(ver, version) {
+		return errors.New("组件自述版本与清单声明不符")
+	}
+	return nil
+}
+
+// copyTree 把 src 目录复制成 dst（dst 须不存在）。只接受目录与普通文件——符号链接、设备等
+// 一律拒绝（解包侧已经拒过，这里是第二道）。root 下产物归 root:root；目录 0755，文件按源的
+// 任一执行位定 0755，否则 0644。
+func copyTree(src, dst string) error {
+	return filepath.WalkDir(src, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, p)
+		if err != nil {
+			return err
+		}
+		out := filepath.Join(dst, rel)
+		switch {
+		case d.IsDir():
+			if err := os.Mkdir(out, 0o755); err != nil {
+				return err
+			}
+			if os.Geteuid() == 0 {
+				_ = os.Chown(out, 0, 0)
+				_ = os.Chmod(out, 0o755)
+			}
+			return nil
+		case d.Type().IsRegular():
+			info, err := d.Info()
+			if err != nil {
+				return err
+			}
+			mode := os.FileMode(0o644)
+			if info.Mode().Perm()&0o111 != 0 {
+				mode = 0o755
+			}
+			if err := copyFile(p, out, mode); err != nil {
+				return err
+			}
+			if os.Geteuid() == 0 {
+				_ = os.Chown(out, 0, 0)
+				_ = os.Chmod(out, mode)
+			}
+			return nil
+		default:
+			return fmt.Errorf("组件目录里有非普通文件 %s", rel)
+		}
+	})
 }
 
 // ComponentRollback 把 current 切回另一个 slot；connector 在跑时重启。
@@ -565,8 +734,8 @@ func (e *Engine) sysShow(parent context.Context, unit string, props ...string) (
 
 // ---- 生产默认实现 ----
 
-// componentVersionArgs 是各组件打印自述版本的参数：cloudflared 认 --version，
-// Mihomo 用 Go flag 只定义了 -v。
+// componentVersionArgs 是各组件打印自述版本的参数：cloudflared 与 codex-app-server 认
+// --version，Mihomo 用 Go flag 只定义了 -v。
 func componentVersionArgs(name string) []string {
 	if name == ComponentMihomo {
 		return []string{"-v"}
@@ -601,10 +770,13 @@ func RunComponentVersion(users map[string]string) func(ctx context.Context, name
 func lookupCredential(name string) (*syscall.Credential, error) {
 	u, err := user.Lookup(name)
 	if err != nil {
-		if name == DefaultProxyUser {
+		switch name {
+		case DefaultProxyUser:
 			return nil, ErrProxyUserMissing
+		case DefaultTunnelUser:
+			return nil, ErrTunnelUserMissing
 		}
-		return nil, ErrTunnelUserMissing
+		return nil, fmt.Errorf("系统里没有 %s 用户，请先按部署文档创建", name)
 	}
 	uid, _ := strconv.Atoi(u.Uid)
 	gid, _ := strconv.Atoi(u.Gid)

@@ -17,6 +17,7 @@ import (
 	"github.com/llm-net/llm-gate/firmware/internal/agentquota"
 	"github.com/llm-net/llm-gate/firmware/internal/claudeauth"
 	"github.com/llm-net/llm-gate/firmware/internal/config"
+	"github.com/llm-net/llm-gate/firmware/internal/devtoolpolicy"
 	"github.com/llm-net/llm-gate/firmware/internal/logging"
 	"github.com/llm-net/llm-gate/firmware/internal/store"
 )
@@ -40,7 +41,7 @@ func TestClaudeQuotaRefreshDoesNotBlockSetupInference(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	_, err = st.UpsertAgentAccount(t.Context(), store.NewAgentAccount{Provider: "claude", AuthJSON: claudeCombinedBlob(t, "fake-old", "fake-refresh", time.Now().Add(-time.Hour))})
+	pinned, err := st.UpsertAgentAccount(t.Context(), store.NewAgentAccount{Provider: "claude", AuthJSON: claudeCombinedBlob(t, "fake-old", "fake-refresh", time.Now().Add(-time.Hour))})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +79,7 @@ func TestClaudeQuotaRefreshDoesNotBlockSetupInference(t *testing.T) {
 	dataDone := make(chan int, 1)
 	go func() {
 		w := httptest.NewRecorder()
-		s.forwardClaude(w, httptest.NewRequest("POST", "/agents/claude/v1/messages", nil), "/v1/messages", []byte(`{"model":"fake-model","messages":[]}`), "fake-model", nil, nil)
+		s.forwardClaude(w, claudePinnedRequest(t, st, s, pinned.ID), "/v1/messages", []byte(`{"model":"fake-model","messages":[]}`), "fake-model", nil, nil)
 		dataDone <- w.Code
 	}()
 	select {
@@ -103,7 +104,7 @@ func TestClaudeQuotaRefreshDoesNotBlockSetupInference(t *testing.T) {
 	}
 	// A quota request loading the setup-only update must reuse the current owner
 	// immediately, even while that owner is blocked on its upstream refresh.
-	updated, updatedBlob, err := st.GetAgentCredential(t.Context(), "claude")
+	updated, updatedBlob, err := st.GetAgentCredential(t.Context(), a.ID)
 	if err != nil {
 		t.Error(err)
 	}
@@ -126,7 +127,7 @@ func TestClaudeQuotaRefreshDoesNotBlockSetupInference(t *testing.T) {
 	if refreshes.Load() != 1 {
 		t.Fatalf("multiple refresh owners: %d", refreshes.Load())
 	}
-	current, blob, err := st.GetAgentCredential(t.Context(), "claude")
+	current, blob, err := st.GetAgentCredential(t.Context(), a.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +198,7 @@ func TestClaudeOAuthLateRefreshCannotOverwriteReconnect(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer st.Close()
-			_, err = st.UpsertAgentAccount(t.Context(), store.NewAgentAccount{Provider: "claude", AuthJSON: claudeOAuthBlob(t, "fake-old", "fake-refresh", time.Now().Add(-time.Hour))})
+			old, err := st.UpsertAgentAccount(t.Context(), store.NewAgentAccount{Provider: "claude", AuthJSON: claudeOAuthBlob(t, "fake-old", "fake-refresh", time.Now().Add(-time.Hour))})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -214,16 +215,16 @@ func TestClaudeOAuthLateRefreshCannotOverwriteReconnect(t *testing.T) {
 			})
 			s := New(&config.Config{}, logging.New(io.Discard, slog.LevelDebug), st, nil, nil, router)
 			done := make(chan struct{})
-			go func() { defer close(done); _ = s.RefreshAgent(context.Background(), "claude") }()
+			go func() { defer close(done); _ = s.RefreshAgent(context.Background(), old.ID) }()
 			<-started
 			want := claudeOAuthBlob(t, "fake-reconnected", "fake-reconnected-refresh", time.Now().Add(time.Hour))
-			_, err = st.UpsertAgentAccount(t.Context(), store.NewAgentAccount{Provider: "claude", AuthJSON: want})
+			_, err = st.UpsertAgentAccount(t.Context(), store.NewAgentAccount{ID: old.ID, Provider: "claude", AuthJSON: want})
 			if err != nil {
 				t.Fatal(err)
 			}
 			close(release)
 			<-done
-			a, got, err := st.GetAgentCredential(t.Context(), "claude")
+			a, got, err := st.GetAgentCredential(t.Context(), old.ID)
 			if err != nil || got != want || a.Status != "active" {
 				t.Fatal("late old refresh replaced or disabled new login")
 			}
@@ -291,7 +292,7 @@ func TestClaudeQuotaFailureNeverDisablesInference(t *testing.T) {
 	if _, err := s.FetchAgentQuota(t.Context(), a); err == nil {
 		t.Fatal("rejected quota refresh accepted")
 	}
-	current, blob, err := st.GetAgentCredential(t.Context(), "claude")
+	current, blob, err := st.GetAgentCredential(t.Context(), a.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -305,7 +306,7 @@ func TestClaudeQuotaFailureNeverDisablesInference(t *testing.T) {
 		t.Fatal("expired quota authorization retried")
 	}
 	w := httptest.NewRecorder()
-	restarted.forwardClaude(w, httptest.NewRequest("POST", "/agents/claude/v1/messages", nil), "/v1/messages", []byte(`{}`), "fake-model", nil, nil)
+	restarted.forwardClaude(w, claudePinnedRequest(t, st, restarted, a.ID), "/v1/messages", []byte(`{}`), "fake-model", nil, nil)
 	if w.Code != 200 || w.Body.String() != response || refreshes != 1 {
 		t.Fatal("quota failure affected inference bytes or availability")
 	}
@@ -317,7 +318,7 @@ func TestClaudeOAuthOnlyCannotInvokeModel(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	_, err = st.UpsertAgentAccount(t.Context(), store.NewAgentAccount{Provider: "claude", AuthJSON: claudeOAuthBlob(t, "fake-old", "fake-refresh", time.Now().Add(-time.Hour))})
+	a, err := st.UpsertAgentAccount(t.Context(), store.NewAgentAccount{Provider: "claude", AuthJSON: claudeOAuthBlob(t, "fake-old", "fake-refresh", time.Now().Add(-time.Hour))})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -326,7 +327,7 @@ func TestClaudeOAuthOnlyCannotInvokeModel(t *testing.T) {
 		return nil, fmt.Errorf("unexpected network")
 	}))
 	w := httptest.NewRecorder()
-	s.forwardClaude(w, httptest.NewRequest("POST", "/agents/claude/v1/messages", nil), "/v1/messages", []byte(`{}`), "fake-model", nil, nil)
+	s.forwardClaude(w, claudePinnedRequest(t, st, s, a.ID), "/v1/messages", []byte(`{}`), "fake-model", nil, nil)
 	if w.Code != 409 || !strings.Contains(w.Body.String(), "requires setup-token") {
 		t.Fatal("missing setup-token guidance")
 	}
@@ -372,8 +373,8 @@ func TestClaudeSetup401CannotDisableReplacementOrQuota(t *testing.T) {
 				return &http.Response{StatusCode: 401, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"error":"fake-denied"}`))}, nil
 			}))
 			w := httptest.NewRecorder()
-			s.forwardClaude(w, httptest.NewRequest("POST", "/agents/claude/v1/messages", nil), "/v1/messages", []byte(`{}`), "fake-model", nil, nil)
-			current, blob, err := st.GetAgentCredential(t.Context(), "claude")
+			s.forwardClaude(w, claudePinnedRequest(t, st, s, a.ID), "/v1/messages", []byte(`{}`), "fake-model", nil, nil)
+			current, blob, err := st.GetAgentCredential(t.Context(), a.ID)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -391,4 +392,33 @@ func TestClaudeSetup401CannotDisableReplacementOrQuota(t *testing.T) {
 			}
 		})
 	}
+}
+
+// claudePinnedRequest 造一条绕过中间件、直接交给 forwardClaude 的 messages 请求：
+// 签一把测试 Key、把该 Claude 账号钉给它、接上策略投影器，并把 Key 身份放进
+// 请求上下文（生产里由 withAuth 填）。
+func claudePinnedRequest(t *testing.T, st *store.Store, s *Server, accountID int64) *http.Request {
+	t.Helper()
+	keys, err := st.ListAPIKeys(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var keyID int64
+	if len(keys) == 0 {
+		k, err := st.CreateAPIKey(t.Context(), "claude-pinned", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", "sk_test", "test", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		keyID = k.ID
+	} else {
+		keyID = keys[0].ID
+	}
+	if _, _, err := st.ReplaceDevToolConfig(t.Context(), store.DevToolConfig{KeyID: keyID, ClaudeAccountID: accountID}); err != nil {
+		t.Fatal(err)
+	}
+	if s.devTools == nil {
+		s.SetDevToolPolicy(&devtoolpolicy.Resolver{Store: st})
+	}
+	r := httptest.NewRequest("POST", "/agents/claude/v1/messages", nil)
+	return r.WithContext(context.WithValue(r.Context(), reqInfoKey{}, &reqInfo{keyID: keyID}))
 }

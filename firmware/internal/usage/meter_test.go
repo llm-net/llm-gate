@@ -954,7 +954,7 @@ func TestReportPricedReadsCatalogNotAmount(t *testing.T) {
 }
 
 // 非 token 形态的计费量要进账本：H3 的秒与参考图张数、Seedream 的出图张数。
-// 缺了它们，页面上每一行视频/图片消费都是「Token 0」——金额可审、金额背后的
+// 缺了它们，页面上每一行视频/图像消费都是「Token 0」——金额可审、金额背后的
 // 量不可审（收口走查点名的缺口）。
 func TestLedgerCarriesSecondsAndImages(t *testing.T) {
 	at := time.Date(2026, 8, 8, 10, 30, 0, 0, time.UTC)
@@ -1036,6 +1036,39 @@ func TestLedgerCarriesSecondsAndImages(t *testing.T) {
 	}
 	if rows3[0].VideoSeconds != 0 || rows3[0].ImageCount != 0 {
 		t.Errorf("Seedance 不按秒/张计费，两列应为 0: %+v", rows3[0])
+	}
+
+	// Grok Imagine 视频提交（走 Record 的请求路径）：受理个数进 video_count，
+	// 秒与张留零、0 元不打估算标。两笔同维度合成一行、个数相加。
+	m4, st4 := newTestMeter(t, shanghai, at)
+	vid := Sample{
+		At: at, KeyID: 7, KeyDisplay: "sk_prefix12…wxyz",
+		ModelName: "grok-imagine-video-1.5", UpstreamName: "Grok Build 订阅",
+		Entry: EntryImagineVideo, Kind: store.ModelKindVideo,
+		TaskUsage: TaskUsage{GeneratedVideos: 1},
+		Status:    200, Attempts: 1, DurationMs: 800,
+	}
+	m4.Record(vid)
+	m4.Record(vid)
+	m4.flush(ctx)
+	rows4, err := st4.QueryUsageRange(ctx, bucket, bucket+1)
+	if err != nil || len(rows4) != 1 {
+		t.Fatalf("落盘 %d 行 (err=%v)", len(rows4), err)
+	}
+	r4 := rows4[0]
+	if r4.VideoCount != 2 || r4.Requests != 2 || r4.CostMicro != 0 || r4.EstimatedRequests != 0 {
+		t.Errorf("视频受理个数没进账本: %+v", r4)
+	}
+	if r4.VideoSeconds != 0 || r4.ImageCount != 0 || r4.TotalTokens != 0 {
+		t.Errorf("视频提交不按秒/张/token 计，应为 0: %+v", r4)
+	}
+	ring4 := m4.recent()
+	if len(ring4) != 2 || ring4[0].VideoCount != 1 {
+		t.Errorf("明细环的视频提交行没带个数: %+v", ring4)
+	}
+	rep4, err := m4.Report(ctx, at.Add(-time.Hour), at.Add(time.Hour))
+	if err != nil || rep4.Total.VideoCount != 2 {
+		t.Errorf("报表合计没带个数 (err=%v): %+v", err, rep4)
 	}
 }
 

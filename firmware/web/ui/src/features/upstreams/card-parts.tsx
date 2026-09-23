@@ -1,4 +1,4 @@
-// 模型接入页共用件：账号与模型搜索、状态灯徽章、订阅卡片事实带。
+// 模型接入页共用件：账号与模型搜索、状态灯徽章。
 
 import { Search, X } from "lucide-react";
 
@@ -60,34 +60,5 @@ export function Pill({
       <span aria-hidden="true" className={cn("size-1.5 shrink-0 rounded-full", dot)} />
       {children}
     </Badge>
-  );
-}
-
-export interface Fact {
-  label: string;
-  value: React.ReactNode;
-}
-
-/**
- * 卡片事实带：sm 起横排成格（标签在上、读数在下，格间竖线）；再窄就一格一行、标签左
- * 读数右——三格并排在手机上会把时间戳截成半截。读数一律单行截断，全文挂在读数自己的
- * title 上。
- */
-export function FactStrip({ facts, dim = false }: { facts: Fact[]; dim?: boolean }): React.ReactElement {
-  return (
-    <dl
-      className={cn(
-        "bg-muted/30 grid divide-y border-t sm:divide-x sm:divide-y-0",
-        facts.length === 3 ? "sm:grid-cols-3" : "sm:grid-cols-2",
-        dim && "opacity-60",
-      )}
-    >
-      {facts.map((f) => (
-        <div key={f.label} className="flex min-w-0 items-baseline justify-between gap-3 px-3 py-2 sm:block sm:py-2.5">
-          <dt className="text-muted-foreground shrink-0 text-[11px] leading-4">{f.label}</dt>
-          <dd className="min-w-0 truncate text-xs leading-5">{f.value}</dd>
-        </div>
-      ))}
-    </dl>
   );
 }

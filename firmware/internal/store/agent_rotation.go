@@ -9,14 +9,15 @@ import (
 // MutateAgentAuth atomically merges a credential component into the latest row.
 // The local-only callback may update Status, Label and DefaultModel; an empty
 // result skips the write. On a concurrent write it runs again on the new row.
+// The row must carry the given provider (the sealing AAD); otherwise ErrNotFound.
 // Callers must compare only their own component and never log plaintext.
 func (s *Store) MutateAgentAuth(ctx context.Context, id int64, provider string, refreshed bool, merge func(*AgentAccount, string) (string, error)) (*AgentAccount, error) {
 	for attempt := 0; attempt < 8; attempt++ {
-		a, previous, err := s.GetAgentCredential(ctx, provider)
+		a, previous, err := s.GetAgentCredential(ctx, id)
 		if err != nil {
 			return nil, err
 		}
-		if a.ID != id {
+		if a.Provider != provider {
 			return nil, ErrNotFound
 		}
 		revision := fmtTime(a.UpdatedAt)

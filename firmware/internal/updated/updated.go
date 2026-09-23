@@ -133,6 +133,10 @@ type Options struct {
 	// nil = 不自检。
 	ProxyConfigCheck func(ctx context.Context, bin, dir, cfg string) error
 	ProxyIDs         func() (uid, gid int, err error)
+
+	// Codex App Server（components.go）：只有 A/B 槽位，没有常驻 unit。AppServerUser 是
+	// 安装时跑 `--version` 自述版本探针的受限身份（缺省 DefaultAppServerUser）。
+	AppServerUser string
 }
 
 // Job 是一次在飞的安装/回退（state.json 持久化，崩溃后按它恢复）。
@@ -252,10 +256,14 @@ func New(opt Options) (*Engine, error) {
 	if opt.ProxyRuntimeDir == "" {
 		opt.ProxyRuntimeDir = DefaultProxyRuntimeDir
 	}
+	if opt.AppServerUser == "" {
+		opt.AppServerUser = DefaultAppServerUser
+	}
 	if opt.ComponentVersion == nil {
 		opt.ComponentVersion = RunComponentVersion(map[string]string{
-			ComponentCloudflared: opt.TunnelUser,
-			ComponentMihomo:      opt.ProxyUser,
+			ComponentCloudflared:    opt.TunnelUser,
+			ComponentMihomo:         opt.ProxyUser,
+			ComponentCodexAppServer: opt.AppServerUser,
 		})
 	}
 	if opt.TunnelReadyWindow <= 0 {

@@ -32,6 +32,7 @@ import (
 	"github.com/llm-net/llm-gate/firmware/internal/devtoolpolicy"
 	"github.com/llm-net/llm-gate/firmware/internal/egress"
 	"github.com/llm-net/llm-gate/firmware/internal/grokauth"
+	"github.com/llm-net/llm-gate/firmware/internal/mediagen"
 	"github.com/llm-net/llm-gate/firmware/internal/platformcatalog"
 	"github.com/llm-net/llm-gate/firmware/internal/store"
 	"github.com/llm-net/llm-gate/firmware/internal/tunnelctx"
@@ -79,8 +80,8 @@ type Server struct {
 	//
 	// 订阅句柄本身**不在这里**：它在库里（agent_accounts，device-key 密封），
 	// 每个请求点查一次。这里只有解封后各句柄的令牌世代与单飞刷新状态
-	// （agentSessions，一个 provider 一个），以及外部地址的开发期覆盖点
-	// （issuer/backend 各 provider 一对）。
+	// （agentSessions，一个账号行一个，按行 id 索引），以及外部地址的开发期
+	// 覆盖点（issuer/backend 各 provider 一对）。
 	agentMu      sync.Mutex
 	agentIssuer  string // 空 = codexauth.DefaultIssuer
 	agentBackend string // 空 = codexBackendURL
@@ -91,10 +92,10 @@ type Server struct {
 	// grokModels 是订阅模型目录上游的开发期覆盖点（空 = grokModelsURL，
 	// grok_managed.go）。同样与令牌无关。
 	grokModels string
-	// grokImagine 是 Grok Imagine 图片/视频官方 API 端点根的开发期覆盖点
+	// grokImagine 是 Grok Imagine 图像/视频官方 API 端点根的开发期覆盖点
 	// （空 = grokImagineBaseURL，imagine_grok.go）。同样与令牌无关。
 	grokImagine   string
-	agentSessions map[string]*agentSession
+	agentSessions map[int64]*agentSession
 
 	// Claude OAuth joins agentSessions for refresh; setup-token stays static.
 	// claudeMu only guards the model endpoint override used in tests.
@@ -103,12 +104,13 @@ type Server struct {
 
 	// Cursor 订阅（cursor.go）：库里封存的是 Dashboard API Key（每请求点查，
 	// 同 Claude 的静态凭据口径），上游 accessToken 是设备侧换发的产物，只活在
-	// cursorSess 的内存缓存里，恒不落盘。cursorMu 同护端点覆盖与会话缓存，
-	// cursorBackend 空值恒解析为编译常量 api2.cursor.sh；受管 HTTP/1.1 的
-	// exchange、aiserver.v1 与 agent.v1/RunSSE 都使用这同一根。
+	// cursorSessions 的内存缓存里（一个账号行一个，按行 id 索引），恒不落盘。
+	// cursorMu 同护端点覆盖与会话缓存，cursorBackend 空值恒解析为编译常量
+	// api2.cursor.sh；受管 HTTP/1.1 的 exchange、aiserver.v1 与 agent.v1/RunSSE
+	// 都使用这同一根。
 	cursorMu       sync.Mutex
 	cursorBackend  string
-	cursorSess     *cursorSession
+	cursorSessions map[int64]*cursorSession
 	cursorRequests cursorRequestModels
 	// cursorClientKey 是设备本地 JWT 的稳定签名根：首次使用时生成并以设备密钥
 	// 封存在 settings，cursorClientKeyOnce 保证进程内只装载一次。
@@ -132,6 +134,16 @@ type Server struct {
 	// 只有管理面那一份（internal/admin/endpoints.go），数据面只做 Key 鉴权与编码。
 	// nil = 未接线（部分测试）：那条端点答 503，不是假装读到了空地址。
 	keyAccess KeyAccess
+	// mediaJobs 是媒体生成的任务内核（internal/mediagen），与管理面共用同一份
+	// （装配期经 SetMediaJobs 注入）；nil = 未接线，/gate-helper/v1/media 答 503。
+	mediaJobs *mediagen.Service
+	// hostAgentMCP 是主机智能体给引擎用的 MCP 工具端点（internal/hostagent，装配期经
+	// SetHostAgentMCP 注入）：只挂 POST /agent-mcp、LANOnly，处理器自己再钉回环与会话
+	// 令牌。nil = 该路径 404。
+	hostAgentMCP http.Handler
+	// studioMCP 是创作工作空间给引擎用的 MCP 工具端点（internal/studio，装配期经 SetStudioMCP
+	// 注入）：只挂 POST /studio-mcp、LANOnly，处理器自己再钉回环与会话令牌。nil = 该路径 404。
+	studioMCP http.Handler
 
 	// Cloudflare Tunnel 专用入口（tunnel.go）：root 是 Handler() 装配出的根
 	// handler（Tunnel listener 经闸门后交给它）；tunnelMatcher 是按数据面与管理面
@@ -165,6 +177,12 @@ type KeyAccess interface {
 
 // SetKeyAccess 注入接入读数的执行体（装配期一次性，之后只读）。
 func (s *Server) SetKeyAccess(access KeyAccess) { s.keyAccess = access }
+
+// SetHostAgentMCP 注入主机智能体的 MCP 工具端点处理器（装配期调用一次，须在 Handler() 之前）。
+func (s *Server) SetHostAgentMCP(h http.Handler) { s.hostAgentMCP = h }
+
+// SetStudioMCP 注入创作工作空间的 MCP 工具端点处理器（装配期调用一次，须在 Handler() 之前）。
+func (s *Server) SetStudioMCP(h http.Handler) { s.studioMCP = h }
 
 func (s *Server) SetDevToolPolicy(policy *devtoolpolicy.Resolver) { s.devTools = policy }
 
@@ -254,11 +272,13 @@ func (s *Server) Handler() http.Handler {
 	// Grok Build（responses.go）：恒订阅制，没有目录模型可混；模型清单由
 	// /grok-helper/managed-config 渲染成受管配置条目下发，条目的 base_url 指回这里。
 	mux.Handle("POST /agents/grok/v1/responses", tunnelctx.API, grokFace(http.HandlerFunc(s.handleGrokResponses)))
-	// Grok Imagine 门（imagine_grok.go）：这份订阅自带的图片/视频生成，xAI 官方
+	// Grok Imagine 门（imagine_grok.go）：这份订阅自带的图像/视频生成，xAI 官方
 	// 路径原样、只换鉴权的逐字节透传；视频轮询 GET 不计量。
 	mux.Handle("POST /agents/grok/v1/images/generations", tunnelctx.API, grokFace(http.HandlerFunc(s.handleGrokImagesGenerations)))
 	mux.Handle("POST /agents/grok/v1/images/edits", tunnelctx.API, grokFace(http.HandlerFunc(s.handleGrokImagesEdits)))
 	mux.Handle("POST /agents/grok/v1/videos/generations", tunnelctx.API, grokFace(http.HandlerFunc(s.handleGrokVideosGenerations)))
+	mux.Handle("POST /agents/grok/v1/videos/edits", tunnelctx.API, grokFace(http.HandlerFunc(s.handleGrokVideosEdits)))
+	mux.Handle("POST /agents/grok/v1/videos/extensions", tunnelctx.API, grokFace(http.HandlerFunc(s.handleGrokVideosExtensions)))
 	mux.Handle("GET /agents/grok/v1/videos/{request_id}", tunnelctx.API, grokFace(http.HandlerFunc(s.handleGrokVideoPoll)))
 	mux.Handle("/agents/grok/", tunnelctx.API, grokFace(http.HandlerFunc(handleNotFound)))
 	// Claude Code（claude_mixed.go + claude.go）：客户反向代理可以在边缘终止 HTTPS
@@ -307,6 +327,29 @@ func (s *Server) Handler() http.Handler {
 	// 方法」页（/ui/connect，不要求管理员会话）拿使用者贴入的 Key 读它——地址、
 	// 按 Key 裁剪的模型清单与铭牌，订阅读数在上面那条 config 里。
 	mux.Handle("GET /gate-helper/v1/endpoints", tunnelctx.API, s.withAuth(http.HandlerFunc(s.handleGateEndpoints)))
+	// 凭 Key 自证的媒体生成（media_holder.go）：Key 持有人页面与 gate media 用自己的 Key
+	// 提交图像 / 视频生成，任务按 Key 归属。
+	s.registerMediaRoutes(mux)
+	mux.Handle("GET /gate-helper/v1/api-debug/models", tunnelctx.API, s.withAuth(http.HandlerFunc(s.handleAPIDebugModels)))
+	mux.Handle("POST /gate-helper/v1/api-debug", tunnelctx.API, s.withAuth(http.HandlerFunc(s.handleAPIDebug)))
+	// 主机智能体的 MCP 工具端点（internal/hostagent/mcp.go）：只给本机回环上的引擎
+	// 实例用，凭一段会话的承载令牌；LANOnly 让 Tunnel 永远够不到它。
+	// 路由表在 New 里就装好了，注入在其后：按请求时的字段分发，没注入即 404。
+	mux.Handle("POST /agent-mcp", tunnelctx.LANOnly, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.hostAgentMCP == nil {
+			handleNotFound(w, r)
+			return
+		}
+		s.hostAgentMCP.ServeHTTP(w, r)
+	}))
+	// 创作工作空间的 MCP 工具端点（internal/studio/mcp.go）：同一纪律，另一套工具。
+	mux.Handle("POST /studio-mcp", tunnelctx.LANOnly, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.studioMCP == nil {
+			handleNotFound(w, r)
+			return
+		}
+		s.studioMCP.ServeHTTP(w, r)
+	}))
 	// —— 厂商协议面（视频 / 图像）——
 	//
 	// **一家一段，段名就是厂商 slug**（config.ProtocolFace*）：`/minimax`、`/ark`。
@@ -347,6 +390,9 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("DELETE /ark/api/v3/contents/generations/tasks/{task_id}", tunnelctx.API, s.withAuth(http.HandlerFunc(s.handleArkVideoCancel)))
 	mux.Handle("POST /ark/api/v3/images/generations", tunnelctx.API, s.withAuth(http.HandlerFunc(s.handleArkImagesGenerations)))
 	mux.Handle("/ark/", tunnelctx.API, s.withAuth(http.HandlerFunc(handleNotFound)))
+	mux.Handle("POST /typesafe/v1/systemone", tunnelctx.API, s.withAuth(http.HandlerFunc(s.handleSystemOne)))
+	mux.Handle("GET /typesafe/v1/models", tunnelctx.API, s.withAuth(http.HandlerFunc(s.handleSystemOneModels)))
+	mux.Handle("/typesafe/", tunnelctx.API, s.withAuth(http.HandlerFunc(handleNotFound)))
 	// /v1 下未实现的路径：先认证再 404，无凭证一律 401（与 OpenAI 行为一致）；
 	// 错误体风格按路径选择（/v1/messages 系 Anthropic 风格、/minimax/ 系 MiniMax
 	// v2 形，其余——含方舟系——OpenAI 风格，方舟自己的错误体就是这一形）。
@@ -362,12 +408,17 @@ func (s *Server) Handler() http.Handler {
 	// 厂商协议面各占一个根级首段（config.ProtocolFace*）。
 	root.Handle("/minimax/", data)
 	root.Handle("/ark/", data)
+	root.Handle("/typesafe/", data)
 	root.Handle("/agents/", data)
 	root.Handle("/codex/", data)
 	root.Handle("/claude/", data)
 	root.Handle("/gate-helper/v1/", data)
 	// 只此一条走数据面链；/grok-helper/ 其余路径（静态接入脚本、官方 CLI 透传）归管理面。
 	root.Handle("/grok-helper/managed-config", data)
+	// 主机智能体的 MCP 工具端点也在数据面链上：不转过来就落进管理面，被 CSRF
+	// 中间件按「无 X-LlmGate-CSRF 的 POST」答 403，引擎实例连 initialize 都过不去。
+	root.Handle("/agent-mcp", data)
+	root.Handle("/studio-mcp", data)
 	if s.admin != nil {
 		// 其余一切路径（/、/admin/v1/*、管理界面静态资源、未知路径）归管理面，
 		// 未知路径的 404 风格也随之是管理面 JSON。

@@ -1,4 +1,4 @@
-// components_test.go 钉住「第三方组件」页依赖的卸载契约：`DELETE /admin/v1/system/components/<name>`
+// components_test.go 钉住「组件管理」页依赖的卸载契约：`DELETE /admin/v1/system/components/<name>`
 // 只限 LAN；功能启用中（Tunnel 在跑）答 409 component_in_use、什么都不动；停用后卸载成功、
 // 读数回到 not_installed 并留一条 system.component_remove 审计；未注入管理器时如实 503。
 package admin_test

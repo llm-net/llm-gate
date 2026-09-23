@@ -111,6 +111,7 @@ type fakeSite struct {
 	failWith string
 	released int
 	unlinked int
+	linkName string // 最近一次 link/start 自报的设备名称
 
 	caKey   *ecdsa.PrivateKey
 	caCert  *x509.Certificate
@@ -156,6 +157,9 @@ func (f *fakeSite) handler() http.Handler {
 	mux.HandleFunc("POST /api/device/link/start", func(w http.ResponseWriter, r *http.Request) {
 		var req LinkStartRequest
 		json.NewDecoder(r.Body).Decode(&req)
+		f.mu.Lock()
+		f.linkName = req.Name
+		f.mu.Unlock()
 		if req.Model != "h618-x98h" {
 			writeErr(w, 400, "bad_model", "模型不对")
 			return
@@ -271,7 +275,7 @@ func (f *fakeSite) handler() http.Handler {
 			TargetIP string `json:"targetIp"`
 		}
 		json.NewDecoder(r.Body).Decode(&req)
-		writeJSON(w, 200, map[string]any{"domain": map[string]any{"id": "dom_1", "label": "boxes", "hostname": "boxes.llm.net", "targetIp": req.TargetIP}})
+		writeJSON(w, 200, map[string]any{"domain": map[string]any{"id": "dom_1", "label": "studio", "hostname": "studio.llm.net", "targetIp": req.TargetIP}})
 	})
 	mux.HandleFunc("POST /api/device/domain/release", func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
@@ -389,12 +393,12 @@ func (h *harness) linkAndClaim(label string) State {
 }
 
 func TestValidateLabel(t *testing.T) {
-	for _, ok := range []string{"boxes", "studio-01", "a1b2c3"} {
+	for _, ok := range []string{"studio", "studio-01", "a1b2c3"} {
 		if err := ValidateLabel(ok); err != nil {
 			t.Errorf("%q 应合法: %v", ok, err)
 		}
 	}
-	for _, bad := range []string{"ab", "four", strings.Repeat("a", 33), "-lead", "trail-", "Upper", "a--b", "underscore_"} {
+	for _, bad := range []string{"ab", "four", "fives", strings.Repeat("a", 33), "-lead", "trail-", "Upper", "a--b", "underscore_"} {
 		if err := ValidateLabel(bad); err == nil {
 			t.Errorf("%q 应非法", bad)
 		}
@@ -417,13 +421,13 @@ func TestProviderRules(t *testing.T) {
 	if err := h.mgr.SetProvider(ctx, ProviderOwnDomain); err != nil {
 		t.Fatalf("自有域名应可选: %v", err)
 	}
-	if _, err := h.mgr.Claim(ctx, "boxes", "192.168.1.20"); !errors.Is(err, ErrWrongProvider) {
+	if _, err := h.mgr.Claim(ctx, "studio", "192.168.1.20"); !errors.Is(err, ErrWrongProvider) {
 		t.Fatalf("自有域名方式下申领托管前缀应答 ErrWrongProvider: %v", err)
 	}
 	if err := h.mgr.SetProvider(ctx, ProviderOfficialSite); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.mgr.Claim(ctx, "boxes", "192.168.1.20"); !errors.Is(err, ErrNotLinked) {
+	if _, err := h.mgr.Claim(ctx, "studio", "192.168.1.20"); !errors.Is(err, ErrNotLinked) {
 		t.Fatalf("未关联就申领应被拒: %v", err)
 	}
 	if _, err := h.mgr.Register(ctx, "box.example.com", "192.168.1.20"); !errors.Is(err, ErrWrongProvider) {
@@ -440,8 +444,8 @@ func TestLinkClaimIssueAndRelease(t *testing.T) {
 	ctx := context.Background()
 	h.site.approveAfter = 2
 
-	st := h.linkAndClaim("boxes")
-	if st.Hostname != "boxes.llm.net" || st.TargetIP != "192.168.1.20" || !st.Linked || st.Account != "测试账号" {
+	st := h.linkAndClaim("studio")
+	if st.Hostname != "studio.llm.net" || st.TargetIP != "192.168.1.20" || !st.Linked || st.Account != "测试账号" {
 		t.Fatalf("申领后状态不对: %+v", st)
 	}
 	if tok := h.settings.kv[settingLinkToken]; tok != h.site.token {
@@ -510,7 +514,7 @@ func TestLinkClaimIssueAndRelease(t *testing.T) {
 	if h.listener.addr != DefaultHTTPSListen || status.HTTPSAddr == "" {
 		t.Fatalf("签发后应启动 HTTPS 监听: %+v", h.listener)
 	}
-	if h.site.lastCSR.Subject.CommonName != "boxes.llm.net" || h.site.lastCSR.DNSNames[0] != "boxes.llm.net" {
+	if h.site.lastCSR.Subject.CommonName != "studio.llm.net" || h.site.lastCSR.DNSNames[0] != "studio.llm.net" {
 		t.Fatalf("CSR 名字不对: %+v", h.site.lastCSR.Subject)
 	}
 	if _, err := os.Stat(filepath.Join(h.dir, "lan-domain", certPendingKeyFile)); !errors.Is(err, os.ErrNotExist) {
@@ -552,7 +556,7 @@ func TestLinkClaimIssueAndRelease(t *testing.T) {
 func TestIssueFailureIsRecorded(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
-	h.linkAndClaim("boxes")
+	h.linkAndClaim("studio")
 	h.site.failWith = "CA 拒绝：DNS problem: NXDOMAIN"
 	ch, err := h.mgr.StartIssue()
 	if err != nil {
@@ -697,8 +701,9 @@ func TestOwnDomainRegisterCheckIssueRelease(t *testing.T) {
 		t.Fatalf("登记后状态不对: %+v", st)
 	}
 	records := st.DNSRecords()
-	if len(records) != 2 || records[0].Type != "A" || records[0].Name != "box.example.com" || records[0].Value != "192.168.1.20" ||
-		records[1].Type != "CNAME" || records[1].Name != "_acme-challenge.box.example.com" || records[1].Value != st.AcmeDelegate {
+	if len(records) != 3 || records[0].Type != "A" || records[0].Name != "box.example.com" || records[0].Value != "192.168.1.20" || records[0].Optional ||
+		records[1].Type != "CNAME" || records[1].Name != "_acme-challenge.box.example.com" || records[1].Value != st.AcmeDelegate || records[1].Optional ||
+		records[2].Type != "CAA" || records[2].Name != "box.example.com" || records[2].Value != CAAIssueValue || !records[2].Optional {
 		t.Fatalf("要设的 DNS 记录不对: %+v", records)
 	}
 	if err := h.mgr.SetProvider(ctx, ProviderOfficialSite); !errors.Is(err, ErrDomainClaimed) {
@@ -754,5 +759,27 @@ func TestOwnDomainRegisterCheckIssueRelease(t *testing.T) {
 	}
 	if err := h.mgr.SetProvider(ctx, ProviderOfficialSite); err != nil {
 		t.Fatalf("释放后应能换提供方式: %v", err)
+	}
+}
+
+// TestStartLinkReportsDeviceName 钉住关联时自报的名称来源：管理员在管理台设的设备名
+// （settings device_name）优先于主机名，账号持有人在官网核对的才是自己起的名字。
+func TestStartLinkReportsDeviceName(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	if err := h.settings.SetSetting(ctx, "device_name", " 客厅盒子 "); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.mgr.SetProvider(ctx, ProviderOfficialSite); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.mgr.StartLink(ctx); err != nil {
+		t.Fatalf("StartLink: %v", err)
+	}
+	h.site.mu.Lock()
+	got := h.site.linkName
+	h.site.mu.Unlock()
+	if got != "客厅盒子" {
+		t.Fatalf("自报设备名 = %q，应取管理台设的设备名", got)
 	}
 }

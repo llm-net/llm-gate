@@ -8,11 +8,11 @@ package admin
 //	POST /admin/v1/system/lan-domain/link/wait          同步陪等关联结果（≤ waitLinkFor）      （LAN）
 //	POST /admin/v1/system/lan-domain/link/cancel        丢弃进行中的关联                       （LAN）
 //	POST /admin/v1/system/lan-domain/unlink             解除账号关联（官网侧释放域名）         （LAN）
-//	POST /admin/v1/system/lan-domain/claim              申领托管域名并开始签发（陪等 ≤ waitIssueFor）（LAN）
+//	POST /admin/v1/system/lan-domain/claim              申领托管域名并开始签发（陪等 ≤ waitIssueStart）（LAN）
 //	POST /admin/v1/system/lan-domain/register           登记自有域名（不签发：先由管理员设 DNS）  （LAN）
 //	POST /admin/v1/system/lan-domain/dns-check          请官网核对自有域名的 A / CNAME / CAA     （LAN）
-//	POST /admin/v1/system/lan-domain/certificate        立即签发/续期（陪等 ≤ waitIssueFor）   （LAN）
-//	POST /admin/v1/system/lan-domain/certificate/wait   陪等进行中的签发（阶段一变即返回）     （LAN）
+//	POST /admin/v1/system/lan-domain/certificate        立即签发/续期（陪等 ≤ waitIssueStart） （LAN）
+//	POST /admin/v1/system/lan-domain/certificate/wait   陪等进行中的签发（每轮 ≤ waitIssueRound）（LAN）
 //	PUT  /admin/v1/system/lan-domain/target             只改解析地址                           （LAN）
 //	POST /admin/v1/system/lan-domain/release            释放域名并删除本机证书                 （LAN）
 //
@@ -49,9 +49,11 @@ const (
 const (
 	// waitLinkFor 是关联陪等的上限：账号持有人在另一台设备上确认，界面每次陪等一轮。
 	waitLinkFor = 25 * time.Second
-	// waitIssueFor 是一轮签发陪等的上限：官网侧 DNS-01 全程通常 30–90 秒，等 TXT 传播那一段
-	// 最长；阶段一变就提前返回，界面循环陪等直到终态。
-	waitIssueFor = 30 * time.Second
+	// waitIssueStart 是申领/发起签发那一次请求的陪等上限：官网侧 DNS-01 全程通常 30–90 秒，
+	// 多数签发在这一轮内就能结束；阶段离开 submitting 或到终态即提前返回。
+	waitIssueStart = 60 * time.Second
+	// waitIssueRound 是后续 certificate/wait 每轮陪等的上限：阶段一变就返回，界面循环陪等直到终态。
+	waitIssueRound = 30 * time.Second
 )
 
 // SetLanDomain 注入内网域名管理器（gatewayd 装配期调用一次）。
@@ -101,6 +103,8 @@ type lanDNSRecordJSON struct {
 	Type  string `json:"type"`
 	Name  string `json:"name"`
 	Value string `json:"value"`
+	// Optional：只在域名已有 CAA 记录时才需要添加（CAA 放行记录）。
+	Optional bool `json:"optional,omitempty"`
 }
 
 // lanDNSCheckJSON 是官网用公共解析器核对自有域名三条记录的结果（POST …/dns-check）。
@@ -190,7 +194,7 @@ func (s *Server) lanDomainJSON(r *http.Request) lanDomainJSON {
 		Addresses:      localIPv4s(servedIP(r)),
 	}
 	for _, rec := range st.State.DNSRecords() {
-		out.DNSRecords = append(out.DNSRecords, lanDNSRecordJSON{Type: rec.Type, Name: rec.Name, Value: rec.Value})
+		out.DNSRecords = append(out.DNSRecords, lanDNSRecordJSON{Type: rec.Type, Name: rec.Name, Value: rec.Value, Optional: rec.Optional})
 	}
 	if st.Link != nil {
 		out.Link.Pending = &lanPendingJSON{
@@ -382,7 +386,7 @@ func (s *Server) handleLanDomainUnlink(w http.ResponseWriter, r *http.Request) {
 	s.writeLanDomain(w, r)
 }
 
-// handleLanDomainClaim 申领域名（或改解析地址）并随即开始签发；陪等 ≤ waitIssueFor。
+// handleLanDomainClaim 申领域名（或改解析地址）并随即开始签发；陪等 ≤ waitIssueStart。
 func (s *Server) handleLanDomainClaim(w http.ResponseWriter, r *http.Request) {
 	if !s.requireLanDomain(w) {
 		return
@@ -411,7 +415,7 @@ func (s *Server) handleLanDomainClaim(w http.ResponseWriter, r *http.Request) {
 		s.writeLanDomainError(w, r, err)
 		return
 	}
-	s.waitIssue(w, r, landomain.StageSubmitting)
+	s.waitIssue(w, r, waitIssueStart, landomain.StageSubmitting)
 }
 
 // handleLanDomainRegister 登记自有域名（或改期望解析地址）。不随即签发：管理员得先在自己的
@@ -493,7 +497,7 @@ func (s *Server) handleLanDomainIssue(w http.ResponseWriter, r *http.Request) {
 	s.audit(r.Context(), store.AuditEvent{
 		Event: EventLanDomainIssue, Entity: "system:lan_domain", Detail: "发起证书签发", RemoteIP: remoteIP(r),
 	})
-	s.waitIssue(w, r, landomain.StageSubmitting)
+	s.waitIssue(w, r, waitIssueStart, landomain.StageSubmitting)
 }
 
 // handleLanDomainIssueWait 陪等进行中的签发：`since` 是界面已经看到的阶段，阶段变了或签发
@@ -512,18 +516,24 @@ func (s *Server) handleLanDomainIssueWait(w http.ResponseWriter, r *http.Request
 		s.writeLanDomain(w, r)
 		return
 	}
-	s.waitIssue(w, r, req.Since)
+	s.waitIssue(w, r, waitIssueRound, req.Since)
 }
 
-// waitIssue 陪等到签发结束、阶段离开 since 或 waitIssueFor 耗尽。结束且失败答 502（管理器已把
-// 失败写进状态，message 直接给管理员看）；其余情况回快照——issuing=true 时界面继续陪等。
-func (s *Server) waitIssue(w http.ResponseWriter, r *http.Request, since string) {
-	finished, err := s.lan.WaitIssue(r.Context(), waitIssueFor, since)
+// waitIssue 陪等到签发结束、阶段离开 since 或 wait 耗尽。结束且失败时：官网的业务拒绝
+// （令牌被撤销、委托 CNAME 缺失、CAA 拦截、配额耗尽……）按原状态码与 code 透出；其余失败答
+// 502 issue_failed（管理器已把失败写进状态，message 直接给管理员看）。没结束就回快照——
+// issuing=true 时界面继续陪等。
+func (s *Server) waitIssue(w http.ResponseWriter, r *http.Request, wait time.Duration, since string) {
+	finished, err := s.lan.WaitIssue(r.Context(), wait, since)
 	if r.Context().Err() != nil {
 		// 管理员关了页面：签发不中断，结果落状态。
 		return
 	}
 	if finished && err != nil {
+		if se, ok := landomain.IsSiteError(err); ok {
+			s.writeSiteError(w, se)
+			return
+		}
 		writeError(w, http.StatusBadGateway, "issue_failed", "证书签发失败——"+err.Error())
 		return
 	}

@@ -101,7 +101,7 @@ func newEnvOpt(t *testing.T, o envOpt) *env {
 	// 管理面不再自持监听器（单端口决策）：cfg 喂上游探测的超时缺省，外加两个
 	// 监听端口——接入读数要如实回显它们。端口刻意取非缺省值，好让测试分得清
 	// 「真的读了配置」与「恰好撞上 80/443」。
-	cfg := &config.Config{Listen: fmt.Sprintf("0.0.0.0:%d", testListenPort)}
+	cfg := &config.Config{Listen: fmt.Sprintf("0.0.0.0:%d", testListenPort), DataDir: dir}
 	// 采集器/记录器与 gatewayd 同构接线；记录器不 Run——历史端点对「开着但
 	// 还没有数据」的响应形状也因此被测到。
 	sysCol := sysinfo.NewCollector()
@@ -215,6 +215,8 @@ type keyDTO struct {
 	BudgetMonthMicro      *int64 `json:"budget_month_micro"`
 	RPMLimit              *int64 `json:"rpm_limit"`
 	MeteredAllowanceMicro int64  `json:"metered_allowance_micro"`
+	Archived              bool   `json:"archived"`
+	ArchivedAt            string `json:"archived_at"`
 	// Spend 是当前自然日/周/月的已消费额，与上面三条预算成对读。
 	// 整块为 nil = 计量未装配。
 	Spend *struct {
@@ -596,6 +598,117 @@ func TestKeyLifecycle(t *testing.T) {
 	}
 	wantStatus(t, e.do("DELETE", fmt.Sprintf("/admin/v1/keys/%d", k.ID), cookie, ""), http.StatusNotFound)
 	wantStatus(t, e.do("DELETE", "/admin/v1/keys/9999", cookie, ""), http.StatusNotFound)
+}
+
+// TestKeyArchiveAndHistoryGuard：有使用记录的 Key 不能物理删除（409
+// key_has_history），归档（POST …/archive）后凭据作废但行留给账本：摘要点查落空、
+// 复制 409 key_archived、启停/限额/额度/可用订阅/可用模型的写入路 409、改标签仍可；
+// 缺省列表不列、include_archived=1 才列；重复归档幂等 200；归档写 key.archive 审计。
+func TestKeyArchiveAndHistoryGuard(t *testing.T) {
+	e := newEnv(t)
+	cookie := e.rootSession()
+	ctx := context.Background()
+
+	k, plaintext := e.createKey(cookie, "退休的笔记本")
+	path := fmt.Sprintf("/admin/v1/keys/%d", k.ID)
+	// 直接给账本落一行，模拟这把 Key 用过。
+	if err := e.st.AddUsageDeltas(ctx, []store.UsageDelta{{
+		BucketHour: time.Now().UTC().Unix() / 3600, KeyID: k.ID, KeyDisplay: k.DisplayPrefix + "…" + k.DisplayLast4,
+		ModelName: "deepseek-chat", UpstreamName: "ds", Entry: "chat", Kind: store.ModelKindText,
+		Requests: 1, CostMicro: 1_000,
+	}}); err != nil {
+		t.Fatalf("AddUsageDeltas: %v", err)
+	}
+
+	resp := e.do("DELETE", path, cookie, "")
+	wantStatus(t, resp, http.StatusConflict)
+	if body := readAll(t, resp); !strings.Contains(body, "key_has_history") {
+		t.Errorf("有使用记录的删除应答 key_has_history，body: %s", body)
+	}
+	if _, err := e.st.LookupKeyByDigest(ctx, digestOf(plaintext)); err != nil {
+		t.Fatalf("被拒的删除不该动行: %v", err)
+	}
+
+	resp = e.do("POST", path+"/archive", cookie, "")
+	wantStatus(t, resp, http.StatusOK)
+	var archived struct {
+		Key keyDTO `json:"key"`
+	}
+	raw := readAll(t, resp)
+	if strings.Contains(raw, plaintext) {
+		t.Error("归档响应泄露了明文")
+	}
+	if err := json.Unmarshal([]byte(raw), &archived); err != nil {
+		t.Fatalf("解码归档响应: %v", err)
+	}
+	if !archived.Key.Archived || archived.Key.ArchivedAt == "" || !archived.Key.Disabled ||
+		archived.Key.PlaintextAvailable || archived.Key.Label != "退休的笔记本" {
+		t.Fatalf("归档后的行不符: %+v", archived.Key)
+	}
+	if _, err := e.st.LookupKeyByDigest(ctx, digestOf(plaintext)); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("归档后摘要仍能点查到: %v", err)
+	}
+	// 重复归档幂等。
+	wantStatus(t, e.do("POST", path+"/archive", cookie, ""), http.StatusOK)
+	wantStatus(t, e.do("POST", "/admin/v1/keys/9999/archive", cookie, ""), http.StatusNotFound)
+
+	// 凭据与准入的写入路一律 409 key_archived；标签照改。
+	for _, c := range []struct{ method, path, body string }{
+		{"POST", path + "/plaintext", ""},
+		{"PATCH", path, `{"disabled":false}`},
+		{"PATCH", path, `{"rpm_limit":10}`},
+		{"POST", path + "/metered-allowance", `{"delta_micro":100}`},
+		{"PUT", path + "/dev-tools", `{"subscriptions":{}}`},
+		{"PUT", path + "/api-models", `{"restricted":false,"model_ids":[],"dev_tool_model_ids":[]}`},
+	} {
+		resp := e.do(c.method, c.path, cookie, c.body)
+		if resp.StatusCode != http.StatusConflict {
+			t.Errorf("%s %s 状态 = %d，期望 409；body: %s", c.method, c.path, resp.StatusCode, readAll(t, resp))
+			continue
+		}
+		if body := readAll(t, resp); !strings.Contains(body, "key_archived") {
+			t.Errorf("%s %s 应答 key_archived，body: %s", c.method, c.path, body)
+		}
+	}
+	wantStatus(t, e.do("PATCH", path, cookie, `{"label":"改名后的笔记本"}`), http.StatusOK)
+
+	// 已归档且有使用记录：删除仍 409 key_has_history，但提示说的是「已归档」而不是引导去归档。
+	resp = e.do("DELETE", path, cookie, "")
+	wantStatus(t, resp, http.StatusConflict)
+	if body := readAll(t, resp); !strings.Contains(body, "key_has_history") || !strings.Contains(body, "已归档") {
+		t.Errorf("已归档 Key 的删除应答 key_has_history 并说明已归档，body: %s", body)
+	}
+
+	// 缺省列表不列；include_archived=1 才列。
+	var list struct {
+		Keys []keyDTO `json:"keys"`
+	}
+	decodeInto(t, e.do("GET", "/admin/v1/keys", cookie, ""), &list)
+	if len(list.Keys) != 0 {
+		t.Errorf("缺省列表不该列已归档的 Key: %+v", list.Keys)
+	}
+	decodeInto(t, e.do("GET", "/admin/v1/keys?include_archived=1", cookie, ""), &list)
+	if len(list.Keys) != 1 || !list.Keys[0].Archived || list.Keys[0].Label != "改名后的笔记本" {
+		t.Errorf("include_archived 列表不符: %+v", list.Keys)
+	}
+
+	db, err := sql.Open("sqlite", filepath.Join(e.dir, store.DBFileName))
+	if err != nil {
+		t.Fatalf("打开审计视角连接: %v", err)
+	}
+	defer db.Close()
+	var archiveEvents int
+	var detail string
+	if err := db.QueryRow(`SELECT COUNT(*), COALESCE(MAX(detail), '') FROM audit_events WHERE event = ? AND entity = ?`,
+		admin.EventKeyArchive, fmt.Sprintf("key:%d", k.ID)).Scan(&archiveEvents, &detail); err != nil {
+		t.Fatalf("查询审计表: %v", err)
+	}
+	if archiveEvents != 1 {
+		t.Errorf("key.archive 审计条数 = %d，期望 1（重复归档幂等不再写）", archiveEvents)
+	}
+	if strings.Contains(detail, plaintext) {
+		t.Error("审计 detail 泄露了明文")
+	}
 }
 
 // TestKeysListWithoutMeter：没接计量器时密钥列表整块不给 spend——必须是

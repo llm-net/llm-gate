@@ -15,6 +15,8 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { t } from "@/lib/i18n";
@@ -30,22 +32,44 @@ export interface RowAction {
   title?: string;
 }
 
+/** 菜单顶部的只读读数（如 Claude 两份凭据的状态）：不可点，只是把低频事实从卡面上挪进来。 */
+export interface RowInfo {
+  label: string;
+  value: React.ReactNode;
+}
+
 export function RowActionsMenu({
   label,
   actions,
+  info = [],
+  size = "icon-xs",
 }: {
   /** 无障碍名：如「账号 deepseek 的更多操作」。 */
   label: string;
   actions: RowAction[];
+  info?: RowInfo[];
+  /** 触发按钮尺寸：与同一行里其他按钮同高——`xs` 按钮配 `icon-xs`（缺省），`sm` 按钮配 `icon-sm`。 */
+  size?: "icon-xs" | "icon-sm";
 }): React.ReactElement {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button size="icon-xs" variant="outline" aria-label={label} title={t("更多操作")}>
+        <Button size={size} variant="outline" aria-label={label} title={t("更多操作")}>
           <EllipsisVertical />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
+        {info.length > 0 ? (
+          <>
+            {info.map((i) => (
+              <DropdownMenuLabel key={i.label} className="flex items-baseline justify-between gap-4 font-normal">
+                <span className="text-muted-foreground text-xs">{i.label}</span>
+                <span className="text-xs">{i.value}</span>
+              </DropdownMenuLabel>
+            ))}
+            <DropdownMenuSeparator />
+          </>
+        ) : null}
         {actions.map((a) => (
           <DropdownMenuItem
             key={a.label}

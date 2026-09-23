@@ -128,15 +128,15 @@ func TestAPIModelScopeNarrowsVideoEntry(t *testing.T) {
 // 模型，即便该模型被 API模型策略排除在外。
 func TestAPIModelScopeDoesNotNarrowClaudeMixedSurface(t *testing.T) {
 	e := newRouteEnv(t)
-	backend := newStub(t, jsonReply(http.StatusOK, `{"model":"deepseek-v4-flash","usage":{"input_tokens":1,"output_tokens":1}}`))
+	backend := newStub(t, jsonReply(http.StatusOK, `{"model":"deepseek-v4-pro","usage":{"input_tokens":1,"output_tokens":1}}`))
 	upstreamID := dbUpstream(t, e.st, "deepseek", config.UpstreamDeepseek, "sk-not-real", backend.url)
-	modelID := dbModel(t, e.st, "deepseek-v4-flash")
-	dbSource(t, e.st, modelID, upstreamID, "deepseek-v4-flash", 10)
+	modelID := dbModel(t, e.st, "deepseek-v4-pro")
+	dbSource(t, e.st, modelID, upstreamID, "deepseek-v4-pro", 10)
 	selectDevToolModels(t, e.st, modelID)
 	// API模型策略把它排除在外：直连 API 入口从此 404。
 	restrictAPIModels(t, e.st)
 	if w := do(e.h, http.MethodPost, "/v1/chat/completions", chatAuth,
-		`{"model":"deepseek-v4-flash","messages":[]}`); w.Code != http.StatusNotFound {
+		`{"model":"deepseek-v4-pro","messages":[]}`); w.Code != http.StatusNotFound {
 		t.Fatalf("直连入口 = %d，期望 404", w.Code)
 	}
 

@@ -251,11 +251,12 @@ func (s *Server) resolveVideoRoute(ctx context.Context, model, protocol string) 
 			continue
 		}
 		acct := upstream.Account{
-			Name:       c.Upstream.Name,
-			Type:       c.Upstream.Type,
-			APIKey:     c.Upstream.APIKey,
-			BaseURL:    c.Upstream.BaseURL,
-			EgressMode: c.Upstream.EgressMode,
+			Name:         c.Upstream.Name,
+			Type:         c.Upstream.Type,
+			APIKey:       c.Upstream.APIKey,
+			BaseURL:      c.Upstream.BaseURL,
+			ProtocolURLs: c.Upstream.ProtocolURLs,
+			EgressMode:   c.Upstream.EgressMode,
 		}
 		if _, ok := acct.Endpoint(ad.protocol()); !ok { // 适配器与端点表联动，防御分支
 			continue
@@ -401,6 +402,15 @@ func (s *Server) submitAIGCTask(w http.ResponseWriter, r *http.Request, ad video
 	if !s.admit(w, r, errStyle) {
 		return
 	}
+	s.submitAdmittedAIGCTask(w, r, ad, path, body, model)
+}
+
+// submitAdmittedAIGCTask 是过了准入闸之后的提交流程。设备自己发起的媒体生成
+// （mediagen_vendor.go）在受理时已经过同一道闸，从这里进，不重复计一次 RPM。
+func (s *Server) submitAdmittedAIGCTask(w http.ResponseWriter, r *http.Request, ad videoAdapter, path string,
+	body aigcSubmitBody, model string) {
+
+	errStyle := entryErrorStyle(r)
 	cands, status := s.resolveVideoRoute(r.Context(), model, ad.protocol())
 	switch status {
 	case routeModelNotFound:
@@ -785,7 +795,7 @@ func (s *Server) pinnedVideoUpstream(w http.ResponseWriter, r *http.Request, tas
 		return upstream.Account{}, nil, false
 	}
 	info.attempts, info.upstream = 1, ru.Name
-	return upstream.Account{Name: ru.Name, Type: ru.Type, APIKey: ru.APIKey, BaseURL: ru.BaseURL, EgressMode: ru.EgressMode}, ad, true
+	return upstream.Account{Name: ru.Name, Type: ru.Type, APIKey: ru.APIKey, BaseURL: ru.BaseURL, ProtocolURLs: ru.ProtocolURLs, EgressMode: ru.EgressMode}, ad, true
 }
 
 // ---- 厂商回查（设备自取，供懒对账与取消前的账单保全） ----

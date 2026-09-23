@@ -47,12 +47,10 @@ func TestLegacyCloudAndExternalSettingsAreDropped(t *testing.T) {
 			t.Errorf("旧设置 %s 迁移后 = %q (err=%v)，期望删除", key, got, err)
 		}
 	}
-	for key, want := range map[string]string{
-		"official_pricing": "{}",
-		"platform_models":  "{}",
-	} {
-		if got, err := s.GetSetting(ctx, key); err != nil || got != want {
-			t.Errorf("本地设置 %s 迁移后 = %q (err=%v)，期望 %q", key, got, err, want)
+	// 合并前的两份目录数据文件（0056 清掉）：读取代码已删，留着只是两段谁也不读的 JSON。
+	for _, key := range []string{"official_pricing", "platform_models"} {
+		if got, err := s.GetSetting(ctx, key); err != nil || got != "" {
+			t.Errorf("拆分目录设置 %s 迁移后 = %q (err=%v)，期望删除", key, got, err)
 		}
 	}
 	for _, version := range []int{18, 20} {

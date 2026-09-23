@@ -1,5 +1,5 @@
 // 组件先决条件卡：功能页（公网接入的 Cloudflare Tunnel 面板、出站代理的内置内核面板）里
-// 只展示「组件装没装、装的哪版、有没有更新」，安装 / 升级 / 回退 / 卸载一律去「第三方组件」页。
+// 只展示「组件装没装、装的哪版、有没有更新」，安装 / 升级 / 回退 / 卸载一律去「组件管理」页。
 
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
@@ -26,13 +26,13 @@ export function ComponentPrereqCard({ spec, comp }: { spec: ComponentSpec; comp:
           </Badge>
         ) : null}
         <Link to="/components" className="ml-auto text-xs underline">
-          {comp.installed ? t("去「第三方组件」页升级或卸载") : t("去「第三方组件」页安装")}
+          {comp.installed ? t("去「组件管理」页升级或卸载") : t("去「组件管理」页安装")}
         </Link>
       </div>
       <p className="text-muted-foreground text-xs">
         {comp.installed
-          ? t("组件由「第三方组件」页统一管理；这里只读。")
-          : t("这项功能需要先安装该组件；组件由「第三方组件」页统一管理。")}
+          ? t("组件由「组件管理」页统一管理；这里只读。")
+          : t("这项功能需要先安装该组件；组件由「组件管理」页统一管理。")}
       </p>
     </Card>
   );

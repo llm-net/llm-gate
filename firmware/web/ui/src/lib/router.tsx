@@ -37,16 +37,30 @@ function emit(): void {
  * hash 未变不触发 hashchange，要手动重渲染，这里同理，否则「已经在这一页时再点
  * 一次导航」会没有反应。
  */
-export function navigate(to: Route, opts?: { replace?: boolean }): void {
+export function navigate(to: Route, opts?: { replace?: boolean; search?: string }): void {
   const href = toHref(to);
-  if (window.location.pathname !== href) {
+  const search = opts?.search ?? "";
+  if (window.location.pathname !== href || window.location.search !== search) {
+    const target = href + search;
     if (opts?.replace === true) {
-      window.history.replaceState(null, "", href);
+      window.history.replaceState(null, "", target);
     } else {
-      window.history.pushState(null, "", href);
+      window.history.pushState(null, "", target);
     }
   }
   emit();
+}
+
+function searchSnapshot(): string {
+  return window.location.search;
+}
+
+/**
+ * useLocationSearch 订阅地址栏查询串。路由表只认路径（`/host-tools`），带参数的页面
+ * （`?host=3`）自己从这里取；navigate 的 `search` 选项负责写。
+ */
+export function useLocationSearch(): URLSearchParams {
+  return new URLSearchParams(useSyncExternalStore(subscribe, searchSnapshot));
 }
 
 function subscribe(cb: () => void): () => void {

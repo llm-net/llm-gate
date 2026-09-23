@@ -19,6 +19,8 @@
 // 但**改址必须同请求重录 Key**（服务端 base_url_requires_key 强制并原子落库——封存的旧
 // Key 绝不会被发往管理员没为它输入过 Key 的主机）；其余产品上游只有历史行可清空。
 
+import { GenericProtocolFields } from "./generic-protocol-fields";
+
 import { KeyRound, Plus, TriangleAlert } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -121,6 +123,7 @@ function keyValue(u: api.Upstream): React.ReactNode {
 // 上游地址：空 = 走内置端点表（特化平台的常态）；minimax 的地址是站点选择，按站点名
 // 读出、完整地址挂在 title 上；openai_compat/mock 恒有地址。
 function baseURLValue(u: api.Upstream): React.ReactNode {
+  if (u.type === "generic") return <div className="flex flex-col gap-1">{Object.entries(u.protocol_urls ?? {}).map(([protocol, url]) => <div key={protocol}><span className="text-muted-foreground">{api.protocolLabel(protocol as api.Protocol)} · </span><code className="font-mono">{url}</code></div>)}</div>;
   if (u.type === "minimax") {
     const intl = minimaxIsIntl(u.base_url);
     return <span title={intl ? api.MinimaxSiteIntl : api.MinimaxSiteCN}>{intl ? t("国际站") : t("国内站")}</span>;
@@ -233,11 +236,11 @@ function BalanceDialog({
 // ---- 新建账号 ----
 
 // 两步式：第一步「选择平台」——搜索框过滤 + 按计费方式分组的平台网格（订阅套餐 /
-// 按量计费 / 通用兼容适配，组内保持目录顺序），平台多到一屏放不下时靠过滤而不是
+// 按量计费 / 通用适配，组内保持目录顺序），平台多到一屏放不下时靠过滤而不是
 // 长列表滚动；点中平台即进第二步，按所选平台渲染能力说明与录入参数，「换平台」可
 // 退回重选。名称/Key/地址等输入值跨平台共享，切换时不丢。
 //
-// 平台网格只列本页那一组：按量页给「按量计费」与「通用兼容适配」，套餐页只给
+// 平台网格只列本页那一组：按量页给「按量计费」与「通用适配」，套餐页只给
 // 「订阅套餐」——在哪一页新建的账号就落在哪一页，不会建完找不到。
 function CreateUpstreamDialog({
   billing,
@@ -261,6 +264,7 @@ function CreateUpstreamDialog({
   const [apiKey, setApiKey] = useState("");
   const [site, setSite] = useState("");
   const [baseURL, setBaseURL] = useState("");
+  const [protocolURLs, setProtocolURLs] = useState<api.ProtocolURLs>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const picked = platforms.find((p) => p.id === pickedID) ?? null;
@@ -304,8 +308,9 @@ function CreateUpstreamDialog({
     setBusy(true);
     let base = "";
     if (picked.type === "minimax") base = site;
-    if (picked.custom_base_url) base = baseURL.trim();
-    api.createUpstream(name.trim(), picked.type, apiKey, base, picked.id).then(
+    if (picked.custom_base_url && picked.type !== "generic") base = baseURL.trim();
+    if (picked.type === "generic" && Object.keys(protocolURLs).length === 0) { setBusy(false); setError(t("请至少选择一个协议面")); return; }
+    api.createUpstream(name.trim(), picked.type, apiKey, base, picked.id, picked.type === "generic" ? protocolURLs : undefined).then(
       (res) => {
         setBusy(false);
         onOpenChange(false);
@@ -330,11 +335,11 @@ function CreateUpstreamDialog({
             p.suggested_name.toLowerCase().includes(kw),
         );
   // 组的语义与 BillingBadge 的提示同一口径：订阅默认优先、用量作兜底、无计费标记的
-  // 通用兼容适配也按兜底处理。
+  // 通用适配也按兜底处理。
   const groups = [
     { mode: "subscription", label: t("订阅套餐"), hint: t("已付费套餐，调度时默认优先、先用满") },
     { mode: "usage", label: t("按量计费"), hint: t("按 token 计费，作为兜底通道") },
-    { mode: "none", label: t("通用兼容适配"), hint: t("目录之外的兼容服务，自填服务地址接入") },
+    { mode: "none", label: t("通用适配"), hint: t("自选协议面，分别填写服务地址") },
   ]
     .filter((g) => apiBillingPage(g.mode as api.BillingMode | "none") === billing)
     .map((g) => ({ ...g, items: visible.filter((p) => p.billing_mode === g.mode) }))
@@ -342,10 +347,10 @@ function CreateUpstreamDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className={choosing || picked === null ? "sm:max-w-3xl" : "sm:max-w-lg"}>
+      <DialogContent className={choosing || picked === null || picked.type === "generic" ? "sm:max-w-3xl" : "sm:max-w-lg"}>
         <form className="flex flex-col gap-4" onSubmit={submit}>
           <DialogHeader>
-            <DialogTitle>{billing === "plan" ? t("新建 API订阅套餐账号") : t("新建 API按量计费账号")}</DialogTitle>
+            <DialogTitle>{!choosing && picked?.type === "generic" ? t("通用适配") : billing === "plan" ? t("新建 API订阅套餐账号") : t("新建 API按量计费账号")}</DialogTitle>
           </DialogHeader>
           {choosing || picked === null ? (
             <>
@@ -353,7 +358,7 @@ function CreateUpstreamDialog({
                   读一遍是噪音，而真需要它的时刻就是现在。 */}
               <p className="text-muted-foreground text-xs">
                 {t(
-                  "这类接入持上游平台签发的 API密钥。平台与模型能力来自设备当前生效的数据目录；固定端点平台在创建时保存端点快照，通用兼容适配由管理员填写地址。账号建好后可在卡片上添加模型。上游 Key 加密入库、任何界面都不回显明文。",
+                  "这类接入持上游平台签发的 API密钥。平台与模型能力来自设备当前生效的数据目录；固定端点平台在创建时保存端点快照，通用适配由管理员填写地址。账号建好后可在卡片上添加模型。上游 Key 加密入库、任何界面都不回显明文。",
                 )}
               </p>
               <div className="flex flex-col gap-1.5">
@@ -417,7 +422,7 @@ function CreateUpstreamDialog({
                 </div>
                 {/* 这家平台的账号能服务的协议面：文本三面与厂商视频/图像面同一列徽标，
                     名字里已带厂商与模态（「火山方舟 视频」），不再分组。 */}
-                {picked.protocols.length > 0 ? (
+                {picked.type !== "generic" && picked.protocols.length > 0 ? (
                   <div className="flex flex-wrap items-center gap-1.5 text-xs">
                     <span className="text-muted-foreground">{t("协议面")}</span>
                     {picked.protocols.map((protocol) => (
@@ -447,19 +452,19 @@ function CreateUpstreamDialog({
                     <MinimaxSiteHint />
                   </div>
                 ) : null}
-                {picked.custom_base_url ? (
+                {picked.custom_base_url && picked.type !== "generic" ? (
                   <div className="flex flex-col gap-1.5">
                     <Label htmlFor="up-base">{t("服务地址（base_url）")}</Label>
                     <Input
                       id="up-base"
                       required
                       value={baseURL}
-                      placeholder="https://api.example.com/v1"
+                      placeholder={picked.type === "systemone" ? "http://192.168.1.30:18080" : "https://api.example.com/v1"}
                       autoComplete="off"
                       onChange={(e) => setBaseURL(e.target.value)}
                     />
                     <p className="text-muted-foreground text-xs">
-                      {t("填兼容服务的端点根（通常以 /v1 结尾）。建成后修改地址必须同时重新输入 Key。")}
+                      {picked.type === "systemone" ? t("填 System One 服务根地址，不附加 /v1。建成后修改地址必须同时重新输入 Key。") : t("填兼容服务的端点根（通常以 /v1 结尾）。建成后修改地址必须同时重新输入 Key。")}
                     </p>
                   </div>
                 ) : null}
@@ -491,10 +496,11 @@ function CreateUpstreamDialog({
                       : t("平台端点不可在账号中修改；上游 Key 加密入库，之后只能覆盖、不能读回。")}
                   </p>
                 </div>
+                {picked.type === "generic" ? <GenericProtocolFields urls={protocolURLs} onChange={setProtocolURLs} apiKey={apiKey} /> : null}
               </div>
               <p className="text-muted-foreground text-xs">
                 {t(
-                  "「订阅」为已付费套餐，挂给模型时默认优先级 100、先用满；「用量」默认 200、作兜底；无计费标记的通用兼容适配也按兜底优先级处理。",
+                  "「订阅」为已付费套餐，挂给模型时默认优先级 100、先用满；「用量」默认 200、作兜底；无计费标记的通用适配也按兜底优先级处理。",
                 )}
               </p>
             </>
@@ -535,6 +541,7 @@ function EditUpstreamDialog({
 }) {
   const [name, setName] = useState(target?.name ?? "");
   const [baseURL, setBaseURL] = useState(target?.base_url ?? "");
+  const [protocolURLs, setProtocolURLs] = useState<api.ProtocolURLs>(target?.protocol_urls ?? {});
   const [site, setSite] = useState(target?.base_url ?? "");
   const [clearBase, setClearBase] = useState(false);
   const [apiKey, setApiKey] = useState("");
@@ -550,9 +557,10 @@ function EditUpstreamDialog({
     );
   }
   const u = target;
+  const isGeneric = u.type === "generic";
   const isMock = u.type === "mock";
   const isMinimax = u.type === "minimax";
-  const isCompatAdapter = u.type === "openai_compat" || u.type === "anthropic_compat";
+  const isCompatAdapter = u.type === "openai_compat" || u.type === "anthropic_compat" || u.type === "systemone";
   const isCompat = isCompatAdapter && u.catalog_id === u.type;
   const isCatalogFixed = isCompatAdapter && u.catalog_id !== u.type;
 
@@ -571,11 +579,17 @@ function EditUpstreamDialog({
     } else if (clearBase && u.base_url !== "") {
       patch.base_url = "";
     }
+    if (isGeneric) {
+      if (Object.keys(protocolURLs).length === 0) { setError(t("请至少选择一个协议面")); return; }
+      const normalized = Object.fromEntries(Object.entries(protocolURLs).map(([k, v]) => [k, v.trim().replace(/\/+$/, "")]));
+      const saved = u.protocol_urls ?? {};
+      if (Object.keys(normalized).length !== Object.keys(saved).length || Object.entries(normalized).some(([k, v]) => saved[k as api.Protocol] !== v)) patch.protocol_urls = normalized;
+    }
     if (apiKey !== "") patch.api_key = apiKey;
     if (egressMode !== u.egress_mode) patch.egress_mode = egressMode;
     // openai_compat 改址须同请求带新 Key（服务端 base_url_requires_key 同规则，
     // 这里提前拦下省一次往返）。
-    if (isCompat && patch.base_url !== undefined && patch.api_key === undefined) {
+    if (((isCompat && patch.base_url !== undefined) || patch.protocol_urls !== undefined) && patch.api_key === undefined) {
       setError(t("修改服务地址时必须同时重新输入上游 Key（旧 Key 不能被发往新地址）"));
       return;
     }
@@ -611,10 +625,10 @@ function EditUpstreamDialog({
         if (!o) onClose();
       }}
     >
-      <DialogContent>
+      <DialogContent className={isGeneric ? "sm:max-w-3xl" : "sm:max-w-lg"}>
         <form className="flex flex-col gap-4" onSubmit={submit}>
           <DialogHeader>
-            <DialogTitle>{t("编辑账号 — {name}", { name: u.name })}</DialogTitle>
+            <DialogTitle>{isGeneric ? t("通用适配") : t("编辑账号 — {name}", { name: u.name })}</DialogTitle>
           </DialogHeader>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="eu-name">{t("名称")}</Label>
@@ -636,7 +650,7 @@ function EditUpstreamDialog({
                   : `${u.platform_label}（${api.billingModeLabel(u.billing_mode)}）`,
             })}
           </p>
-          {isMock ? (
+          {isGeneric ? null : isMock ? (
             <div className="flex flex-col gap-1.5">
               <Label>{t("上游地址（base_url）")}</Label>
               <Input required value={baseURL} autoComplete="off" onChange={(e) => setBaseURL(e.target.value)} />
@@ -647,7 +661,7 @@ function EditUpstreamDialog({
               <Input
                 required
                 value={baseURL}
-                placeholder="https://api.example.com/v1"
+                placeholder={u.type === "systemone" ? "http://192.168.1.30:18080" : "https://api.example.com/v1"}
                 autoComplete="off"
                 onChange={(e) => setBaseURL(e.target.value)}
               />
@@ -695,6 +709,7 @@ function EditUpstreamDialog({
               {t("上游 Key 不可读回，只能覆盖；留空即保持现有 Key 不变。")}
             </p>
           </div>
+          {isGeneric ? <GenericProtocolFields urls={protocolURLs} onChange={setProtocolURLs} apiKey={apiKey} upstreamID={u.id} egressMode={egressMode} /> : null}
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="eu-egress">{t("出站方式")}</Label>
             <Select value={egressMode} onValueChange={(v) => setEgressMode(v as api.EgressMode)}>

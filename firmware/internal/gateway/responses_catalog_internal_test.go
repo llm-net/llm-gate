@@ -5,6 +5,7 @@ package gateway
 
 import (
 	"encoding/json"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -78,10 +79,11 @@ func TestResponsesToChatPayloadCodexShape(t *testing.T) {
 	if m := msgs[4].(map[string]any); m["tool_call_id"] != "call_1" || m["content"] != "ok" {
 		t.Fatalf("function_call_output 映射不对: %v", m)
 	}
-	// 工具嵌套形 + strict 丢弃；非 function 类型（namespace/web_search——真
-	// codex 0.147 缺省就带，2026-08-13 实测）整个丢弃而不是 400。
-	if n := len(out["tools"].([]any)); n != 1 {
-		t.Fatalf("非 function 工具应被丢弃，只剩 1 个 function 工具，得到 %d 个", n)
+	// 工具嵌套形 + strict 丢弃；namespace 的内层函数以 `<namespace>__<name>` 平铺
+	// （真 codex 缺省就带 multi_agent 分组，MCP 服务器也是这个形）；web_search 之类
+	// 其余非 function 类型整个丢弃而不是 400。
+	if n := len(out["tools"].([]any)); n != 2 {
+		t.Fatalf("应剩 shell 与平铺出的 multi_agent_v1__spawn_agent 两个 function 工具，得到 %d 个: %v", n, out["tools"])
 	}
 	tool := out["tools"].([]any)[0].(map[string]any)
 	fn := tool["function"].(map[string]any)
@@ -90,6 +92,9 @@ func TestResponsesToChatPayloadCodexShape(t *testing.T) {
 	}
 	if _, has := fn["strict"]; has {
 		t.Fatal("strict 应被丢弃")
+	}
+	if flat := out["tools"].([]any)[1].(map[string]any)["function"].(map[string]any); flat["name"] != "multi_agent_v1__spawn_agent" {
+		t.Fatalf("namespace 内层函数未平铺: %v", flat)
 	}
 	// 标量映射与丢弃清单。
 	if out["max_tokens"] != json.Number("128") {
@@ -236,7 +241,7 @@ func TestChatToResponseShape(t *testing.T) {
 			"finish_reason":"length"}],
 		"usage": {"prompt_tokens":100,"completion_tokens":7,"prompt_cache_hit_tokens":25}
 	}`)
-	resp := chatToResponse(chatObj, "resp_req1", "kimi-k3")
+	resp := chatToResponse(chatObj, "resp_req1", "kimi-k3", nil)
 	if resp["model"] != "kimi-k3" || resp["object"] != "response" || resp["store"] != false {
 		t.Fatalf("response 头部字段不对: %v", resp)
 	}
@@ -281,5 +286,83 @@ func TestOutputTextForms(t *testing.T) {
 	}
 	if got := outputText(map[string]any{"k": "v"}); !strings.Contains(got, `"k":"v"`) {
 		t.Fatalf("结构化输出应 JSON 序列化: %q", got)
+	}
+}
+
+// TestResponsesCatalogNamespaceToolsFoldBack：namespace 工具（codex 的 MCP 服务器分组）
+// 在目录面两头一致——请求侧内层函数平铺成 `<namespace>__<name>` 的普通函数工具、历史
+// 里带 namespace 的 function_call 同名平铺；响应侧（整体与流式）模型叫出的平铺名折回
+// namespace + 内层名，普通函数名原样。拼不出合规平铺名的内层项与非 function 内层项跳过。
+func TestResponsesCatalogNamespaceToolsFoldBack(t *testing.T) {
+	p := decodeAny(t, `{"model":"m","input":[
+		{"type":"function_call","call_id":"call_0","namespace":"mcp__host","name":"exec","arguments":"{\"command\":\"id\"}"},
+		{"type":"function_call_output","call_id":"call_0","output":"uid=0"}],
+		"tools":[
+			{"type":"function","name":"shell","parameters":{"type":"object"}},
+			{"type":"namespace","name":"mcp__host","description":"host","tools":[
+				{"type":"function","name":"exec","description":"run on host","parameters":{"type":"object"},"strict":false},
+				{"type":"function","name":"bad name"},
+				{"type":"web_search"}]},
+			{"type":"namespace","name":"x","tools":[]}]}`)
+	out, cerr := responsesToChatPayload(p)
+	if cerr != nil {
+		t.Fatalf("转换失败: %s %s", cerr.code, cerr.message)
+	}
+	tools := out["tools"].([]any)
+	if len(tools) != 2 {
+		t.Fatalf("应有 shell 与 mcp__host__exec 两个工具，得到 %v", tools)
+	}
+	flat := tools[1].(map[string]any)["function"].(map[string]any)
+	if flat["name"] != "mcp__host__exec" || flat["description"] != "run on host" || flat["parameters"] == nil {
+		t.Fatalf("平铺工具不对: %v", flat)
+	}
+	if _, has := flat["strict"]; has {
+		t.Fatal("平铺工具的 strict 应被丢弃")
+	}
+	tc := out["messages"].([]any)[0].(map[string]any)["tool_calls"].([]any)[0].(map[string]any)
+	if tc["function"].(map[string]any)["name"] != "mcp__host__exec" {
+		t.Fatalf("历史 function_call 未按 namespace 平铺: %v", tc)
+	}
+	ns := toolNamespacesOf(p)
+	if len(ns) != 1 || ns["mcp__host__exec"] != (namespacedTool{namespace: "mcp__host", name: "exec"}) {
+		t.Fatalf("平铺表 = %v", ns)
+	}
+	if toolNamespacesOf(decodeAny(t, `{"model":"m","input":"hi"}`)) != nil {
+		t.Fatal("无 namespace 工具时平铺表应为 nil")
+	}
+
+	// 整体应答：平铺名折回，普通函数名原样。
+	resp := chatToResponse(decodeAny(t, `{"choices":[{"finish_reason":"tool_calls","message":{"role":"assistant","content":"",
+		"tool_calls":[{"id":"call_1","type":"function","function":{"name":"mcp__host__exec","arguments":"{\"command\":\"uname -a\"}"}},
+		{"id":"call_2","type":"function","function":{"name":"shell","arguments":"{}"}}]}}]}`), "resp_1", "m", ns)
+	output := resp["output"].([]any)
+	if len(output) != 2 {
+		t.Fatalf("output = %v", output)
+	}
+	if it := output[0].(map[string]any); it["namespace"] != "mcp__host" || it["name"] != "exec" || it["call_id"] != "call_1" {
+		t.Fatalf("平铺名未折回 namespace: %v", it)
+	}
+	if it := output[1].(map[string]any); it["name"] != "shell" {
+		t.Fatalf("普通函数调用应原样: %v", it)
+	} else if _, has := it["namespace"]; has {
+		t.Fatalf("普通函数调用不该带 namespace: %v", it)
+	}
+
+	// 流式应答：name 在首个增量、arguments 分帧，收口的 item 同样折回。
+	rec := httptest.NewRecorder()
+	y := newResponsesSynth(rec, "resp_2", "m", ns)
+	y.start()
+	y.feedChatChunk(decodeAny(t, `{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_3","type":"function","function":{"name":"mcp__host__exec","arguments":"{\"comm"}}]}}]}`))
+	y.feedChatChunk(decodeAny(t, `{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"and\":\"id\"}"}}]},"finish_reason":"tool_calls"}]}`))
+	y.finish()
+	body := rec.Body.String()
+	if strings.Contains(body, "mcp__host__exec") {
+		t.Fatalf("流式事件里不该再出现平铺名:\n%s", body)
+	}
+	if !strings.Contains(body, `"namespace":"mcp__host"`) || !strings.Contains(body, `"name":"exec"`) || !strings.Contains(body, `"call_id":"call_3"`) {
+		t.Fatalf("流式 function_call 未折回 namespace:\n%s", body)
+	}
+	if !strings.Contains(body, `"arguments":"{\"command\":\"id\"}"`) {
+		t.Fatalf("分帧 arguments 未拼齐:\n%s", body)
 	}
 }

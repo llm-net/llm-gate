@@ -70,7 +70,7 @@ func TestAgentAuthJSONSealRoundTrip(t *testing.T) {
 		t.Error("管理视图（Upsert 返回值）不该带密文")
 	}
 
-	got, authJSON, err := s.GetAgentCredential(ctx, AgentProviderCodex)
+	got, authJSON, err := s.GetAgentCredential(ctx, acct.ID)
 	if err != nil {
 		t.Fatalf("GetAgentCredential: %v", err)
 	}
@@ -184,16 +184,21 @@ func TestAgentSealAADBindsProvider(t *testing.T) {
 	}
 
 	// 直接把密文塞进另一个 provider 的行（模拟串号/误抄）。
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO agent_accounts
+	res, err := s.db.ExecContext(ctx, `INSERT INTO agent_accounts
 		(provider, label, account_id, default_model, auth_json_sealed, status, created_at, updated_at)
 		VALUES ('claude', '', '', '', ?, 'active', '2026-08-11T00:00:00.000Z', '2026-08-11T00:00:00.000Z')`,
-		sealed); err != nil {
+		sealed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claudeID, err := res.LastInsertId()
+	if err != nil {
 		t.Fatal(err)
 	}
 
 	// 失败时只印 id/provider：这是唯一带密文的视图，%+v 会把密文与明文一起
 	// 印进测试输出（agents.go 里那条"本结构不得以 %+v 打印"的规矩从这里就得守）。
-	got, authJSON, err := s.GetAgentCredential(ctx, "claude")
+	got, authJSON, err := s.GetAgentCredential(ctx, claudeID)
 	if err == nil {
 		t.Fatalf("换 provider 仍解出了凭据: id=%d provider=%s, 明文 %d 字节",
 			got.ID, got.Provider, len(authJSON))
@@ -204,7 +209,7 @@ func TestAgentSealAADBindsProvider(t *testing.T) {
 	assertNoAgentSecretLeak(t, err, sealed)
 
 	// 原 provider 照旧解得开（AAD 没把好行也一起挡掉）。
-	if _, plain, err := s.GetAgentCredential(ctx, AgentProviderCodex); err != nil || plain != fakeAuthJSON {
+	if _, plain, err := s.GetAgentCredential(ctx, acct.ID); err != nil || plain != fakeAuthJSON {
 		t.Errorf("原 provider 应仍可解: err=%v", err)
 	}
 
@@ -215,28 +220,29 @@ func TestAgentSealAADBindsProvider(t *testing.T) {
 	}
 }
 
-// TestAgentAccountUpsertSingleRow：同一 provider 重复连接是**覆盖而非增行**
-// （单账户语义）。覆盖分两组：label/default_model 空即保持（重登不该把管理员
+// TestAgentAccountUpsertAndReconnect：不带 ID 的 Upsert 是**新建一行**（同一
+// provider 可以有多行，每行一份独立凭据）；带 ID 的 Upsert 是**覆盖那一行**
+// （重新登录）。覆盖分两组：label/default_model 空即保持（重登不该把管理员
 // 设过的默认模型悄悄抹掉），而 account_id 跟着凭据无条件走（陈旧的 account_id
 // 配新账号的 token 是一台注入了错 ChatGPT-Account-ID 的代理）。
-// 另一个 provider 是另一行。
-func TestAgentAccountUpsertSingleRow(t *testing.T) {
+func TestAgentAccountUpsertAndReconnect(t *testing.T) {
 	s, _ := mustOpen(t)
 	ctx := context.Background()
 
 	first := mustAgent(t, s, AgentProviderCodex, fakeAuthJSON)
 
-	// 重新登录：只带新凭据，其余字段留空。
+	// 重新登录：按行 id 覆盖，只带新凭据，其余字段留空。
 	const rotated = `{"tokens":{"access_token":"fake-access-2","refresh_token":"fake-refresh-2"}}`
 	second, err := s.UpsertAgentAccount(ctx, NewAgentAccount{
+		ID:       first.ID,
 		Provider: AgentProviderCodex,
 		AuthJSON: rotated,
 	})
 	if err != nil {
-		t.Fatalf("重复连接: %v", err)
+		t.Fatalf("重新登录: %v", err)
 	}
 	if second.ID != first.ID {
-		t.Errorf("重复连接插出了新行: id %d → %d", first.ID, second.ID)
+		t.Errorf("按 id 重连插出了新行: id %d → %d", first.ID, second.ID)
 	}
 	if second.Label != "订阅一号" || second.DefaultModel != "gpt-5-codex" {
 		t.Errorf("空值覆盖抹掉了既有展示字段: label=%q default_model=%q",
@@ -247,7 +253,7 @@ func TestAgentAccountUpsertSingleRow(t *testing.T) {
 	if second.AccountID != "" {
 		t.Errorf("account_id 未随凭据一起换掉，仍是 %q", second.AccountID)
 	}
-	if _, plain, err := s.GetAgentCredential(ctx, AgentProviderCodex); err != nil || plain != rotated {
+	if _, plain, err := s.GetAgentCredential(ctx, first.ID); err != nil || plain != rotated {
 		t.Errorf("凭据未被新一代覆盖: %q (err=%v)", plain, err)
 	}
 
@@ -256,6 +262,7 @@ func TestAgentAccountUpsertSingleRow(t *testing.T) {
 		t.Fatal(err)
 	}
 	third, err := s.UpsertAgentAccount(ctx, NewAgentAccount{
+		ID:           first.ID,
 		Provider:     AgentProviderCodex,
 		Label:        "订阅二号",
 		AccountID:    "acct_fake_0002",
@@ -273,6 +280,35 @@ func TestAgentAccountUpsertSingleRow(t *testing.T) {
 		t.Errorf("重新登录后状态 = %q, 期望回到 %q", third.Status, AgentStatusActive)
 	}
 
+	// 不带 ID 的同 provider 连接是另一行：两份 Codex 账号并存，各持各的凭据。
+	fourth, err := s.UpsertAgentAccount(ctx, NewAgentAccount{
+		Provider: AgentProviderCodex, Label: "订阅三号", AccountID: "acct_fake_0003", AuthJSON: fakeAuthJSON,
+	})
+	if err != nil {
+		t.Fatalf("第二个 codex 账号: %v", err)
+	}
+	if fourth.ID == first.ID {
+		t.Fatal("不带 ID 的连接覆盖了既有行，多账号语义被破坏")
+	}
+	if _, plain, err := s.GetAgentCredential(ctx, fourth.ID); err != nil || plain != fakeAuthJSON {
+		t.Errorf("第二个账号的凭据不符: err=%v", err)
+	}
+	if _, plain, err := s.GetAgentCredential(ctx, first.ID); err != nil || plain != rotated {
+		t.Errorf("第二个账号连接动到了第一个账号的凭据: err=%v", err)
+	}
+
+	// 按 id 重连时 provider 必须相符：把 claude 的凭据写到 codex 的行上落不下去。
+	if _, err := s.UpsertAgentAccount(ctx, NewAgentAccount{
+		ID: first.ID, Provider: AgentProviderClaude, AuthJSON: `{"setup_token":"fake"}`,
+	}); !errors.Is(err, ErrNotFound) {
+		t.Errorf("provider 不符的重连应 ErrNotFound, 得到 %v", err)
+	}
+	if _, err := s.UpsertAgentAccount(ctx, NewAgentAccount{
+		ID: first.ID + 999, Provider: AgentProviderCodex, AuthJSON: rotated,
+	}); !errors.Is(err, ErrNotFound) {
+		t.Errorf("不存在的行应 ErrNotFound, 得到 %v", err)
+	}
+
 	// 空凭据不许落库：一行的存在就意味着句柄在盒子手里。既不许建行，
 	// 也不许把在跑的那份刷成空（那不是"清空"，是把句柄弄丢）。
 	if _, err := s.UpsertAgentAccount(ctx, NewAgentAccount{Provider: "empty-provider"}); err == nil {
@@ -281,18 +317,17 @@ func TestAgentAccountUpsertSingleRow(t *testing.T) {
 	if err := s.SetAgentAuthJSON(ctx, first.ID, AgentProviderCodex, ""); err == nil {
 		t.Error("空凭据不应覆盖在跑的句柄")
 	}
-	if _, plain, err := s.GetAgentCredential(ctx, AgentProviderCodex); err != nil || plain != rotated {
+	if _, plain, err := s.GetAgentCredential(ctx, first.ID); err != nil || plain != rotated {
 		t.Errorf("被拒的空写入不该动到既有凭据: %q (err=%v)", plain, err)
 	}
 	// 读侧也守同一条不变式：手改过的库（或将来某个忘了封存那一步的写入方）
 	// 留下一行空密文时，返回的必须是错误而不是"一份成功的空凭据"——后者会把
 	// 故障推迟到解析 auth.json 或一次没有 Authorization 的上游请求上。
 	if _, err := s.db.ExecContext(ctx,
-		`UPDATE agent_accounts SET auth_json_sealed = '' WHERE provider = ?`,
-		AgentProviderCodex); err != nil {
+		`UPDATE agent_accounts SET auth_json_sealed = '' WHERE id = ?`, first.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, plain, err := s.GetAgentCredential(ctx, AgentProviderCodex); !errors.Is(err, ErrAgentAuthUnreadable) {
+	if _, plain, err := s.GetAgentCredential(ctx, first.ID); !errors.Is(err, ErrAgentAuthUnreadable) {
 		t.Errorf("空密文应回 ErrAgentAuthUnreadable, 得到 %d 字节明文 (err=%v)", len(plain), err)
 	}
 	// 复原，后面的断言继续用这一行。
@@ -300,7 +335,7 @@ func TestAgentAccountUpsertSingleRow(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 另一个 provider 是另一行；codex 仍只有一行。
+	// 另一个 provider 是另一行；列表按 provider、id 排。
 	if _, err := s.UpsertAgentAccount(ctx, NewAgentAccount{
 		Provider: "claude", AuthJSON: fakeAuthJSON,
 	}); err != nil {
@@ -310,8 +345,8 @@ func TestAgentAccountUpsertSingleRow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(list) != 2 {
-		t.Fatalf("列表 %d 行, 期望 2（每 provider 一行）", len(list))
+	if len(list) != 3 || list[0].Provider != "claude" || list[1].ID != first.ID || list[2].ID != fourth.ID {
+		t.Fatalf("列表不符（期望 claude、codex#%d、codex#%d）: %+v", first.ID, fourth.ID, list)
 	}
 }
 
@@ -342,7 +377,7 @@ func TestAgentAccountUpdateClears(t *testing.T) {
 	if got.Status != AgentStatusDisabled {
 		t.Errorf("改名动了状态: %q", got.Status)
 	}
-	if _, plain, err := s.GetAgentCredential(ctx, AgentProviderCodex); err != nil || plain != fakeAuthJSON {
+	if _, plain, err := s.GetAgentCredential(ctx, acct.ID); err != nil || plain != fakeAuthJSON {
 		t.Errorf("改名动了凭据 (err=%v)", err)
 	}
 
@@ -390,8 +425,18 @@ func TestAgentAccountStatusAndDelete(t *testing.T) {
 	}
 
 	// 停用的行照样取得到（状态分岔归调用方，不在 SQL 里滤）。
-	if _, _, err := s.GetAgentCredential(ctx, AgentProviderCodex); err != nil {
+	if _, _, err := s.GetAgentCredential(ctx, acct.ID); err != nil {
 		t.Fatalf("停用/失效的行仍应可读: %v", err)
+	}
+
+	// 钉在这一行上的 Key 策略随删除解开：钉置空、revision 递增，别家的钉不动。
+	key := mustKey(t, s, "digest-agent-delete")
+	other := mustAgent(t, s, AgentProviderGrok, fakeAuthJSON)
+	pinned, _, err := s.ReplaceDevToolConfig(ctx, DevToolConfig{
+		KeyID: key.ID, CodexAccountID: acct.ID, GrokAccountID: other.ID,
+	})
+	if err != nil {
+		t.Fatalf("ReplaceDevToolConfig: %v", err)
 	}
 
 	if err := s.DeleteAgentAccount(ctx, acct.ID); err != nil {
@@ -400,8 +445,15 @@ func TestAgentAccountStatusAndDelete(t *testing.T) {
 	if _, err := s.GetAgentAccount(ctx, acct.ID); !errors.Is(err, ErrNotFound) {
 		t.Errorf("删除后点查应 ErrNotFound, 得到 %v", err)
 	}
-	if _, _, err := s.GetAgentCredential(ctx, AgentProviderCodex); !errors.Is(err, ErrNotFound) {
+	if _, _, err := s.GetAgentCredential(ctx, acct.ID); !errors.Is(err, ErrNotFound) {
 		t.Errorf("删除后取凭据应 ErrNotFound, 得到 %v", err)
+	}
+	cfg, err := s.GetDevToolConfig(ctx, key.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.CodexAccountID != 0 || cfg.GrokAccountID != other.ID || cfg.Revision != pinned.Revision+1 {
+		t.Errorf("删除账号后 Key 策略未解开: %+v (之前 revision=%d)", cfg, pinned.Revision)
 	}
 	if err := s.DeleteAgentAccount(ctx, acct.ID); !errors.Is(err, ErrNotFound) {
 		t.Errorf("重复删除应 ErrNotFound, 得到 %v", err)
@@ -434,7 +486,7 @@ func TestAgentAccountBadDeviceKey(t *testing.T) {
 	t.Cleanup(func() { s2.Close() })
 	ctx := context.Background()
 
-	got, authJSON, err := s2.GetAgentCredential(ctx, AgentProviderCodex)
+	got, authJSON, err := s2.GetAgentCredential(ctx, acct.ID)
 	if err == nil {
 		t.Fatalf("坏设备密钥仍解出了凭据: id=%d provider=%s, 明文 %d 字节",
 			got.ID, got.Provider, len(authJSON))
@@ -501,17 +553,17 @@ func TestCursorModelFreeMigration(t *testing.T) {
 	if got.DefaultModel != "" || got.Label != "Cursor 订阅" {
 		t.Fatalf("迁移后 label=%q default_model=%q", got.Label, got.DefaultModel)
 	}
-	if _, plain, err := s.GetAgentCredential(ctx, AgentProviderCursor); err != nil || plain != fakeCursorAuthJSON {
+	if _, plain, err := s.GetAgentCredential(ctx, acct.ID); err != nil || plain != fakeCursorAuthJSON {
 		t.Fatalf("迁移改坏凭据: err=%v", err)
 	}
 }
 
-// TestAgentCursorSealAADAndSingleRow（迭代 3 Phase 1）：cursor 作为第四个
-// provider 复用 agent_accounts 的两道既有防线，逐条对它复验——AAD 钉
-// provider（cursor 的密文搬进别的 provider 行、别家的密文冒充 cursor，都解出
-// 错误而不是值），以及 UNIQUE(provider) 的单账户覆盖语义。Cursor 的
-// default_model 恒归零，因为透明代理没有模型配置语义。
-func TestAgentCursorSealAADAndSingleRow(t *testing.T) {
+// TestAgentCursorSealAADAndReconnect：cursor 作为第四个 provider 复用
+// agent_accounts 的既有防线，逐条对它复验——AAD 钉 provider（cursor 的密文
+// 搬进别的 provider 行、别家的密文冒充 cursor，都解出错误而不是值），以及按
+// 行 id 重连的覆盖语义。Cursor 的 default_model 恒归零，因为透明代理没有模型
+// 配置语义。
+func TestAgentCursorSealAADAndReconnect(t *testing.T) {
 	s, _ := mustOpen(t)
 	ctx := context.Background()
 
@@ -527,7 +579,7 @@ func TestAgentCursorSealAADAndSingleRow(t *testing.T) {
 	if acct.DefaultModel != "" {
 		t.Fatalf("cursor default_model = %q，期望恒为空", acct.DefaultModel)
 	}
-	if _, plain, err := s.GetAgentCredential(ctx, AgentProviderCursor); err != nil || plain != fakeCursorAuthJSON {
+	if _, plain, err := s.GetAgentCredential(ctx, acct.ID); err != nil || plain != fakeCursorAuthJSON {
 		t.Fatalf("cursor 凭据往返不一致 (err=%v)", err)
 	}
 	var sealedCursor string
@@ -539,13 +591,18 @@ func TestAgentCursorSealAADAndSingleRow(t *testing.T) {
 	}
 
 	// cursor 的密文当 claude 的解：必须失败，而不是被当成 claude 凭据用。
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO agent_accounts
+	res, err := s.db.ExecContext(ctx, `INSERT INTO agent_accounts
 		(provider, label, account_id, default_model, auth_json_sealed, status, created_at, updated_at)
 		VALUES ('claude', '', '', '', ?, 'active', '2026-08-11T00:00:00.000Z', '2026-08-11T00:00:00.000Z')`,
-		sealedCursor); err != nil {
+		sealedCursor)
+	if err != nil {
 		t.Fatal(err)
 	}
-	got, plain, err := s.GetAgentCredential(ctx, AgentProviderClaude)
+	claudeID, err := res.LastInsertId()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, plain, err := s.GetAgentCredential(ctx, claudeID)
 	if err == nil {
 		t.Fatalf("cursor 密文按 claude 解出了凭据: id=%d, 明文 %d 字节", got.ID, len(plain))
 	}
@@ -558,32 +615,32 @@ func TestAgentCursorSealAADAndSingleRow(t *testing.T) {
 	}
 
 	// 反向：codex 的密文塞进 cursor 行同样解不出。
-	mustAgent(t, s, AgentProviderCodex, fakeAuthJSON)
+	codex := mustAgent(t, s, AgentProviderCodex, fakeAuthJSON)
 	var sealedCodex string
-	if err := s.db.QueryRow(`SELECT auth_json_sealed FROM agent_accounts WHERE provider = ?`, AgentProviderCodex).Scan(&sealedCodex); err != nil {
+	if err := s.db.QueryRow(`SELECT auth_json_sealed FROM agent_accounts WHERE id = ?`, codex.ID).Scan(&sealedCodex); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.ExecContext(ctx, `UPDATE agent_accounts SET auth_json_sealed = ? WHERE provider = ?`,
-		sealedCodex, AgentProviderCursor); err != nil {
+	if _, err := s.db.ExecContext(ctx, `UPDATE agent_accounts SET auth_json_sealed = ? WHERE id = ?`,
+		sealedCodex, acct.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, plain, err := s.GetAgentCredential(ctx, AgentProviderCursor); !errors.Is(err, ErrAgentAuthUnreadable) {
+	if _, plain, err := s.GetAgentCredential(ctx, acct.ID); !errors.Is(err, ErrAgentAuthUnreadable) {
 		t.Errorf("codex 密文冒充 cursor 应解不开, 得到 %d 字节明文 (err=%v)", len(plain), err)
 	}
 
-	// 单账户语义：重复连接 cursor 是覆盖而非增行；空 label 保持，default_model 恒空。
+	// 按 id 重连 cursor 是覆盖而非增行；空 label 保持，default_model 恒空。
 	const rotated = `{"api_key":"fake-cursor-dashboard-api-key-NOT-REAL-rotated"}`
-	second, err := s.UpsertAgentAccount(ctx, NewAgentAccount{Provider: AgentProviderCursor, AuthJSON: rotated})
+	second, err := s.UpsertAgentAccount(ctx, NewAgentAccount{ID: acct.ID, Provider: AgentProviderCursor, DefaultModel: "composer-1", AuthJSON: rotated})
 	if err != nil {
-		t.Fatalf("重复连接: %v", err)
+		t.Fatalf("重新连接: %v", err)
 	}
 	if second.ID != acct.ID {
-		t.Errorf("重复连接插出了新行: id %d → %d", acct.ID, second.ID)
+		t.Errorf("按 id 重连插出了新行: id %d → %d", acct.ID, second.ID)
 	}
 	if second.Label != "Cursor 订阅" || second.DefaultModel != "" {
-		t.Errorf("重复连接后的字段不符: label=%q default_model=%q", second.Label, second.DefaultModel)
+		t.Errorf("重连后的字段不符: label=%q default_model=%q", second.Label, second.DefaultModel)
 	}
-	if _, plain, err := s.GetAgentCredential(ctx, AgentProviderCursor); err != nil || plain != rotated {
+	if _, plain, err := s.GetAgentCredential(ctx, acct.ID); err != nil || plain != rotated {
 		t.Errorf("凭据未被新一代覆盖 (err=%v)", err)
 	}
 	list, err := s.ListAgentAccounts(ctx)

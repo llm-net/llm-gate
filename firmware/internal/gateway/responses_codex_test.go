@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/llm-net/llm-gate/firmware/internal/config"
@@ -82,7 +83,7 @@ func TestCodexMixedModelsMergesOnlySelectedCatalogModels(t *testing.T) {
 }
 
 func TestCodexMixedRejectsInvalidSelectionAndRequiresKey(t *testing.T) {
-	e := newRouteEnv(t)
+	e := newAgentEnv(t, jsonReply(http.StatusOK, codexNonStreamBody))
 	w := do(e.h, http.MethodGet, "/agents/codex/v1/models?llmgate_catalog=ok,,bad", chatAuth, "")
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("非法选择状态 = %d", w.Code)
@@ -202,4 +203,136 @@ func TestCodexSubscriptionForwardsInputUntouched(t *testing.T) {
 	if got, want := sentInputItems(t, e, 0), decodeInputItems(t, input); !reflect.DeepEqual(got, want) {
 		t.Fatalf("没有目录面条目时 input 应原样转发：\n got = %v\nwant = %v", got, want)
 	}
+}
+
+func TestCodexSubscriptionRecoversInvalidToolImage(t *testing.T) {
+	for _, endpoint := range []string{"/agents/codex/v1/responses", "/agents/v1/responses"} {
+		t.Run(endpoint, func(t *testing.T) {
+			e := newAgentEnv(t, jsonReply(http.StatusOK, codexNonStreamBody))
+			input := `[
+				{"type":"function_call","call_id":"call_image","name":"view_image","arguments":"{}"},
+				{"type":"function_call_output","call_id":"call_image","output":[
+					{"type":"input_text","text":"media/original.png"},
+					{"type":"input_image","image_url":"data:image/png;base64,aW1hZ2U=","detail":"high"},
+					{"type":"input_image","image_url":"data:image/png;base64,[truncated]","detail":"high"}]},
+				{"type":"message","role":"user","content":[{"type":"input_image","image_url":"data:image/png;base64,%%%"}]}
+			]`
+			w := do(e.h, http.MethodPost, endpoint, codexAuth, codexReplayReq(input))
+			if w.Code != http.StatusOK || e.backend.count() != 1 {
+				t.Fatalf("status = %d, upstream requests = %d", w.Code, e.backend.count())
+			}
+			got := sentInputItems(t, e, 0)
+			want := decodeInputItems(t, input)
+			parts := got[1]["output"].([]any)
+			notice := parts[2].(map[string]any)
+			if notice["type"] != "input_text" || !strings.Contains(notice["text"].(string), "Read the original image again") {
+				t.Fatal("upstream received an invalid tool image instead of a reread notice")
+			}
+			want[1]["output"].([]any)[2] = notice
+			if !reflect.DeepEqual(got, want) {
+				t.Fatal("tool metadata, valid image or user attachment changed")
+			}
+		})
+	}
+}
+
+// viewImageReplay 造一段 Agent 引擎回放的会话历史：n 次 view_image，每次工具结果带
+// 一张约 size 字节的内联 JPEG（data URL，Base64 长度取 4 的整数倍，是有效编码）。
+func viewImageReplay(n, size int) string {
+	image := "data:image/jpeg;base64," + strings.Repeat("AAAA", (size-len("data:image/jpeg;base64,"))/4)
+	var b strings.Builder
+	b.WriteString(`[{"type":"message","role":"user","content":[{"type":"input_text","text":"做一段 MV"}]}`)
+	for i := range n {
+		fmt.Fprintf(&b, `,{"type":"function_call","call_id":"call_%d","name":"view_image","arguments":"{}"}`, i)
+		fmt.Fprintf(&b, `,{"type":"function_call_output","call_id":"call_%d","output":[{"type":"input_text","text":"media/s%02d-frame.png"},{"type":"input_image","image_url":%q,"detail":"high"}]}`, i, i, image)
+	}
+	b.WriteString("]")
+	return b.String()
+}
+
+// TestAgentResponsesOmitEarlyToolImages：Agent 面的会话历史超过 8 MiB 转发上限时，
+// 设备从最早的工具图片起换成省略说明、把请求收进上限再转发，最新的图片与其余条目
+// 原样；标准 /v1/responses 协议面仍按 8 MiB 读体。
+func TestAgentResponsesOmitEarlyToolImages(t *testing.T) {
+	const images, imageSize, limit = 30, 330 << 10, 8 << 20
+	input := viewImageReplay(images, imageSize)
+	check := func(t *testing.T, sent []map[string]any, body string) {
+		t.Helper()
+		if len(body) > limit {
+			t.Fatalf("forwarded body = %d bytes, want <= %d", len(body), limit)
+		}
+		want := decodeInputItems(t, input)
+		if len(sent) != len(want) {
+			t.Fatalf("forwarded %d items, want %d", len(sent), len(want))
+		}
+		omitted := 0
+		for i, item := range sent {
+			if item["type"] != "function_call_output" {
+				if !reflect.DeepEqual(item, want[i]) {
+					t.Fatalf("item %d changed", i)
+				}
+				continue
+			}
+			part := item["output"].([]any)[1].(map[string]any)
+			if part["type"] == "input_text" {
+				if !strings.Contains(part["text"].(string), "omitted from this request") || omitted != (i-1)/2 {
+					t.Fatalf("item %d: unexpected replacement or omission out of order", i)
+				}
+				omitted++
+				continue
+			}
+			if !reflect.DeepEqual(item, want[i]) {
+				t.Fatalf("item %d: kept tool output changed", i)
+			}
+		}
+		if omitted == 0 || omitted == images {
+			t.Fatalf("omitted %d of %d images", omitted, images)
+		}
+	}
+	for _, endpoint := range []string{"/agents/codex/v1/responses", "/agents/v1/responses"} {
+		t.Run(endpoint, func(t *testing.T) {
+			e := newAgentEnv(t, jsonReply(http.StatusOK, codexNonStreamBody))
+			body := codexReplayReq(input)
+			if len(body) <= limit {
+				t.Fatalf("fixture body = %d bytes, want > %d", len(body), limit)
+			}
+			w := do(e.h, http.MethodPost, endpoint, codexAuth, body)
+			if w.Code != http.StatusOK || e.backend.count() != 1 {
+				t.Fatalf("status = %d, upstream requests = %d, body = %s", w.Code, e.backend.count(), w.Body.String())
+			}
+			check(t, sentInputItems(t, e, 0), e.backend.sentBody(0))
+		})
+	}
+	t.Run("/agents/grok/v1/responses", func(t *testing.T) {
+		e := newGrokEnv(t, jsonReply(http.StatusOK, grokNonStreamBody), issuerNever(t))
+		body := fmt.Sprintf(`{"model":%q,"input":%s,"stream":false,"store":false}`, grokModel, input)
+		w := do(e.h, http.MethodPost, "/agents/grok/v1/responses", grokClientHeaders, body)
+		if w.Code != http.StatusOK || e.backend.count() != 1 {
+			t.Fatalf("status = %d, upstream requests = %d, body = %s", w.Code, e.backend.count(), w.Body.String())
+		}
+		var sent struct {
+			Input []map[string]any `json:"input"`
+		}
+		if err := json.Unmarshal([]byte(e.backend.sentBody(0)), &sent); err != nil {
+			t.Fatal(err)
+		}
+		check(t, sent.Input, e.backend.sentBody(0))
+	})
+	t.Run("standard /v1/responses keeps the 8 MiB read limit", func(t *testing.T) {
+		e := newRouteEnv(t)
+		w := do(e.h, http.MethodPost, "/v1/responses", chatAuth, codexReplayReq(input))
+		if w.Code != http.StatusRequestEntityTooLarge {
+			t.Fatalf("status = %d, want 413", w.Code)
+		}
+	})
+	t.Run("read limit", func(t *testing.T) {
+		e := newAgentEnv(t, jsonReply(http.StatusOK, codexNonStreamBody))
+		w := do(e.h, http.MethodPost, "/agents/codex/v1/responses", codexAuth, codexReplayReq(viewImageReplay(100, imageSize)))
+		if w.Code != http.StatusRequestEntityTooLarge || e.backend.count() != 0 {
+			t.Fatalf("status = %d, upstream requests = %d", w.Code, e.backend.count())
+		}
+		if _, code, msg := decodeError(t, w); code != "request_too_large" || !strings.Contains(msg, "32 MB") {
+			t.Fatalf("error = %s / %s", code, msg)
+		}
+	})
 }

@@ -12,8 +12,8 @@ import (
 	"github.com/llm-net/llm-gate/firmware/internal/store"
 )
 
-// overrideDevToolConfig 覆写唯一测试 Key 的开发工具策略（routeEnv 缺省四个订阅全勾、
-// 没有目录模型；mutate 从一份全空策略起改）。
+// overrideDevToolConfig 覆写唯一测试 Key 的开发工具策略（mutate 从一份全空策略
+// 起改：解开各用例经 connectAgent 钉上的账号、清空目录模型）。
 func overrideDevToolConfig(t *testing.T, st *store.Store, mutate func(*store.DevToolConfig)) {
 	t.Helper()
 	keys, err := st.ListAPIKeys(t.Context())
@@ -55,6 +55,9 @@ func TestAgentFacesRouteByPath(t *testing.T) {
 	})
 	t.Run("子树兜底先鉴权再 404", func(t *testing.T) {
 		e := newRouteEnv(t)
+		// 两棵子树都对这把 Key 开放（各钉一个账号），兜底才轮得到 404。
+		connectAgent(t, e.st, store.NewAgentAccount{Provider: store.AgentProviderCodex, AuthJSON: codexAuthJSON(codexAccess1, codexRefresh1)})
+		connectAgent(t, e.st, store.NewAgentAccount{Provider: store.AgentProviderGrok, AuthJSON: grokAuthJSONFixture(grokAccess1, grokRefresh1)})
 		for _, path := range []string{"/agents/codex/v1/other", "/agents/grok/v1/models", "/agents/codex/", "/agents/grok/"} {
 			if w := do(e.h, http.MethodGet, path, nil, ""); w.Code != http.StatusUnauthorized {
 				t.Errorf("%s 无凭证状态码 = %d，期望 401", path, w.Code)

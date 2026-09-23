@@ -1,6 +1,8 @@
-// Package ui 承载设备界面的静态资源：web/ui 的 vite 构建产物入库在 uidist/，
-// 经 go:embed 打进二进制——与 internal/admin 同规矩，go build 绝不依赖 Node，
-// 重建产物用 `make web`（一次编两份：管理台 + 产品面）。
+// Package ui 承载设备界面的静态资源：web/ui 的 vite 构建产物落在 uidist/，
+// 经 go:embed 打进二进制。产物不入库（目录只跟踪 .gitkeep，同 gatehelper 的
+// gate 制品），`make build` / `make test` 每次先经 `make web` 重建；embed 模式
+// 写成 all:uidist，目录里只剩 .gitkeep 时 go build 仍能编译，但那样的二进制
+// 没有界面——uidist 是否齐全由 ui_test.go 与 Makefile 把守。
 //
 // 路由约定：/ui/* 服务单页应用，未知子路径回退 index.html（直达/刷新不
 // 404）；一律 Cache-Control: no-store，固件升级后旧界面不得从缓存复活
@@ -17,7 +19,7 @@ import (
 	"strings"
 )
 
-//go:embed uidist
+//go:embed all:uidist
 var uiFiles embed.FS
 
 // UIHandler 服务 /ui/ 子树的嵌入静态资源。静态资源不要求会话：这一层只是
@@ -25,7 +27,7 @@ var uiFiles embed.FS
 func UIHandler() http.Handler {
 	sub, err := fs.Sub(uiFiles, "uidist")
 	if err != nil {
-		panic("uidist 嵌入缺失（先 make web 生成并入库）: " + err.Error())
+		panic("uidist 嵌入缺失（先 make web 生成）: " + err.Error())
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		name := strings.TrimPrefix(r.URL.Path, "/ui/")

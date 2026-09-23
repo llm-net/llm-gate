@@ -39,7 +39,7 @@ func (s *Server) handleCodexResponses(w http.ResponseWriter, r *http.Request) {
 	if !rejectCodexCatalogQuery(w, r) {
 		return
 	}
-	payload, model, ok := decodeEntryPayload(w, r, openAIErrorStyle)
+	payload, model, ok := s.readAgentResponses(w, r)
 	if !ok {
 		return
 	}
@@ -163,8 +163,8 @@ func (s *Server) selectedCodexCatalogModels(ctx context.Context, selected map[st
 		if _, wanted := selected[row.ModelName]; !wanted || !row.EntryResponses {
 			continue
 		}
-		acct := upstream.Account{Type: row.UpstreamType, BaseURL: row.UpstreamBaseURL}
-		if _, ok := acct.ModelEndpoint(doc, row.UpstreamCatalogID, row.ModelName, row.UpstreamModelID, config.ProtocolOpenAIChat); ok {
+		acct := upstream.Account{Type: row.UpstreamType, BaseURL: row.UpstreamBaseURL, ProtocolURLs: row.UpstreamProtocolURLs}
+		if _, ok := acct.ModelEndpoint(doc, row.UpstreamCatalogID, row.ModelName, row.UpstreamModelID, acct.WireProtocol(config.ProtocolOpenAIResponses)); ok {
 			openAI[row.ModelName] = true
 		}
 	}
@@ -300,8 +300,8 @@ func (s *Server) selectedCodexLocalCatalog(ctx context.Context, selected map[str
 		if _, wanted := selected[row.ModelName]; !wanted || !row.EntryResponses {
 			continue
 		}
-		acct := upstream.Account{Type: row.UpstreamType, BaseURL: row.UpstreamBaseURL}
-		if _, ok := acct.ModelEndpoint(doc, row.UpstreamCatalogID, row.ModelName, row.UpstreamModelID, config.ProtocolOpenAIChat); !ok {
+		acct := upstream.Account{Type: row.UpstreamType, BaseURL: row.UpstreamBaseURL, ProtocolURLs: row.UpstreamProtocolURLs}
+		if _, ok := acct.ModelEndpoint(doc, row.UpstreamCatalogID, row.ModelName, row.UpstreamModelID, acct.WireProtocol(config.ProtocolOpenAIResponses)); !ok {
 			continue
 		}
 		openAI[row.ModelName] = true

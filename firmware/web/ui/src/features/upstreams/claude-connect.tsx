@@ -5,7 +5,10 @@ import { Label } from "@/components/ui/label";
 import * as api from "@/lib/api";
 import { t } from "@/lib/i18n";
 
+// account 非空 = 更新那一个 Claude 账号的某一份凭据；为空 = 新建账号（首次保存
+// 建行，之后从卡片上的「配置 Claude 凭据」再补另一份）。
 export function ClaudeConnect({ label, model, secure, account, onDone }: { account: api.AgentAccount | undefined; label: string; model: string; secure: boolean; onDone: () => void }): React.ReactElement {
+  const accountId = account?.id ?? 0;
   const [mode, setMode] = useState<"browser" | "setup">(account?.setup_token_configured && account.status !== "auth_expired" ? "browser" : "setup");
   const [login, setLogin] = useState<api.ClaudeLoginStart | null>(null);
   const [credential, setCredential] = useState("");
@@ -37,8 +40,8 @@ export function ClaudeConnect({ label, model, secure, account, onDone }: { accou
     setBusy(true);
     setError(null);
     try {
-      if (mode === "browser") await api.completeClaudeLogin(credential.trim(), label.trim(), model.trim());
-      else await api.connectClaudeSetupToken(credential.trim(), label.trim(), model.trim());
+      if (mode === "browser") await api.completeClaudeLogin(credential.trim(), label.trim(), model.trim(), accountId);
+      else await api.connectClaudeSetupToken(credential.trim(), label.trim(), model.trim(), accountId);
       if (sequence !== operation.current) return;
       setCredential("");
       setLogin(null);
@@ -56,6 +59,7 @@ export function ClaudeConnect({ label, model, secure, account, onDone }: { accou
 
   return <div className="flex flex-col gap-3">
     <p className="text-muted-foreground text-xs">{t("setup-token 用于 gate 模型调用，OAuth 授权用于查询额度。请使用同一个 Claude 账号，分别保存；更新其中一项会保留另一项。")}</p>
+    {account === undefined && <p className="text-muted-foreground text-xs">{t("这是一个新的 Claude 账号：先保存任一份凭据建立账号，另一份稍后从账号卡片上的「配置 Claude 凭据」补齐。")}</p>}
     <p className="text-xs">{t("模型调用凭据：{status}", { status: account?.setup_token_configured ? account.status === "auth_expired" ? t("已失效") : t("已配置") : t("未配置") })} · {t("额度授权：{status}", { status: account?.quota_oauth_configured ? account.quota_oauth_expired ? t("已失效") : t("已授权") : t("未授权") })}</p>
     <div className="flex flex-wrap gap-2">
       <Button variant={mode === "browser" ? "default" : "outline"} aria-pressed={mode === "browser"} disabled={busy} onClick={() => choose("browser")}>{t("额度查询（OAuth）")}</Button>

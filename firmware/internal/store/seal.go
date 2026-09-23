@@ -8,17 +8,20 @@ package store
 // 密钥与库同目录，同时拿到两者仍可解密——这个局限是已知并接受的（决策 2），
 // 加密备份迭代复用同一套密钥体系。
 //
-// 用设备密钥封存的密文共有四类，各自钉不同的 AAD：upstreams.api_key_sealed
+// 用设备密钥封存的密文共有五类，各自钉不同的 AAD：upstreams.api_key_sealed
 // （AAD 恒 nil——那批密文迭代 5 就已入库，改 AAD 等于让所有已存的 Key 立刻读不
 // 出来）、密封的 settings 单值（AAD = setting 键名）、agent_accounts.auth_json_sealed（AAD = "agent:<provider>"，
-// Codex/Grok 存 auth.json，Claude 存规范 setup-token 包装；见 agents.go），以及 api_keys.plaintext_sealed（AAD =
+// Codex/Grok 存 auth.json，Claude 存规范 setup-token 包装；见 agents.go）、api_keys.plaintext_sealed（AAD =
 // "apikey:<key_digest>"，逐行钉死在自己的摘要上，密文挪行解不开；属主自助复制
-// 端点用，见 repo.go 的 GetAPIKeyPlaintext）。加第五处之前先回来改这一段。
+// 端点用，见 repo.go 的 GetAPIKeyPlaintext），以及 credentials.secret_sealed（AAD =
+// "credential:<id>"，「智能体 → 凭证管理」的 git 令牌，同样逐行钉死；见 credentials.go）。
+// 加第六处之前先回来改这一段。
 //
 // §15.1 纪律：明文只出现在 CreateUpstream/SetUpstreamKey 的入参与
 // ResolveModelRoute 的返回值里（Agents 凭据同理，只在 GetAgentCredential 的
 // 返回值里；客户端 API密钥同理，只在 CreateAPIKey 的入参与 GetAPIKeyPlaintext
-// 的返回值里）；本文件的错误信息不含密钥物料、密文内容或明文片段，可安全落日志。
+// 的返回值里；凭证管理的令牌同理，只在 CreateCredential/UpdateCredential 的入参与
+// GetCredentialSecret 的返回值里）；本文件的错误信息不含密钥物料、密文内容或明文片段，可安全落日志。
 
 import (
 	"crypto/aes"

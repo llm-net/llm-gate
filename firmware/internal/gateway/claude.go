@@ -250,15 +250,28 @@ func ensureAnthropicBeta(h http.Header, required string) {
 	h.Set("Anthropic-Beta", strings.Join(values, ","))
 }
 
-// claudeCredential reads only the inference credential, without consulting OAuth.
+// claudeCredential reads only the inference credential of the Claude account
+// pinned to this key, without consulting OAuth.
 func (s *Server) claudeCredential(w http.ResponseWriter, r *http.Request) (*store.AgentAccount, *claudeauth.Credential, bool) {
 	info := infoFrom(r.Context())
 	if s.store == nil {
 		anthropicErrorStyle(w, http.StatusInternalServerError, "internal_error", internalErrorMessage)
 		return nil, nil, false
 	}
-	acct, blob, err := s.store.GetAgentCredential(r.Context(), store.AgentProviderClaude)
+	snapshot, ok := s.devToolSnapshot(w, r)
+	if !ok {
+		return nil, nil, false
+	}
+	accountID := snapshot.Subscription(store.AgentProviderClaude).AccountID
+	if accountID == 0 {
+		writeClaudeNotConfigured(w)
+		return nil, nil, false
+	}
+	acct, blob, err := s.store.GetAgentCredential(r.Context(), accountID)
 	switch {
+	case err == nil && acct.Provider != store.AgentProviderClaude:
+		writeClaudeNotConfigured(w)
+		return nil, nil, false
 	case err == nil:
 	case errors.Is(err, store.ErrNotFound):
 		writeClaudeNotConfigured(w)

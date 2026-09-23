@@ -11,6 +11,14 @@ export function fmtTime(iso: string): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
+/** fmtTimeSeconds 带秒的时刻：提交与完成常在同一分钟内，分钟精度分不开。 */
+export function fmtTimeSeconds(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  const p = (n: number): string => String(n).padStart(2, "0");
+  return `${fmtTime(iso)}:${p(d.getSeconds())}`;
+}
+
 /** keyDisplay 是 Key 在界面上的短读数（前缀…后四位），明文从不参与展示。 */
 export function keyDisplay(k: ApiKey): string {
   return `${k.display_prefix}…${k.display_last4}`;

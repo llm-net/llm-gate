@@ -61,6 +61,10 @@ Group=llmgate
 ExecStart=/usr/local/bin/llmgate gatewayd --config /etc/llmgate/gatewayd.yaml
 Restart=on-failure
 RestartSec=2
+# h618-x98h 为 2 GiB 内存；超限只终止并重启 gatewayd，不拖垮整机。
+MemoryHigh=768M
+MemoryMax=1G
+Environment=GOMEMLIMIT=700MiB
 # 非 root 绑定 80 端口
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE

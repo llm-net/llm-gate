@@ -37,7 +37,7 @@ func TestMutateAgentAuthRetriesOnConcurrentWrite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	current, blob, err := s.GetAgentCredential(t.Context(), AgentProviderClaude)
+	current, blob, err := s.GetAgentCredential(t.Context(), a.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

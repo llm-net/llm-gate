@@ -387,7 +387,7 @@ func TestGrokDownloadUsesArtifactTimeoutAndAtomicReplacement(t *testing.T) {
 	client.Timeout = 10 * time.Millisecond
 	root := t.TempDir()
 	a := &app{root: root, cfg: config{BaseURL: srv.URL}, hc: client}
-	target, err := a.downloadGrokBinary("grok-9.9.9-linux-x86_64")
+	target, err := a.downloadGrokBinary(a.grokOrigins(), "grok-9.9.9-linux-x86_64")
 	if err != nil {
 		t.Fatalf("download with artifact timeout: %v", err)
 	}
@@ -420,7 +420,7 @@ func TestGrokDownloadSelfCheckFailureKeepsExistingBinary(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := &app{root: root, cfg: config{BaseURL: srv.URL}, hc: srv.Client()}
-	if _, err := a.downloadGrokBinary("grok-9.9.9-linux-x86_64"); err == nil || !strings.Contains(err.Error(), "无法运行") {
+	if _, err := a.downloadGrokBinary(a.grokOrigins(), "grok-9.9.9-linux-x86_64"); err == nil || !strings.Contains(err.Error(), "无法运行") {
 		t.Fatalf("invalid Grok binary error = %v", err)
 	}
 	got, err := os.ReadFile(target)
@@ -924,6 +924,97 @@ func TestParseCursorInstallerVersionFailClosed(t *testing.T) {
 		if got, err := parseCursorInstallerVersion(script); err == nil || !strings.Contains(err.Error(), "拒绝猜测性安装") {
 			t.Errorf("%s: parse=(%q,%v), want fail closed", name, got, err)
 		}
+	}
+}
+
+func TestToolBinaryNameForPlatforms(t *testing.T) {
+	cases := []struct{ goos, name, want string }{
+		{"linux", "cursor", "cursor-agent"},
+		{"darwin", "cursor", "cursor-agent"},
+		// 官方 Windows 整树制品与安装脚本都没有 cursor-agent.exe，入口是 .cmd。
+		{"windows", "cursor", "cursor-agent.cmd"},
+		{"linux", "codex", "codex"},
+		{"windows", "codex", "codex.exe"},
+		{"windows", "grok", "grok.exe"},
+		{"windows", "claude", "claude.exe"},
+		{"windows", "opencode", "opencode.exe"},
+	}
+	for _, tc := range cases {
+		if got := toolBinaryNameFor(tc.goos, tc.name); got != tc.want {
+			t.Errorf("toolBinaryNameFor(%s,%s)=%q want %q", tc.goos, tc.name, got, tc.want)
+		}
+	}
+	if got := toolBinaryName("cursor"); got != toolBinaryNameFor(runtime.GOOS, "cursor") {
+		t.Fatalf("toolBinaryName must follow runtime.GOOS: %q", got)
+	}
+}
+
+func TestProbeVersionReportsFailureReason(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture runs on Unix test hosts")
+	}
+	dir := t.TempDir()
+	missing := filepath.Join(dir, "cursor-agent")
+	if _, err := probeVersion(missing, nil, time.Second); err == nil || !strings.Contains(err.Error(), "cursor-agent --version") {
+		t.Fatalf("missing entry must report the launch failure: %v", err)
+	}
+	if got := detectVersionWithEnv(missing, nil); got != "unknown" {
+		t.Fatalf("detectVersion keeps the unknown sentinel: %q", got)
+	}
+	failing := filepath.Join(dir, "failing")
+	if err := os.WriteFile(failing, []byte("#!/bin/sh\necho 'boom: missing runtime' >&2\nexit 3\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, err := probeVersion(failing, nil, time.Second)
+	if err == nil || !strings.Contains(err.Error(), "exit status 3") || !strings.Contains(err.Error(), "boom: missing runtime") {
+		t.Fatalf("exit code and output prefix must be surfaced: %v", err)
+	}
+	silent := filepath.Join(dir, "silent")
+	if err := os.WriteFile(silent, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := probeVersion(silent, nil, time.Second); err == nil || !strings.Contains(err.Error(), "没有输出") {
+		t.Fatalf("empty output must be an error: %v", err)
+	}
+	ok := filepath.Join(dir, "ok")
+	if err := os.WriteFile(ok, []byte("#!/bin/sh\necho 2026.09.10-fd3934a\necho extra\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := probeVersion(ok, nil, time.Second); err != nil || got != "2026.09.10-fd3934a" {
+		t.Fatalf("first line expected: %q %v", got, err)
+	}
+}
+
+func TestCursorInstallSelfCheckFailureNamesCause(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture runs on Unix test hosts")
+	}
+	const vNew = "2026.09.01-0abc123"
+	assetNew, err := cursorCLIAssetPath(runtime.GOOS, runtime.GOARCH, vNew)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 归档没有入口文件（如官方换了入口名）：错误必须说出启动失败，而不是
+	// 折叠成「版本 "unknown" 不一致」。
+	state := &cursorDeviceState{configured: true, available: true, defaultModel: "legacy-cursor-model",
+		cliFiles: map[string][]byte{
+			"install.sh": []byte(cursorInstallScript(vNew)),
+			assetNew: cursorTarGz(t, []cursorTarEntry{
+				{name: "dist-package/", typ: tar.TypeDir, mode: 0o755},
+				{name: "dist-package/index.js", mode: 0o644, body: "// no launcher"},
+			}),
+		}}
+	srv := newCursorDeviceServer(t, state)
+	t.Setenv("PATH", t.TempDir())
+	root := t.TempDir()
+	a := &app{root: root, cfg: config{SchemaVersion: 1, BaseURL: srv.URL, APIKey: fakeKey, Tools: map[string]toolState{}},
+		hc: newHTTPClient(), out: &bytes.Buffer{}, err: &bytes.Buffer{}}
+	err = a.install("cursor", false, false)
+	if err == nil || !strings.Contains(err.Error(), "自检失败") || !strings.Contains(err.Error(), "cursor-agent --version") || strings.Contains(err.Error(), "unknown") {
+		t.Fatalf("self-check failure must name the cause: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "tools", "cursor", "app")); !os.IsNotExist(err) {
+		t.Fatalf("failed self-check must not commit app tree: %v", err)
 	}
 }
 
@@ -1990,7 +2081,7 @@ func TestClaudeDownloadChecksumFailureKeepsExistingBinary(t *testing.T) {
 	}
 	a := &app{root: root, cfg: config{BaseURL: srv.URL}, hc: newHTTPClient()}
 	release := claudeReleasePlatform{Binary: "claude", Checksum: strings.Repeat("0", 64), Size: int64(len(body))}
-	if _, err := a.downloadClaudeBinary("9.9.9", "linux-x64", release); err == nil || !strings.Contains(err.Error(), "SHA-256") {
+	if _, err := a.downloadClaudeBinary(a.claudeOrigins(), "9.9.9", "linux-x64", release); err == nil || !strings.Contains(err.Error(), "SHA-256") {
 		t.Fatalf("checksum mismatch = %v", err)
 	}
 	got, err := os.ReadFile(target)
@@ -2223,7 +2314,7 @@ func TestCodexInstallFallsBackToDeviceWhenPathCodexIsUnusable(t *testing.T) {
 		t.Fatalf("state=%+v want managed install at %s", st, want)
 	}
 	stderr := a.err.(*bytes.Buffer).String()
-	if !strings.Contains(stderr, staleBin) || !strings.Contains(stderr, "改为经设备安装受管 codex") {
+	if !strings.Contains(stderr, staleBin) || !strings.Contains(stderr, "改为安装受管 codex") {
 		t.Fatalf("fallback narration missing:\n%s", stderr)
 	}
 }

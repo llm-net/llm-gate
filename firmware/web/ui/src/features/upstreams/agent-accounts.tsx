@@ -1,17 +1,23 @@
-// 开发工具订阅列：把一份已有的 Agent 订阅（Codex / Grok Build / Claude Code / Cursor）
+// 开发工具订阅列：把已有的 Agent 订阅账号（Codex / Grok Build / Claude Code / Cursor）
 // 关联到这台设备。订阅凭据只留在设备里，不下发到任何人的电脑上。
 //
-// 一个 provider 只有一份订阅（服务端 UNIQUE(provider)，重复连接是覆盖），所以这一列
-// 恒按四种订阅铺位：已连接的画成整张卡片，没连的画成一条虚线槽位、连接入口就长在槽上
-// ——扫一眼就知道四种里哪几种接上了，不必先看空列表再去找按钮。
+// 同一种订阅可以录入多个账号，每个账号一张卡片、各持各的凭据；哪把 Key 用哪个账号在
+// API密钥页的「可用订阅」里钉死。列头的「连接订阅」新建账号（对话框里选订阅类型）；
+// 一个账号都没有的订阅种类画成一条虚线槽位，连接入口就长在槽上——扫一眼就知道四种里
+// 哪几种还没接。卡片上的「重新登录 / 重新连接」只覆盖自己这一行的凭据，不新建账号。
 //
-// 卡片三段：头部（品牌 + 名称 + 状态灯）、事实带（账号 / 默认或可见模型 / 最近刷新）、
-// 动作行（自检、编辑外露，重新登录/停用/删除收进「⋯」菜单）。凭据过期时头部下方加一条
-// 琥珀提示，修复入口直接长在那句话旁边；已停用整卡压暗、动作行留亮，「启用」就在动作行上。
+// 卡片只有一条顶栏：左起品牌图标、订阅名 + 账号名 + 状态灯，下面一行小字是事实
+// （默认或可见模型 / 最近刷新），右端是动作（自检、编辑外露，重新登录/停用/删除收进
+// 「⋯」菜单；Claude 的两份凭据状态与「配置 Claude 凭据」也在菜单里）。上游账号标识收纳在「上游账号」
+// 这个词后面，鼠标悬停或聚焦才展开——它只在排查时有用，平时不占版面。凭据过期时顶栏
+// 下方加一条琥珀提示，修复入口直接长在那句话旁边；已停用压暗左侧、动作留亮，「启用」
+// 就在动作组里。
 //
 // 各订阅按自己的官方授权方式接入：
 //   Codex   授权码 + 人肉搬运回调 URL——授权完浏览器会停在一个**打不开的**
 //           localhost:1455 页面上，不写清楚管理员会以为登录失败。
+//   「打开授权页」旁边配一个「复制地址」：管理台常常开在没有 OpenAI / xAI 登录态的
+//   浏览器里（或者另一台机器上），授权地址要搬到别处去打开，新标签页帮不上忙。
 //   Grok    设备码流（RFC 8628）：显示 user_code，去浏览器批准，回来点「完成连接」。
 //           **还没批准时服务端回 agent_login_pending，那不是失败**——留在原地提示
 //           稍后再点，会话仍在。丢了这条分支，用户会以为连接失败。
@@ -21,8 +27,8 @@
 //           设备封存。连接离线完成、不做联网验证（同 setup-token 纪律）；Key 是否
 //           有效由「自检」（设备重新 exchange）与真实转发揭晓。
 
-import { CircleHelp, TriangleAlert } from "lucide-react";
-import { useState } from "react";
+import { CircleHelp, Copy, TriangleAlert } from "lucide-react";
+import { Fragment, useState } from "react";
 import { toast } from "sonner";
 
 import { AgentProviderIcon } from "@/components/brand-icon";
@@ -39,20 +45,27 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { SegTabs } from "@/features/access/access";
 import * as api from "@/lib/api";
+import { copyText } from "@/lib/clipboard";
 import { cn } from "@/lib/cn";
 import { useConfirm } from "@/lib/confirm";
 import { fmtTime } from "@/lib/format";
 import { t } from "@/lib/i18n";
 
-import { PROVIDERS, reconnectVerb, StatusPill, visibleModelSemantics } from "./agent-status";
-import { FactStrip, type Fact } from "./card-parts";
+import { accountName, PROVIDERS, reconnectVerb, StatusPill, visibleModelSemantics } from "./agent-status";
 import { ClaudeConnect } from "./claude-connect";
 import { AgentQuotaPanel } from "./agent-quota";
-import { RowActionsMenu, type RowAction } from "./row-actions";
+import { RowActionsMenu, type RowAction, type RowInfo } from "./row-actions";
 
 const DEFAULT_PROVIDER: api.AgentProvider = "codex";
+
+function copyAuthorizeURL(url: string): void {
+  void copyText(url).then((ok) => {
+    toast(ok ? t("已复制授权地址") : t("复制失败，请手动选择后复制"));
+  });
+}
 
 function SubscriptionHelpDialog({
   open,
@@ -91,23 +104,28 @@ function SubscriptionHelpDialog({
 function ConnectDialog({
   open,
   initialProvider,
+  target,
   onOpenChange,
   accounts,
   onDone,
 }: {
   open: boolean;
-  /** 打开时预选的订阅类型：列头「连接订阅」给缺省，卡片「重新登录/重新连接」给自己那家。 */
+  /** 打开时预选的订阅类型：列头「连接订阅」与槽位给自己那家，卡片「重新登录/重新连接」给自己那家。 */
   initialProvider: api.AgentProvider;
+  /** 非空 = 重新登录/重新连接这一个账号（凭据覆盖进它那一行）；空 = 新建账号。 */
+  target: api.AgentAccount | null;
   onOpenChange: (o: boolean) => void;
   accounts: api.AgentAccount[];
   onDone: () => void;
 }) {
   const [provider, setProvider] = useState<api.AgentProvider>(initialProvider);
-  const existingOf = (p: api.AgentProvider) => accounts.find((a) => a.provider === p);
-  const existing = existingOf(provider);
+  // 切到别的订阅类型就不再是重连那一个账号：目标只对它自己那家有效。
+  const existing = target !== null && target.provider === provider ? target : undefined;
+  const accountId = existing?.id ?? 0;
+  const countOf = (p: api.AgentProvider) => accounts.filter((a) => a.provider === p).length;
 
-  // 该 provider 已有账号时是「重新连接」，名称与默认模型预填其现值（服务端 Upsert 的
-  // 「空即保持」口径）。切 provider 时重填。
+  // 重连既有账号时名称与默认模型预填其现值（服务端「空即保持」口径）；新建时留空。
+  // 切 provider 时重填。
   const [label, setLabel] = useState(existing?.label ?? "");
   const [model, setModel] = useState(existing?.default_model ?? "");
   const [error, setError] = useState<string | null>(null);
@@ -123,7 +141,7 @@ function ConnectDialog({
 
   function switchProvider(p: api.AgentProvider): void {
     setProvider(p);
-    const ex = existingOf(p);
+    const ex = target !== null && target.provider === p ? target : undefined;
     setLabel(ex?.label ?? "");
     setModel(ex?.default_model ?? "");
     setError(null);
@@ -164,7 +182,7 @@ function ConnectDialog({
     }
     setError(null);
     setBusy(true);
-    api.completeAgentLogin("codex", pasted, label.trim(), model.trim()).then(
+    api.completeAgentLogin("codex", pasted, label.trim(), model.trim(), accountId).then(
       () => done(t("Codex 订阅已连接")),
       (err: unknown) => {
         setBusy(false);
@@ -177,7 +195,7 @@ function ConnectDialog({
     setError(null);
     setPending("");
     setBusy(true);
-    api.completeAgentLogin("grok", "", label.trim(), model.trim()).then(
+    api.completeAgentLogin("grok", "", label.trim(), model.trim(), accountId).then(
       () => done(t("Grok Build 订阅已连接")),
       (err: unknown) => {
         setBusy(false);
@@ -200,7 +218,7 @@ function ConnectDialog({
     }
     setError(null);
     setBusy(true);
-    api.connectCursorAPIKey(value, label.trim()).then(
+    api.connectCursorAPIKey(value, label.trim(), accountId).then(
       () => {
         setApiKey("");
         done(t("Cursor 订阅已连接"));
@@ -220,7 +238,7 @@ function ConnectDialog({
     }
     setError(null);
     setBusy(true);
-    api.importAgentAuth(provider as api.OAuthAgentProvider, value, label.trim(), model.trim()).then(
+    api.importAgentAuth(provider as api.OAuthAgentProvider, value, label.trim(), model.trim(), accountId).then(
       () => done(t("{provider} 订阅已连接", { provider: api.agentProviderLabel(provider) })),
       (err: unknown) => {
         setBusy(false);
@@ -237,33 +255,44 @@ function ConnectDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>{t("连接 Agent 订阅")}</DialogTitle>
+          <DialogTitle>
+            {existing === undefined
+              ? t("连接 Agent 订阅")
+              : t("{verb} — {account}", { verb: reconnectVerb(existing.provider), account: accountName(existing) })}
+          </DialogTitle>
+          <DialogDescription>
+            {existing === undefined
+              ? t("新建一个订阅账号。同一种订阅可以录入多个账号，成员的 API密钥各自固定使用其中一个。")
+              : t("凭据只覆盖进这一个账号，不新建账号；钉着它的 API密钥继续用它。")}
+          </DialogDescription>
         </DialogHeader>
-        <div className="flex flex-wrap items-center gap-3">
-          <span className="text-sm font-medium">{t("订阅类型")}</span>
-          <div className="max-w-full overflow-x-auto pb-1">
-            <SegTabs
-              items={PROVIDERS.map((p) => ({
-                key: p,
-                label: api.agentProviderLabel(p),
-                icon: <AgentProviderIcon provider={p} />,
-                lit: existingOf(p) !== undefined,
-              }))}
-              active={provider}
-              onSelect={(k) => switchProvider(k as api.AgentProvider)}
-            />
+        {existing === undefined ? (
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="text-sm font-medium">{t("订阅类型")}</span>
+            <div className="max-w-full overflow-x-auto pb-1">
+              <SegTabs
+                items={PROVIDERS.map((p) => ({
+                  key: p,
+                  label: countOf(p) === 0 ? api.agentProviderLabel(p) : `${api.agentProviderLabel(p)} · ${countOf(p)}`,
+                  icon: <AgentProviderIcon provider={p} />,
+                  lit: countOf(p) > 0,
+                }))}
+                active={provider}
+                onSelect={(k) => switchProvider(k as api.AgentProvider)}
+              />
+            </div>
           </div>
-        </div>
+        ) : null}
         <div className="flex flex-col gap-3">
           <div className="flex flex-col gap-1.5">
             <Label>
               {t("名称")}
-              <span className="text-muted-foreground ml-1 text-xs font-normal">{t("仅本页展示")}</span>
+              <span className="text-muted-foreground ml-1 text-xs font-normal">{t("本页与 API密钥页显示")}</span>
             </Label>
             <Input
               value={label}
               maxLength={api.LabelMaxLen}
-              placeholder={t("给这份订阅起个名字，可留空")}
+              placeholder={t("给这个账号起个名字，可留空；多个账号时靠它分辨")}
               autoComplete="off"
               onChange={(e) => setLabel(e.target.value)}
             />
@@ -361,11 +390,15 @@ function ConnectDialog({
                     <span className="text-muted-foreground text-xs">{t("授权码")}</span>
                     <code className="font-mono text-lg tracking-widest">{start.user_code ?? ""}</code>
                   </div>
-                  <div>
+                  <div className="flex flex-wrap items-center gap-2">
                     <Button asChild>
                       <a href={verifyURL} target="_blank" rel="noopener noreferrer" title={t("在新标签页打开 xAI 授权页")}>
                         {t("打开授权页")}
                       </a>
+                    </Button>
+                    <Button type="button" variant="outline" onClick={() => copyAuthorizeURL(verifyURL)}>
+                      <Copy />
+                      {t("复制地址")}
                     </Button>
                   </div>
                   <p className="text-muted-foreground text-xs">
@@ -387,7 +420,7 @@ function ConnectDialog({
                       { redirect },
                     )}
                   </p>
-                  <div>
+                  <div className="flex flex-wrap items-center gap-2">
                     <Button asChild>
                       <a
                         href={start.authorize_url ?? "#"}
@@ -397,6 +430,10 @@ function ConnectDialog({
                       >
                         {t("打开授权页")}
                       </a>
+                    </Button>
+                    <Button type="button" variant="outline" onClick={() => copyAuthorizeURL(start.authorize_url ?? "")}>
+                      <Copy />
+                      {t("复制地址")}
                     </Button>
                   </div>
                   <p className="text-muted-foreground text-xs">
@@ -521,7 +558,7 @@ function EditAgentDialog({
       <DialogContent>
         <form className="flex flex-col gap-4" onSubmit={submit}>
           <DialogHeader>
-            <DialogTitle>{t("编辑订阅 — {provider}", { provider: api.agentProviderLabel(a.provider) })}</DialogTitle>
+            <DialogTitle>{t("编辑账号 — {provider} · {account}", { provider: api.agentProviderLabel(a.provider), account: accountName(a) })}</DialogTitle>
           </DialogHeader>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="ag-label">{t("名称")}</Label>
@@ -530,7 +567,7 @@ function EditAgentDialog({
               autoFocus
               value={label}
               maxLength={api.LabelMaxLen}
-              placeholder={t("仅本页展示，可留空")}
+              placeholder={t("本页与 API密钥页的账号选择里显示，可留空")}
               autoComplete="off"
               onChange={(e) => setLabel(e.target.value)}
             />
@@ -610,10 +647,6 @@ function ProviderSlot({
   );
 }
 
-function Muted({ children }: { children: React.ReactNode }): React.ReactElement {
-  return <span className="text-muted-foreground">{children}</span>;
-}
-
 function AgentCard({
   a,
   onEdit,
@@ -654,11 +687,11 @@ function AgentCard({
 
   async function remove(): Promise<void> {
     const ok = await confirm({
-      title: t("删除订阅"),
+      title: t("删除账号"),
       body: (
         <>
-          <p>{t("确定删除这份 {provider} 订阅？", { provider: api.agentProviderLabel(a.provider) })}</p>
-          <p className="text-destructive">{t("封存的订阅凭据一并销毁，成员经它转发的调用立即失败。")}</p>
+          <p>{t("确定删除 {provider} 账号「{account}」？", { provider: api.agentProviderLabel(a.provider), account: accountName(a) })}</p>
+          <p className="text-destructive">{t("封存的订阅凭据一并销毁；钉着它的 API密钥失去该订阅的授权，成员经它转发的调用立即失败。")}</p>
         </>
       ),
       confirmText: t("确定删除"),
@@ -674,61 +707,84 @@ function AgentCard({
     reload();
   }
 
-  const facts: Fact[] = [
-    {
-      label: t("账号"),
-      // claude / cursor 的连接流不存上游账号标识，
-      // 这一格恒读作「不提供」，不是「未知」。
-      value:
-        a.provider === "claude" || a.provider === "cursor" ? (
-          <Muted>{t("不提供")}</Muted>
-        ) : a.account_id === "" ? (
-          <Muted>{t("未知")}</Muted>
-        ) : (
-          <code className="font-mono" title={a.account_id}>
-            {a.account_id}
-          </code>
-        ),
-    },
-  ];
+  // 顶栏第二行的事实：一行小字、点号分隔。上游账号标识不平铺——收在「上游账号」
+  // 这个词后面，悬停/聚焦才展开。claude / cursor 的连接流不存上游账号标识，整项不画。
+  const meta: { key: string; node: React.ReactNode }[] = [];
+  if (a.provider === "codex" || a.provider === "grok") {
+    meta.push({
+      key: "upstream",
+      node: (
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span tabIndex={0} className="cursor-help underline decoration-dotted underline-offset-2">
+                {t("上游账号")}
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" sideOffset={4}>
+              {a.account_id === "" ? t("未知") : <code className="font-mono">{a.account_id}</code>}
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      ),
+    });
+  }
   if (a.provider !== "cursor") {
     // Claude 这格读作「对成员可见的模型」：未设 = 不收窄 = 成员看得到全部。
     const visible = visibleModelSemantics(a.provider);
-    facts.push({
-      label: visible ? t("可见模型") : t("默认模型"),
-      value:
-        a.default_model === "" ? (
-          <Muted>{visible ? t("全部") : t("未设")}</Muted>
-        ) : (
-          <code className="font-mono" title={a.default_model}>
-            {a.default_model}
-          </code>
-        ),
+    meta.push({
+      key: "model",
+      node: (
+        <>
+          {visible ? t("可见模型") : t("默认模型")}{" "}
+          {a.default_model === "" ? (
+            <span className="text-foreground/70">{visible ? t("全部") : t("未设")}</span>
+          ) : (
+            <code className="text-foreground/80 font-mono" title={a.default_model}>
+              {a.default_model}
+            </code>
+          )}
+        </>
+      ),
     });
   }
   // Claude OAuth 展示续期时间，setup-token 展示固定凭据；Cursor 走常规时间戳，读作最近
   // 一次凭据自检/换发成功的时刻（自检 = 设备重新 exchange）。
-  facts.push({
-    label: a.provider === "claude" ? t("额度授权最近续期") : t("最近刷新"),
-    value:
-      a.provider === "claude" && !a.quota_oauth_configured ? (
-        <Muted>{t("固定凭据")}</Muted>
-      ) : a.last_refresh_at === null ? (
-        <Muted>{t("从未刷新")}</Muted>
-      ) : (
-        fmtTime(a.last_refresh_at)
-      ),
+  meta.push({
+    key: "refresh",
+    node: (
+      <>
+        {a.provider === "claude" ? t("额度授权最近续期") : t("最近刷新")}{" "}
+        <span className="text-foreground/70 tabular-nums">
+          {a.provider === "claude" && !a.quota_oauth_configured
+            ? t("固定凭据")
+            : a.last_refresh_at === null
+              ? t("从未刷新")
+              : fmtTime(a.last_refresh_at)}
+        </span>
+      </>
+    ),
   });
 
+  // Claude 两份凭据的状态与配置入口都收进「⋯」菜单：卡面只留状态灯和额度，
+  // 「配置 Claude 凭据」覆盖 setup-token 与 OAuth 两条流，所以它替代「重新连接」常驻菜单。
+  const info: RowInfo[] = [];
   if (a.provider === "claude") {
-    facts.push({ label: t("模型调用"), value: a.setup_token_configured ? expired ? t("setup-token 已失效") : t("setup-token 已配置") : t("待配置 setup-token") });
-    facts.push({ label: t("额度授权"), value: a.quota_oauth_configured ? a.quota_oauth_expired ? t("需重新授权") : t("已授权") : t("未授权") });
+    info.push({
+      label: t("模型调用"),
+      value: a.setup_token_configured ? (expired ? t("setup-token 已失效") : t("setup-token 已配置")) : t("待配置 setup-token"),
+    });
+    info.push({
+      label: t("额度授权"),
+      value: a.quota_oauth_configured ? (a.quota_oauth_expired ? t("需重新授权") : t("已授权")) : t("未授权"),
+    });
   }
 
   // 凭据过期时修复入口已经长在琥珀提示上，菜单里不再重复；也先不提供启停——先修凭据。
   // cursor 的「重新连接」打开粘贴 API Key 的连接流（它没有 login/start 可走）。
   const menu: RowAction[] = [];
-  if (!expired) menu.push({ label: reconnectVerb(a.provider), onSelect: onReconnect });
+  if (a.provider === "claude") menu.push({ label: t("配置 Claude 凭据"), onSelect: onReconnect });
+  else if (!expired) menu.push({ label: reconnectVerb(a.provider), onSelect: onReconnect });
   if (!expired && !disabled) menu.push({ label: t("停用订阅"), onSelect: () => void toggle() });
   menu.push({ label: t("删除订阅"), destructive: true, onSelect: () => void remove() });
 
@@ -736,17 +792,47 @@ function AgentCard({
     <article
       className={cn("bg-card overflow-hidden rounded-xl border shadow-xs", expired && "border-signal-alert/60")}
     >
-      <div className={cn("flex items-center gap-3 p-4", disabled && "opacity-60")}>
-        <AgentProviderIcon provider={a.provider} size="card" />
-        <div className="min-w-0 flex-1">
-          <h3 className="text-base leading-6 font-semibold">{api.agentProviderLabel(a.provider)}</h3>
-          {a.label === "" ? null : (
-            <p className="text-muted-foreground truncate text-xs leading-5" title={a.label}>
-              {a.label}
+      <div className="flex items-center gap-3 px-4 py-2.5">
+        <div className={cn("flex min-w-0 flex-1 items-center gap-3", disabled && "opacity-60")}>
+          <AgentProviderIcon provider={a.provider} size="list" />
+          <div className="min-w-0 flex-1">
+            <div className="flex min-w-0 items-center gap-2">
+              <h3 className="shrink-0 text-sm leading-5 font-semibold">{api.agentProviderLabel(a.provider)}</h3>
+              <span className="text-muted-foreground min-w-0 truncate text-xs leading-5" title={accountName(a)}>
+                {accountName(a)}
+              </span>
+              <StatusPill a={a} />
+            </div>
+            <p className="text-muted-foreground flex flex-wrap items-center gap-x-1.5 text-[11px] leading-4">
+              {meta.map((m, i) => (
+                <Fragment key={m.key}>
+                  {i > 0 ? <span aria-hidden="true">·</span> : null}
+                  <span className="min-w-0 truncate">{m.node}</span>
+                </Fragment>
+              ))}
             </p>
-          )}
+          </div>
         </div>
-        <StatusPill a={a} />
+        <div className="flex shrink-0 items-center gap-1.5">
+          {disabled ? (
+            <Button size="xs" variant="outline" onClick={() => void toggle()}>
+              {t("启用")}
+            </Button>
+          ) : null}
+          {a.provider === "claude" && !a.quota_oauth_configured ? null : (
+            <Button size="xs" variant="outline" disabled={checking} onClick={() => void selfCheck()}>
+              {checking ? t("自检中…") : a.provider === "claude" ? t("额度授权自检") : t("自检")}
+            </Button>
+          )}
+          <Button size="xs" variant="outline" onClick={onEdit}>
+            {t("编辑")}
+          </Button>
+          <RowActionsMenu
+            label={t("账号 {account} 的更多操作", { account: accountName(a) })}
+            actions={menu}
+            info={info}
+          />
+        </div>
       </div>
       {expired ? (
         <div className="bg-signal-alert/10 flex flex-wrap items-center gap-2 border-t px-4 py-2 text-xs">
@@ -757,33 +843,7 @@ function AgentCard({
           </Button>
         </div>
       ) : null}
-      <FactStrip facts={facts} dim={disabled} />
-      {a.provider === "claude" && <div className="flex items-center justify-between gap-2 border-t px-4 py-2 text-xs">
-        <span className="text-muted-foreground">{t("setup-token 用于调用，OAuth 授权用于查询额度")}</span>
-        <Button size="xs" variant="outline" onClick={onReconnect}>{t("配置 Claude 凭据")}</Button>
-      </div>}
       <AgentQuotaPanel account={a} reload={reload} />
-      <div className="flex items-center gap-1.5 border-t px-3 py-2">
-        {disabled ? (
-          <Button size="xs" variant="outline" onClick={() => void toggle()}>
-            {t("启用")}
-          </Button>
-        ) : null}
-        {a.provider === "claude" && !a.quota_oauth_configured ? null : (
-          <Button size="xs" variant="outline" disabled={checking} onClick={() => void selfCheck()}>
-            {checking ? t("自检中…") : a.provider === "claude" ? t("额度授权自检") : t("自检")}
-          </Button>
-        )}
-        <Button size="xs" variant="outline" onClick={onEdit}>
-          {t("编辑")}
-        </Button>
-        <div className="ml-auto">
-          <RowActionsMenu
-            label={t("订阅 {provider} 的更多操作", { provider: api.agentProviderLabel(a.provider) })}
-            actions={menu}
-          />
-        </div>
-      </div>
     </article>
   );
 }
@@ -795,17 +855,21 @@ function AgentCard({
 export function AgentAccountsColumn({
   accounts,
   reload,
+  tiled = false,
 }: {
   accounts: api.AgentAccount[];
   reload: () => void;
+  /** 右列「模型」收起时为 true：本列吃掉整宽，卡片按可用宽度两三列平铺，而不是一根长条。 */
+  tiled?: boolean;
 }): React.ReactElement {
-  // null = 关闭；有值 = 打开且预选这一家（槽位给自己那家，卡片「重新登录」也给自己那家）。
-  const [connecting, setConnecting] = useState<api.AgentProvider | null>(null);
+  // null = 关闭；有值 = 打开且预选这一家：列头「连接订阅」与槽位新建账号（target 为空），
+  // 卡片「重新登录 / 重新连接」覆盖自己那一行（target 为该账号）。
+  const [connecting, setConnecting] = useState<{ provider: api.AgentProvider; target: api.AgentAccount | null } | null>(null);
   const [editing, setEditing] = useState<api.AgentAccount | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
 
-  // 已连接的按 PROVIDERS 顺序排前面，没连的槽位跟在后面：整张卡片是「在用的」，
-  // 虚线槽位是「还能接的」，两段各自连续。
+  // 已有的账号按 PROVIDERS 顺序、同种订阅按 id 排前面，一个账号都没有的订阅种类以
+  // 虚线槽位跟在后面：整张卡片是「在用的」，虚线槽位是「还没接的」，两段各自连续。
   const connected = PROVIDERS.flatMap((p) => accounts.filter((a) => a.provider === p));
   const vacant = PROVIDERS.filter((p) => !accounts.some((a) => a.provider === p));
 
@@ -813,40 +877,49 @@ export function AgentAccountsColumn({
     <>
       <div className="flex flex-col gap-1 lg:col-start-1 lg:row-start-1">
         <div className="flex min-h-8 flex-wrap items-center gap-2">
-          <h2 className="text-base font-semibold">{t("订阅")}</h2>
-          <Badge variant="secondary" title={t("共 {n} 份订阅", { n: connected.length })}>
+          <h2 className="text-base font-semibold">{t("订阅账号")}</h2>
+          <Badge variant="secondary" title={t("共 {n} 个订阅账号", { n: connected.length })}>
             {connected.length}
           </Badge>
           <Button variant="ghost" size="xs" className="text-muted-foreground" onClick={() => setHelpOpen(true)}>
             <CircleHelp />
             {t("说明")}
           </Button>
+          <Button size="xs" variant="outline" className="ml-auto" onClick={() => setConnecting({ provider: DEFAULT_PROVIDER, target: null })}>
+            {t("连接订阅")}
+          </Button>
         </div>
         <p className="text-muted-foreground text-xs">
-          {t("四种订阅各接一份；凭据只封存在设备里，成员用自己的 API密钥经设备使用。")}
+          {t("每种订阅可录入多个账号；凭据只封存在设备里，成员的 API密钥各自固定使用其中一个账号（在「API密钥 → 可用订阅」里指定）。")}
         </p>
       </div>
-      <div className="flex flex-col gap-3 lg:col-start-1 lg:row-start-2">
+      <div
+        className={cn(
+          "lg:col-start-1 lg:row-start-2",
+          tiled ? "grid grid-cols-1 items-start gap-3 md:grid-cols-2 2xl:grid-cols-3" : "flex flex-col gap-3",
+        )}
+      >
         {connected.map((a) => (
           <AgentCard
             key={a.id}
             a={a}
             reload={reload}
             onEdit={() => setEditing(a)}
-            onReconnect={() => setConnecting(a.provider)}
+            onReconnect={() => setConnecting({ provider: a.provider, target: a })}
           />
         ))}
         {vacant.map((p) => (
-          <ProviderSlot key={p} provider={p} onConnect={() => setConnecting(p)} />
+          <ProviderSlot key={p} provider={p} onConnect={() => setConnecting({ provider: p, target: null })} />
         ))}
       </div>
 
       <SubscriptionHelpDialog open={helpOpen} onOpenChange={setHelpOpen} />
 
       <ConnectDialog
-        key={`connect-${connecting ?? "closed"}`}
+        key={`connect-${connecting === null ? "closed" : `${connecting.provider}-${connecting.target?.id ?? "new"}`}`}
         open={connecting !== null}
-        initialProvider={connecting ?? DEFAULT_PROVIDER}
+        initialProvider={connecting?.provider ?? DEFAULT_PROVIDER}
+        target={connecting?.target ?? null}
         onOpenChange={(o) => {
           if (!o) setConnecting(null);
         }}

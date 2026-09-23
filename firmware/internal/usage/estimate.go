@@ -18,7 +18,7 @@ package usage
 // token。比 count_tokens 兜底的纯 /4 对中文准得多——`heuristicInputTokens`
 // 的对外契约不动，这里是它的姊妹函数而不是替代品。
 //
-// 视频/图片**不估算**：那两条路的量是秒数与张数，猜不出来也不该猜。厂商
+// 视频/图像**不估算**：那两条路的量是秒数与张数，猜不出来也不该猜。厂商
 // usage 缺失或已过 7 天查询窗口时记 0 元 + estimated 标 + 告警（见 settle.go）。
 
 import (

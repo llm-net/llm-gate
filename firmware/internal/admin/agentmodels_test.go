@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/llm-net/llm-gate/firmware/internal/platformcatalog"
 	"github.com/llm-net/llm-gate/firmware/internal/store"
 )
 
@@ -54,15 +55,20 @@ func TestAgentModelsMaterializeFromCatalog(t *testing.T) {
 		byName[m.Name] = m
 	}
 	// 文本计价行：无来源、带 grok 注记（管理台据此归订阅接入标签页）。
-	for _, name := range []string{"grok-4.6", "grok-4.5"} {
+	grok, ok := platformcatalog.Builtin().Agent(store.AgentProviderGrok)
+	if !ok || len(grok.Models) == 0 {
+		t.Fatal("内嵌目录缺少 Grok 订阅文本模型")
+	}
+	for _, model := range grok.Models {
+		name := model.Name
 		m, ok := byName[name]
 		if !ok || m.Kind != "text" || m.Agent != store.AgentProviderGrok || len(m.Sources) != 0 {
 			t.Errorf("%s = %+v，期望 text / agent=grok / 无来源", name, m)
 		}
 	}
 	// 订阅带的只有文本行：agents 段只收文本模型，不会长出别的种类。
-	if len(byName) != 2 {
-		t.Errorf("Grok 订阅下的模型 = %+v，期望只有两条文本行", byName)
+	if len(byName) != len(grok.Models) {
+		t.Errorf("Grok 订阅下的模型 = %+v，期望 %d 条文本行", byName, len(grok.Models))
 	}
 	// 没连 Codex：它的模型一行都不该长出来。
 	for _, name := range []string{"gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"} {
@@ -94,14 +100,15 @@ func TestAgentModelsFollowSubscriptionLifecycle(t *testing.T) {
 		t.Fatalf("撤掉订阅后仍有模型行: %+v", got)
 	}
 
-	// 换 Codex：只长它自己的四条文本行，grok 的不该出现。
+	// 换 Codex：只长它自己那批文本行（数量随内嵌目录 agents 段），grok 的不该出现。
 	seedAgentSubscription(t, e, store.AgentProviderCodex)
 	byName := map[string]modelDTO{}
 	for _, m := range e.listModels(root) {
 		byName[m.Name] = m
 	}
-	if len(byName) != 4 {
-		t.Fatalf("Codex 订阅下的模型 = %+v，期望四条文本行", byName)
+	codex, _ := platformcatalog.Builtin().Agent(store.AgentProviderCodex)
+	if len(byName) != len(codex.Models) || len(byName) < 4 {
+		t.Fatalf("Codex 订阅下的模型 = %+v，期望 %d 条文本行", byName, len(codex.Models))
 	}
 	for _, name := range []string{"gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"} {
 		m, ok := byName[name]
@@ -204,7 +211,7 @@ func TestAgentSubscriptionModelsMatchAdminView(t *testing.T) {
 	e := newEnv(t)
 	root := e.rootSession()
 	seedAgentSubscription(t, e, store.AgentProviderGrok)
-	// 一条管理员自己的图片模型：非 text 行不该进订阅模型读数。
+	// 一条管理员自己的图像模型：非 text 行不该进订阅模型读数。
 	e.createModelKind(root, "my-free-image", "image")
 
 	want := map[string]string{}
@@ -233,7 +240,7 @@ func TestAgentSubscriptionModelsMatchAdminView(t *testing.T) {
 			t.Errorf("%s: 数据面 provider = %q，管理台 = %q", name, got[name], provider)
 		}
 	}
-	// 非 text 行不进这条读数：/agents/v1/responses 是文本入口，把图片模型名
+	// 非 text 行不进这条读数：/agents/v1/responses 是文本入口，把图像模型名
 	// 列进 codex 的选择器只会让人选中一个调不通的名字。
 	for _, name := range media {
 		if _, ok := got[name]; ok {

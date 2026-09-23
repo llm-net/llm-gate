@@ -1,11 +1,17 @@
 package admin
 
 // API密钥 管理端点：GET/POST /admin/v1/keys、PATCH/DELETE /admin/v1/keys/{id}、
-// POST /admin/v1/keys/{id}/plaintext、POST /admin/v1/keys/{id}/metered-allowance。
+// POST /admin/v1/keys/{id}/archive、POST /admin/v1/keys/{id}/plaintext、
+// POST /admin/v1/keys/{id}/metered-allowance。
 //
 // 设备只有一个管理员，密钥因此没有「属主」这一维——一台设备一串密钥，签发、
-// 复制、改标签、限额、启停、删除都在同一组端点上（0019 之前分成「管理端」与「本人
-// 自助」两组，那个区分随用户概念一起退场）。
+// 复制、改标签、限额、启停、归档、删除都在同一组端点上（0019 之前分成「管理端」与
+// 「本人自助」两组，那个区分随用户概念一起退场）。
+//
+// 退场分三档：禁用可逆（挡数据面，凭据仍在）；归档不可逆（凭据作废，行与标签
+// 留给用量账本、AIGC 任务与媒体生成里的 key_id 对名）；物理删除只给**没有使用
+// 记录**的 Key（有记录答 409 key_has_history，出路是归档）。列表缺省不列已归档，
+// `?include_archived=1` 才带。
 //
 // 明文纪律（2026-08-12 产品决定放宽，AGENTS.md 同步开例外）：明文以设备密钥
 // 封存入库（store 层，AAD 钉摘要），只经两个响应外流——创建响应与复制端点；
@@ -35,6 +41,8 @@ const (
 	EventKeyDisable = "key.disable"
 	EventKeyEnable  = "key.enable"
 	EventKeyDelete  = "key.delete"
+	// EventKeyArchive 记归档：凭据作废、行保留（detail 同规，只有 label 与前缀）。
+	EventKeyArchive = "key.archive"
 	// EventKeyReveal 记经复制端点解封明文（凭据被读取要留痕；detail 与其他
 	// 事件同规——只有 label 与前缀，永不含明文）。
 	EventKeyReveal = "key.reveal"
@@ -122,6 +130,10 @@ type keyJSON struct {
 	MeteredAllowanceMicro int64     `json:"metered_allowance_micro"`
 	CreatedAt             time.Time `json:"created_at"`
 	LastUsedAt            time.Time `json:"last_used_at,omitzero"`
+	// Archived 表示这把 Key 已归档（凭据作废、不可逆），ArchivedAt 是归档时刻；
+	// 在用的行 archived=false 且 archived_at 缺席。
+	Archived   bool      `json:"archived"`
+	ArchivedAt time.Time `json:"archived_at,omitzero"`
 	// Spend 是这把密钥当前自然日/周/月的已消费额（整数微元）。它与同一结构里
 	// 的 budget_*_micro 成对读：一个是花了多少，一个是能花多少——密钥列表不摆
 	// 已消费额，等于让管理员盯着一排永远不动的上限。
@@ -158,6 +170,8 @@ func toKeyJSON(k *store.APIKey) keyJSON {
 		MeteredAllowanceMicro: k.MeteredAllowanceMicro,
 		CreatedAt:             k.CreatedAt,
 		LastUsedAt:            k.LastUsedAt,
+		Archived:              k.Archived(),
+		ArchivedAt:            k.ArchivedAt,
 	}
 }
 
@@ -217,9 +231,18 @@ func (s *Server) issueKey(ctx context.Context, label, ip string) (*store.APIKey,
 	return k, plaintext, nil
 }
 
-// handleListKeys 列出全部 Key，永不含明文与摘要。
+// handleListKeys 列出在用的 Key，永不含明文与摘要；`?include_archived=1` 连
+// 已归档的一起列（给管理页的「显示已归档」用）。
 func (s *Server) handleListKeys(w http.ResponseWriter, r *http.Request) {
-	keys, err := s.st.ListAPIKeys(r.Context())
+	var (
+		keys []store.APIKey
+		err  error
+	)
+	if v := r.URL.Query().Get("include_archived"); v == "1" || v == "true" {
+		keys, err = s.st.ListAllAPIKeys(r.Context())
+	} else {
+		keys, err = s.st.ListAPIKeys(r.Context())
+	}
 	if err != nil {
 		s.internalError(w, r, err)
 		return
@@ -254,9 +277,11 @@ func (s *Server) handleCreateKey(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, keyCreatedResponse{Key: toKeyJSON(k), Plaintext: plaintext})
 }
 
-// handleDeleteKey 删除一把 Key（不可撤销：封存明文随行删除，这把 Key 再无
-// 恢复可能，误删只能重签一把新的）。删除后摘要点查落空，数据面下一个请求
-// 即 401。
+// handleDeleteKey 物理删除一把**没有使用记录**的 Key（不可撤销：封存明文随行
+// 删除，这把 Key 再无恢复可能，误删只能重签一把新的）。删除后摘要点查落空，
+// 数据面下一个请求即 401。账本 / AIGC 任务 / 媒体生成里有它的行则答 409
+// key_has_history 且分文不动——那种 Key 该归档。判定前先让计量器把内存里的
+// 增量落库，刚用过几分钟的 Key 不会因为账还没冲刷而被误判成没用过。
 func (s *Server) handleDeleteKey(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(r)
 	if !ok {
@@ -268,7 +293,16 @@ func (s *Server) handleDeleteKey(w http.ResponseWriter, r *http.Request) {
 		s.writeKeyError(w, r, err)
 		return
 	}
+	if flusher, ok := s.usage.(interface{ Flush(context.Context) }); ok {
+		flusher.Flush(r.Context())
+	}
 	if err := s.st.DeleteAPIKey(r.Context(), k.ID); err != nil {
+		// 已归档的 Key 有使用记录就是它的终态：再引导去归档没有意义，说清楚即可。
+		if k.Archived() && errors.Is(err, store.ErrKeyHasHistory) {
+			writeError(w, http.StatusConflict, "key_has_history",
+				"这把 Key 已归档且有使用记录，只保留在用量历史里，不能删除")
+			return
+		}
 		s.writeKeyError(w, r, err)
 		return
 	}
@@ -279,6 +313,63 @@ func (s *Server) handleDeleteKey(w http.ResponseWriter, r *http.Request) {
 		RemoteIP: remoteIP(r),
 	})
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleArchiveKey 归档一把 Key（不可逆）：摘要换成不可命中的哨兵、封存明文清空、
+// 禁用位置 1，数据面下一个请求即 401、复制端点再也解不出明文；行、标签、展示串
+// 与历史账全部保留，用量页仍能把它的 key_id 对回名字。已归档的重复归档幂等答
+// 200 当前行、不写审计。
+func (s *Server) handleArchiveKey(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(r)
+	if !ok {
+		writeError(w, http.StatusNotFound, "not_found", "Key 不存在")
+		return
+	}
+	k, err := s.st.GetAPIKeyByID(r.Context(), id)
+	if err != nil {
+		s.writeKeyError(w, r, err)
+		return
+	}
+	if k.Archived() {
+		writeJSON(w, http.StatusOK, keyResponse{Key: s.withSpend(toKeyJSON(k))})
+		return
+	}
+	if err := s.st.ArchiveAPIKey(r.Context(), k.ID); err != nil {
+		s.writeKeyError(w, r, err)
+		return
+	}
+	s.audit(r.Context(), store.AuditEvent{
+		Event:    EventKeyArchive,
+		Entity:   entityKey(k.ID),
+		Detail:   fmt.Sprintf("label=%s display_prefix=%s", k.Label, k.DisplayPrefix),
+		RemoteIP: remoteIP(r),
+	})
+	k, err = s.st.GetAPIKeyByID(r.Context(), id)
+	if err != nil {
+		s.writeKeyError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, keyResponse{Key: s.withSpend(toKeyJSON(k))})
+}
+
+// keyForWrite 取一把要改凭据或准入配置的 Key：不存在 404，已归档 409
+// key_archived（响应已写出，返回 false）。改标签不走这里——归档后的标签仍是账本
+// 上的名字，允许改。
+func (s *Server) keyForWrite(w http.ResponseWriter, r *http.Request, id int64) (*store.APIKey, bool) {
+	k, err := s.st.GetAPIKeyByID(r.Context(), id)
+	if err != nil {
+		s.writeKeyError(w, r, err)
+		return nil, false
+	}
+	if k.Archived() {
+		writeKeyArchived(w)
+		return nil, false
+	}
+	return k, true
+}
+
+func writeKeyArchived(w http.ResponseWriter) {
+	writeError(w, http.StatusConflict, "key_archived", "这把 Key 已归档，凭据已作废，只能改标签")
 }
 
 // handleRevealKey 解封 Key 明文（自助复制；2026-08-12 产品决定，明文外流仅有
@@ -292,9 +383,8 @@ func (s *Server) handleRevealKey(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "Key 不存在")
 		return
 	}
-	k, err := s.st.GetAPIKeyByID(r.Context(), id)
-	if err != nil {
-		s.writeKeyError(w, r, err)
+	k, ok := s.keyForWrite(w, r, id)
+	if !ok {
 		return
 	}
 	plaintext, err := s.st.GetAPIKeyPlaintext(r.Context(), id)
@@ -326,6 +416,15 @@ func (s *Server) handleRevealKey(w http.ResponseWriter, r *http.Request) {
 func (s *Server) writeKeyError(w http.ResponseWriter, r *http.Request, err error) {
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "not_found", "Key 不存在")
+		return
+	}
+	if errors.Is(err, store.ErrKeyHasHistory) {
+		writeError(w, http.StatusConflict, "key_has_history",
+			"这把 Key 已有使用记录，不能删除；请改用归档：凭据作废，用量历史与标签保留")
+		return
+	}
+	if errors.Is(err, store.ErrKeyArchived) {
+		writeKeyArchived(w)
 		return
 	}
 	s.internalError(w, r, err)
@@ -385,6 +484,11 @@ func (s *Server) handlePatchKey(w http.ResponseWriter, r *http.Request) {
 	target, err := s.st.GetAPIKeyByID(r.Context(), id)
 	if err != nil {
 		s.writeKeyError(w, r, err)
+		return
+	}
+	// 已归档的 Key 只剩标签可改：启停与限额都是准入配置，凭据已作废就没有准入。
+	if target.Archived() && (req.Disabled != nil || dayGiven || weekGiven || monthGiven || rpmGiven) {
+		writeKeyArchived(w)
 		return
 	}
 	// 展示标签：空串 = 清除；幂等无变更不写库、不写审计。
@@ -466,9 +570,8 @@ func (s *Server) handleAdjustKeyMeteredAllowance(w http.ResponseWriter, r *http.
 		writeError(w, http.StatusBadRequest, "invalid_delta", err.Error())
 		return
 	}
-	target, err := s.st.GetAPIKeyByID(r.Context(), id)
-	if err != nil {
-		s.writeKeyError(w, r, err)
+	target, ok := s.keyForWrite(w, r, id)
+	if !ok {
 		return
 	}
 	remaining, err := s.st.AdjustAPIKeyMeteredAllowance(r.Context(), id, delta)

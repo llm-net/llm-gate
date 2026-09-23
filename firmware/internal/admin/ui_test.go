@@ -162,6 +162,7 @@ func TestToolSpecificInstallRoutesAbsent(t *testing.T) {
 		"/claude-helper/install.sh", "/claude-helper/install.ps1",
 		"/opencode-helper/install.sh", "/opencode-helper/install.ps1",
 		"/cursor-helper/install.sh", "/cursor-helper/install.ps1",
+		"/mcode-helper/install.sh", "/mcode-helper/install.ps1",
 	} {
 		resp := e.do(http.MethodGet, path, "", "")
 		wantStatus(t, resp, http.StatusNotFound)
@@ -261,6 +262,25 @@ func TestClaudeHelperCLIPublic(t *testing.T) {
 	}
 
 	resp = e.do(http.MethodGet, "/claude-helper/cli/2.1.241/linux-x64/random", "", "")
+	wantStatus(t, resp, http.StatusNotFound)
+}
+
+func TestMCodeHelperCLIPublic(t *testing.T) {
+	e := newEnv(t)
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/install.sh" || r.Header.Get("Authorization") != "" {
+			t.Error("unexpected bootstrap request")
+		}
+		w.Write([]byte("# fake installer\n"))
+	}))
+	t.Cleanup(up.Close)
+	e.srv.SetMCodeCLIArtifactBase(up.URL)
+	resp := e.do(http.MethodGet, "/mcode-helper/cli/install.sh", "", "")
+	wantStatus(t, resp, http.StatusOK)
+	if readAll(t, resp) != "# fake installer\n" {
+		t.Fatal("installer bytes changed")
+	}
+	resp = e.do(http.MethodGet, "/mcode-helper/cli/arbitrary.tgz", "", "")
 	wantStatus(t, resp, http.StatusNotFound)
 }
 

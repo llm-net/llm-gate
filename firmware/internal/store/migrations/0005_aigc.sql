@@ -1,4 +1,4 @@
--- 0005_aigc: 视频/图片转发面的存储基座（iteration-8 Phase 1）。三件事：
+-- 0005_aigc: 视频/图像转发面的存储基座（iteration-8 Phase 1）。三件事：
 -- ① upstreams.type 的 CHECK 扩入 'minimax'（重建路径）；② models 加 kind 列；
 -- ③ 新建 aigc_tasks 异步任务表。时间戳惯例同 0001（UTC 固定宽度毫秒文本）。
 --

@@ -51,6 +51,7 @@ import (
 	"github.com/llm-net/llm-gate/firmware/internal/agentauth"
 	"github.com/llm-net/llm-gate/firmware/internal/cursorauth"
 	"github.com/llm-net/llm-gate/firmware/internal/cursorwire"
+	"github.com/llm-net/llm-gate/firmware/internal/devtoolpolicy"
 	"github.com/llm-net/llm-gate/firmware/internal/store"
 	"github.com/llm-net/llm-gate/firmware/internal/usage"
 )
@@ -119,7 +120,7 @@ func (sess *cursorSession) invalidate(rejected string) {
 func (s *Server) SetCursorEndpoints(endpoint string) {
 	s.cursorMu.Lock()
 	s.cursorBackend = strings.TrimRight(strings.TrimSpace(endpoint), "/")
-	s.cursorSess = nil
+	s.cursorSessions = nil
 	s.cursorMu.Unlock()
 }
 
@@ -314,8 +315,9 @@ func verifyCursorClientToken(input string, signature, signingKey []byte) bool {
 }
 
 // withCursorAuth 同时接受安装命令注入的原客户端 Key 与 exchange 签发的本地
-// JWT。JWT 先按其受签名保护的 Key 摘要回查原条目，再用当前 Cursor Dashboard
-// API Key 验签；因此客户端 Key 被禁用/删除或订阅 Key 被轮换都会即时拒绝。
+// JWT。JWT 先按其受签名保护的 Key 摘要回查原条目，再用**这把 Key 钉死的**
+// Cursor 账号的 Dashboard API Key 验签；因此客户端 Key 被禁用/删除、订阅 Key
+// 被轮换或管理员给这把 Key 换了账号都会即时拒绝。
 func (s *Server) withCursorAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token := clientKey(r)
@@ -325,22 +327,9 @@ func (s *Server) withCursorAuth(next http.Handler) http.Handler {
 			return
 		}
 		ident, ok := s.keys.Authorize(r.Context(), token)
+		var policy *devtoolpolicy.Snapshot
 		if !ok {
-			claims, input, signature, parsed := parseCursorClientToken(token)
-			if parsed {
-				if candidate, found := s.keys.AuthorizeDigest(r.Context(), claims.KeyDigest); found {
-					if _, blob, err := s.store.GetAgentCredential(r.Context(), store.AgentProviderCursor); err == nil {
-						if credential, err := cursorauth.Parse(blob); err == nil &&
-							credential.Token() != "" {
-							if deviceKey, err := s.cursorClientSigningKey(); err == nil &&
-								verifyCursorClientToken(input, signature,
-									cursorClientMACKey(deviceKey, credential.Token())) {
-								ident, ok = candidate, true
-							}
-						}
-					}
-				}
-			}
+			ident, policy, ok = s.cursorClientTokenIdentity(r.Context(), token)
 		}
 		if !ok {
 			connectErrorStyle(w, http.StatusUnauthorized, "invalid_api_key", "Invalid API key provided.")
@@ -350,8 +339,38 @@ func (s *Server) withCursorAuth(next http.Handler) http.Handler {
 		info.keyID = ident.KeyID
 		info.bill.keyDisplay = ident.KeyDisplay
 		info.limits = ident.KeyAuth
+		// 验签时已经算过这把 Key 的策略快照，交给后面的订阅闸复用。
+		if policy != nil {
+			info.devTools = policy
+		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// cursorClientTokenIdentity 校验 exchange 签发的本地 JWT：按 Key 摘要回查条目，
+// 取这把 Key 钉死的 Cursor 账号，用它当前的 Dashboard API Key 验 HMAC。
+func (s *Server) cursorClientTokenIdentity(ctx context.Context, token string) (ClientIdentity, *devtoolpolicy.Snapshot, bool) {
+	claims, input, signature, parsed := parseCursorClientToken(token)
+	if !parsed {
+		return ClientIdentity{}, nil, false
+	}
+	candidate, found := s.keys.AuthorizeDigest(ctx, claims.KeyDigest)
+	if !found {
+		return ClientIdentity{}, nil, false
+	}
+	_, blob, policy, err := s.pinnedAgentCredential(ctx, candidate.KeyID, store.AgentProviderCursor)
+	if err != nil {
+		return ClientIdentity{}, nil, false
+	}
+	credential, err := cursorauth.Parse(blob)
+	if err != nil || credential.Token() == "" {
+		return ClientIdentity{}, nil, false
+	}
+	deviceKey, err := s.cursorClientSigningKey()
+	if err != nil || !verifyCursorClientToken(input, signature, cursorClientMACKey(deviceKey, credential.Token())) {
+		return ClientIdentity{}, nil, false
+	}
+	return candidate, policy, true
 }
 
 // handleCursorRPC 是 /agents/cursor/ 子树的整面入口（已过认证中间件与
@@ -393,7 +412,7 @@ func (s *Server) handleCursorRPC(w http.ResponseWriter, r *http.Request) {
 	// 半双工——真机钉死的 cursor-agent（connect-es/undici）走纯 HTTP/1.1，
 	// 请求侧必然先发完再收；若将来某个客户端真以 h2 全双工打 bidi RPC，要在
 	// 「流式转发」与「401 重试」之间重新取舍。上限口径同文本入口：刻意不预裁
-	// （entry.go 的 videoSubmitBodyLimit 注释——只有视频/图片面挂体积闸）。
+	// （entry.go 的 videoSubmitBodyLimit 注释——只有视频/图像面挂体积闸）。
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		connectErrorStyle(w, http.StatusBadRequest, "invalid_request_body",
@@ -456,17 +475,29 @@ func (s *Server) forwardCursorAgentRPC(w http.ResponseWriter, r *http.Request,
 	s.passthroughCursorResponse(w, r, resp, rpc)
 }
 
-// cursorCredential 取「已连接且可用的 Cursor 订阅」的解封 API Key：每请求点查
-// agent_accounts（同 Key 鉴权的无缓存口径），按行状态分岔出机读原因。返回
-// ok=false 时错误响应已写出。整体仿 claudeCredential。
+// cursorCredential 取这把 Key 钉死的 Cursor 订阅账号的解封 API Key：先从策略
+// 快照拿账号行 id，再每请求点查 agent_accounts（同 Key 鉴权的无缓存口径），按行
+// 状态分岔出机读原因。返回 ok=false 时错误响应已写出。整体仿 claudeCredential。
 func (s *Server) cursorCredential(w http.ResponseWriter, r *http.Request) (*store.AgentAccount, string, bool) {
 	info := infoFrom(r.Context())
 	if s.store == nil {
 		connectErrorStyle(w, http.StatusInternalServerError, "internal_error", internalErrorMessage)
 		return nil, "", false
 	}
-	acct, blob, err := s.store.GetAgentCredential(r.Context(), store.AgentProviderCursor)
+	snapshot, ok := s.devToolSnapshot(w, r)
+	if !ok {
+		return nil, "", false
+	}
+	accountID := snapshot.Subscription(store.AgentProviderCursor).AccountID
+	if accountID == 0 {
+		writeCursorNotConfigured(w)
+		return nil, "", false
+	}
+	acct, blob, err := s.store.GetAgentCredential(r.Context(), accountID)
 	switch {
+	case err == nil && acct.Provider != store.AgentProviderCursor:
+		writeCursorNotConfigured(w)
+		return nil, "", false
 	case err == nil:
 	case errors.Is(err, store.ErrNotFound):
 		writeCursorNotConfigured(w)
@@ -516,8 +547,8 @@ func (s *Server) cursorCredential(w http.ResponseWriter, r *http.Request) (*stor
 func (s *Server) cursorSessionFor(acct *store.AgentAccount, apiKey string) *cursorSession {
 	s.cursorMu.Lock()
 	defer s.cursorMu.Unlock()
-	sess := s.cursorSess
-	if sess != nil && sess.rowID == acct.ID {
+	sess := s.cursorSessions[acct.ID]
+	if sess != nil {
 		if sess.apiKey == apiKey {
 			if acct.UpdatedAt.After(sess.updatedAt) {
 				sess.updatedAt = acct.UpdatedAt
@@ -529,7 +560,10 @@ func (s *Server) cursorSessionFor(acct *store.AgentAccount, apiKey string) *curs
 		}
 	}
 	sess = &cursorSession{rowID: acct.ID, updatedAt: acct.UpdatedAt, apiKey: apiKey}
-	s.cursorSess = sess
+	if s.cursorSessions == nil {
+		s.cursorSessions = make(map[int64]*cursorSession, 2)
+	}
+	s.cursorSessions[acct.ID] = sess
 	return sess
 }
 
@@ -790,15 +824,11 @@ func (s *Server) markCursorAuthExpired(ctx context.Context, accountID int64) {
 }
 
 // refreshCursorAgent 是管理面「自检」在 cursor 侧的落点（RefreshAgent 分流至
-// 此）：用库里那把 API Key 强制重走一次 exchange——管理员要的答复就是「这份
-// 订阅现在还能不能换出 token」，只有真去换一次才答得了。成功盖 last_refresh_at
-// 并刷新缓存；被上游确定性拒绝落 auth_expired（错误按 agentauth.ErrAuthExpired
-// 一族返回，管理面据此显「需重新连接」）。
-func (s *Server) refreshCursorAgent(ctx context.Context) error {
-	acct, blob, err := s.store.GetAgentCredential(ctx, store.AgentProviderCursor)
-	if err != nil {
-		return err
-	}
+// 此，acct/blob 是它刚点查解封的那一行）：用库里那把 API Key 强制重走一次
+// exchange——管理员要的答复就是「这份订阅现在还能不能换出 token」，只有真去换
+// 一次才答得了。成功盖 last_refresh_at 并刷新缓存；被上游确定性拒绝落
+// auth_expired（错误按 agentauth.ErrAuthExpired 一族返回，管理面据此显「需重新连接」）。
+func (s *Server) refreshCursorAgent(ctx context.Context, acct *store.AgentAccount, blob string) error {
 	cred, err := cursorauth.Parse(blob)
 	if err != nil {
 		// 同数据面处置（cursorCredential）：形态不合只有重新连接一条路，报成

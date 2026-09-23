@@ -1,5 +1,5 @@
 -- 0016_grok_agent: upstreams.type 的 CHECK 扩入 'grok_agent'——Grok Build 订阅
--- 承载的 xAI Imagine 图片/视频两族（xai_image/xai_video）的上游类型
+-- 承载的 xAI Imagine 图像/视频两族（xai_image/xai_video）的上游类型
 -- （2026-08-13 产品决定：订阅侧出图/出视频进模型目录，经「订阅接入 → 添加
 -- 模型」管理；契约见 docs/firmware-agents-imagine.md）。该类型的行
 -- api_key_sealed 恒空——数据面凭证从 agent_accounts 的 grok 行取订阅令牌，

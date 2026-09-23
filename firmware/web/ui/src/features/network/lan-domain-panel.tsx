@@ -68,7 +68,7 @@ function caLabel(ca: string | undefined): string {
 }
 
 function looksLikeLabel(s: string): boolean {
-  return /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(s) && s.length >= 5 && s.length <= 32 && !s.includes("--");
+  return /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(s) && s.length >= 6 && s.length <= 32 && !s.includes("--");
 }
 
 // looksLikeHostname 是自有域名的界面预检（服务端与官网为准）：至少两级，各级字母数字连字符。
@@ -611,7 +611,7 @@ function ClaimForm({ status, onDone }: { status: api.LanDomainStatus; onDone: ()
     ev.preventDefault();
     const value = label.trim().toLowerCase();
     if (!looksLikeLabel(value)) {
-      setError(t("域名前缀须为 5–32 位小写字母、数字或连字符，不能以连字符开头结尾"));
+      setError(t("域名前缀须为 6–32 位小写字母、数字或连字符，不能以连字符开头结尾"));
       return;
     }
     if (ip === "") {
@@ -639,7 +639,7 @@ function ClaimForm({ status, onDone }: { status: api.LanDomainStatus; onDone: ()
         <div className="flex items-center gap-1.5">
           <Label htmlFor="lan-domain-label">{t("域名前缀")}</Label>
           <HelpTip label={t("域名前缀说明")}>
-            {t("5–32 位小写字母、数字或连字符。保留名称（www、api、admin 等）与已被占用的前缀会被官网拒绝。")}
+            {t("6–32 位小写字母、数字或连字符。保留名称（www、api、admin 等）与已被占用的前缀会被官网拒绝。")}
           </HelpTip>
         </div>
         <div className="flex items-center gap-2">
@@ -648,7 +648,7 @@ function ClaimForm({ status, onDone }: { status: api.LanDomainStatus; onDone: ()
             value={label}
             autoComplete="off"
             spellCheck={false}
-            placeholder="studio"
+            placeholder="studio-01"
             className="max-w-56"
             onChange={(e) => setLabel(e.target.value)}
           />
@@ -996,7 +996,18 @@ function OwnDomainCard({ status, reload }: { status: api.LanDomainStatus; reload
             <tbody>
               {records.map((rec) => (
                 <tr key={rec.type + rec.name} className="border-b last:border-0">
-                  <td className="px-3 py-1.5 font-mono">{rec.type}</td>
+                  <td className="px-3 py-1.5 font-mono">
+                    <span className="flex items-center gap-1.5">
+                      {rec.type}
+                      {rec.optional && (
+                        <span title={t("只在域名（或其上级）已有 CAA 记录时才需要添加；没有 CAA 记录时任何证书颁发机构都可签发。")}>
+                          <Badge variant="outline" className="font-sans">
+                            {t("可选")}
+                          </Badge>
+                        </span>
+                      )}
+                    </span>
+                  </td>
                   <td className="px-3 py-1.5">
                     <span className="flex items-center gap-1">
                       <code className="font-mono">{rec.name}</code>

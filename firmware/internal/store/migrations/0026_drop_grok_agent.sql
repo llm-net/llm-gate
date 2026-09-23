@@ -1,4 +1,4 @@
--- 0026_drop_grok_agent: 清掉 Grok Build 订阅承载的 xAI Imagine 图片/视频行。
+-- 0026_drop_grok_agent: 清掉 Grok Build 订阅承载的 xAI Imagine 图像/视频行。
 -- 设备不转发订阅侧出图/出视频：没有 /agents/v1/images|videos/* 路由，也没有
 -- xai_image/xai_video 两个接口族与 grok_agent 上游类型；模型目录数据的 agents
 -- 段只收文本模型。旧固件按目录数据建过的那组行——xai 两族的模型行、挂在

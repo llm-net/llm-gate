@@ -8,7 +8,7 @@
 // 操作按钮保持可用。目录价明确展示计价单位，未定价与显式 0 元分开表达。
 
 import { Boxes, Plus } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { PlatformIcon } from "@/components/brand-icon";
@@ -39,9 +39,10 @@ import { t } from "@/lib/i18n";
 
 import { CatalogSearch } from "./card-parts";
 import { agentPricingModel } from "./domain";
+import { SystemOneTestQuestions } from "./systemone-test-questions";
 import { RowActionsMenu } from "./row-actions";
 
-const modelKinds: api.ModelKind[] = ["text", "video", "image"];
+const modelKinds: api.ModelKind[] = ["text", "video", "image", "systemone"];
 
 // 取一个 AIGC 模型的协议面：以**建模时的声明**为准。空串 = 存量未声明的行，回退按
 // 第一条能服务的来源推（全部来源必同族，服务端守卫保证）；连来源也没有时返回 null。
@@ -66,6 +67,8 @@ function entryPaths(m: api.Model): string[] {
 function entryNote(m: api.Model): string | null {
   if (m.kind === "text") return null;
   switch (aigcFamilyOf(m)) {
+    case "systemone":
+      return t("System One 协议面：SDK 的 base_url 填设备地址加 /typesafe；同步返回语义判断，保留后端模型名与概率。");
     case "minimax_video":
       return t("MiniMax 视频协议面：把 SDK 的 base_url 换成「设备地址 + /minimax」，官方接口原样转发；提交拿厂商任务 ID，查询/取消按官方路径");
     case "ark_video":
@@ -79,6 +82,8 @@ function entryNote(m: api.Model): string | null {
 
 function noEntryTitle(kind: api.ModelKind): string {
   switch (kind) {
+    case "systemone":
+      return t("该上游不服务 System One 协议面");
     case "text":
       return t("该上游当前不服务任何协议面（mock 上游需配置 base_url）");
     case "video":
@@ -88,8 +93,12 @@ function noEntryTitle(kind: api.ModelKind): string {
   }
 }
 
+function canTestModel(kind: api.ModelKind): boolean {
+  return kind === "text" || kind === "systemone";
+}
+
 const noTestTitle = t(
-  "视频/图像模型的上游不支持连通性测试——对这类入口的最小探测就是真实提交一次付费生成任务",
+  "此模型的来源不支持连通性测试，请通过对应协议面提交请求验证",
 );
 
 function pricingOf(m: api.Model): api.Pricing {
@@ -561,22 +570,33 @@ function TestDialog({
   const [running, setRunning] = useState(false);
   const [started, setStarted] = useState(false);
 
+  const generation = useRef(0);
+  const [activeSource, setActiveSource] = useState<number | null>(null);
+  useEffect(() => () => { generation.current++; }, []);
+
   function run(): void {
     if (target === null) return;
+    const current = ++generation.current;
+    const sources = target.sources;
     setRunning(true);
     setStarted(true);
-    const next = new Map<number, api.SourceTestReport | string>();
-    void Promise.all(
-      target.sources.map((s) =>
-        api.testModelSource(s.id).then(
-          (r) => next.set(s.id, r),
-          (err: unknown) => next.set(s.id, api.errorMessage(err)),
-        ),
-      ),
-    ).then(() => {
-      setReports(next);
+    setReports(new Map());
+    void (async () => {
+      const next = new Map<number, api.SourceTestReport | string>();
+      for (const source of sources) {
+        if (current !== generation.current) return;
+        setActiveSource(source.id);
+        try {
+          next.set(source.id, await api.testModelSource(source.id));
+        } catch (err) {
+          next.set(source.id, api.errorMessage(err));
+        }
+        if (current !== generation.current) return;
+        setReports(new Map(next));
+      }
+      setActiveSource(null);
       setRunning(false);
-    });
+    })();
   }
 
   return (
@@ -592,7 +612,9 @@ function TestDialog({
             <DialogTitle>{t("测试上游 — {name}", { name: target.model.name })}</DialogTitle>
           </DialogHeader>
           <p className="text-muted-foreground text-xs">
-            {t("按来源的协议面测试上游连通性。OpenAI Chat 与 OpenAI Responses 共用一次 Chat 上游探测；真实调用可能产生少量费用。")}
+            {target.model.kind === "systemone"
+              ? t("每个来源只发一次 System One 请求，同时测试 Choice、Noul、Score。使用固定退款场景，校验三个答案的协议结构并展示结果；真实调用可能产生少量费用。")
+              : t("按来源逐个测试协议面。由 Chat 承载的 Responses 共用 Chat 探测，原生 Responses 单独测试；真实调用可能产生少量费用。")}
           </p>
           {target.sources.map((s) => {
             const rep = reports.get(s.id);
@@ -606,22 +628,25 @@ function TestDialog({
                   </span>
                 </div>
                 {rep === undefined ? (
-                  <span className="text-muted-foreground text-xs">{running ? t("测试中…") : t("尚未测试")}</span>
+                  <span className="text-muted-foreground text-xs">{running ? activeSource === s.id ? t("测试中…") : t("等待测试") : t("尚未测试")}</span>
                 ) : typeof rep === "string" ? (
                   <span className="text-destructive text-xs">{rep}</span>
                 ) : rep.results.length === 0 ? (
                   <span className="text-muted-foreground text-xs">{t("该来源当前不服务任何协议面。")}</span>
                 ) : (
                   rep.results.map((r) => (
-                    <div key={r.protocol} className="flex flex-wrap items-center gap-2 text-xs">
-                      <Badge variant="outline" className={r.ok ? "text-signal-ok" : "text-signal-alert"}>
-                        {r.ok ? t("通过") : t("失败")}
-                      </Badge>
-                      <span>{api.protocolLabel(r.protocol)}</span>
-                      <span className="text-muted-foreground font-mono">
-                        {`HTTP ${r.status} · ${fmtLatency(r.latency_ms)}`}
-                      </span>
-                      {r.message === "" ? null : <span className="text-muted-foreground">{r.message}</span>}
+                    <div key={r.protocol} className="flex flex-col gap-2">
+                      <div className="flex flex-wrap items-center gap-2 text-xs">
+                        <Badge variant="outline" className={r.ok ? "text-signal-ok" : "text-signal-alert"}>
+                          {r.ok ? t("通过") : t("失败")}
+                        </Badge>
+                        <span>{api.protocolLabel(r.protocol)}</span>
+                        <span className="text-muted-foreground font-mono">
+                          {`HTTP ${r.status} · ${fmtLatency(r.latency_ms)}`}
+                        </span>
+                        {r.message === "" ? null : <span className="text-muted-foreground">{r.message}</span>}
+                      </div>
+                      <SystemOneTestQuestions questions={r.questions} />
                     </div>
                   ))
                 )}
@@ -738,7 +763,7 @@ function SourceRow({
         ) : null}
       </div>
       <div className="col-start-2 row-start-1 flex shrink-0 justify-end gap-1 @2xl/model:col-start-5">
-        <Button size="xs" variant="ghost" disabled={model.kind !== "text"} title={model.kind !== "text" ? noTestTitle : undefined} onClick={onTest}>
+        <Button size="xs" variant="ghost" disabled={!canTestModel(model.kind)} title={!canTestModel(model.kind) ? noTestTitle : undefined} onClick={onTest}>
           {t("测试")}
         </Button>
         <RowActionsMenu
@@ -827,9 +852,9 @@ function ModelCard({
   }
 
   // AIGC 模型的「测试上游」不进菜单（禁用的菜单项悬停不出提示，解释留给来源行上
-  // 那颗禁用的「测试」）；文本模型有来源才给。
+  // 那颗禁用的「测试」）；文本与 System One 模型有来源才给。
   const menuActions = [
-    ...(m.kind === "text" && m.sources.length > 0
+    ...(canTestModel(m.kind) && m.sources.length > 0
       ? [{ label: t("测试上游"), onSelect: () => onTest(m.sources) }]
       : []),
     { label: m.disabled ? t("启用模型") : t("停用模型"), onSelect: () => void toggle() },

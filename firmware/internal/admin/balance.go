@@ -82,7 +82,7 @@ func (s *Server) handleUpstreamBalance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	acct := upstream.Account{Name: ru.Name, Type: ru.Type, APIKey: ru.APIKey, BaseURL: ru.BaseURL, EgressMode: ru.EgressMode}
+	acct := upstream.Account{Name: ru.Name, Type: ru.Type, APIKey: ru.APIKey, BaseURL: ru.BaseURL, ProtocolURLs: ru.ProtocolURLs, EgressMode: ru.EgressMode}
 	queryCtx, cancel := context.WithTimeout(r.Context(), balanceQueryTimeout)
 	res := upstream.QueryBalance(queryCtx, s.upstreamClient, acct)
 	cancel()

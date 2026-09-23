@@ -13,7 +13,8 @@
 // 显示中文。目录内容由 /i18n 技能定期补齐，固件构建不因缺译失败。
 //
 // 数据面（/v1、/agents 等给程序看的 API）不经本包；只有管理面
-// internal/admin 的 writeError / writeJSON 走它。
+// internal/admin 的 writeError / writeJSON，以及数据面里专为设备界面服务的
+// 凭 Key 自证的媒体生成端点（internal/gateway/media_holder.go）走它。
 package i18n
 
 import (

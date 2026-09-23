@@ -14,6 +14,7 @@ import (
 // 「设备允许装哪个 cloudflared」这一决策的唯一依据（docs-dev/firmware-cloudflare-tunnel.md §7.1）。
 var trustedKeys = map[string]string{
 	"llmgate-components-2026-08": "Dv1eXOLBuF6nB31Ddk9HdPAc9TdWIpo/yZjsw0HYfWs=",
+	"llmgate-components-2026-09": "gT856e4F5hxC6sCKCYdBcloP+rn1PvIlhL9K7sJvPjc=",
 }
 
 // TrustedKeys 返回内嵌公钥表的解码副本。解不开的条目是打包错误，直接 panic

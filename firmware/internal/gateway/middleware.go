@@ -31,7 +31,7 @@ type reqInfo struct {
 	// upstream 是最后尝试的上游账户名——诊断故障切换用，凭证绝不在内（§15.1）。
 	attempts int
 	upstream string
-	// imageUsage/imageCount/imageReqSize 是图片同步入口的账单事实内存记录点位：
+	// imageUsage/imageCount/imageReqSize 是图像同步入口的账单事实内存记录点位：
 	// 厂商 usage 原文 JSON、出图张数（data[] 长度）、请求 size 参数，由
 	// images.go 的观察器在 2xx 出图时回填。消费方是 iteration-9 的计量账本
 	// （同步调用无任务行，不建新表）；刻意**不进访问日志**——usage 与 size 都
@@ -73,6 +73,9 @@ func (s *Server) withRequestID(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		info := &reqInfo{id: newRequestID()}
 		w.Header().Set("X-Request-Id", info.id)
+		if strings.HasPrefix(r.URL.Path, "/typesafe/") {
+			w.Header().Set("X-Typesafe-Request-Id", info.id)
+		}
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), reqInfoKey{}, info)))
 	})
 }
@@ -454,6 +457,9 @@ func connectErrorCode(status int) string {
 // 错误形），/minimax/ 系是 MiniMax 协议面，其余（chat、
 // models 等）是 OpenAI 风格入口。
 func entryErrorStyle(r *http.Request) errorStyle {
+	if strings.HasPrefix(r.URL.Path, "/typesafe/") {
+		return systemOneErrorStyle
+	}
 	if r.URL.Path == "/v1/messages" || strings.HasPrefix(r.URL.Path, "/v1/messages/") ||
 		strings.HasPrefix(r.URL.Path, "/agents/claude/") || strings.HasPrefix(r.URL.Path, "/claude/") {
 		return anthropicErrorStyle

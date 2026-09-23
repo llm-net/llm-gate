@@ -1,7 +1,7 @@
 // 「添加模型」：把这个账号平台上的模型加进模型目录。勾选清单 + 自定义一条。
 //
 // 模型不从模型列「新建」，而是从**承载它的账号**加——平台已知，协议面与优先级都不必
-// 再问一遍。清单来自平台模型信息文件（固件内嵌基线，可从官网进行数据升级），**且恒可
+// 再问一遍。清单来自模型目录文件（固件内嵌基线，可从官网进行数据升级），**且恒可
 // 自定义**：厂商上新而清单还没更新时照样录得进去。
 //
 // 打开时读一次可选清单（用户动作触发的一次性读取，不违零轮询）。清单读不到不该把这个
@@ -105,9 +105,9 @@ export function AddModelsDialog({
 
   const addable = (res?.models ?? []).filter((m) => m.added !== true && (m.blocked ?? "") === "");
   const canSubmit = picked.size > 0 || customName.trim() !== "";
-  // 清单读不到时三个种类都列出来（服务端仍会裁决）。
+  // 清单读不到时全部种类都列出来（服务端仍会裁决）。
   const kindOptions: api.UpstreamKind[] =
-    res !== null ? res.kinds : (["text", "video", "image"] as const).map((k) => ({ kind: k }));
+    res !== null ? res.kinds : (["text", "video", "image", "systemone"] as const).map((k) => ({ kind: k }));
 
   function submit(): void {
     if (u === null) return;

@@ -12,6 +12,7 @@ import (
 	"mime"
 	"net"
 	"net/http"
+	"regexp"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -189,7 +190,7 @@ func (s *Server) withCSRF(next http.Handler) http.Handler {
 			// 固件包与组件制品上传是管理面仅有的非 JSON 变更请求（裸二进制字节，
 			// docs/firmware-update.md）。放行的是**另一个同样表单发不出的**
 			// Content-Type，CSRF 头照旧强制——防线一道没少，只换了体裁。
-			if r.Method == http.MethodPost && octetStreamPaths[r.URL.Path] {
+			if r.Method == http.MethodPost && octetStreamPath(r.URL.Path) {
 				if err != nil || ct != "application/octet-stream" {
 					writeError(w, http.StatusUnsupportedMediaType, "unsupported_media_type", "二进制上传的 Content-Type 必须为 application/octet-stream")
 					return
@@ -357,6 +358,17 @@ var octetStreamPaths = map[string]bool{
 	FirmwareUploadPath:  true,
 	ComponentUploadPath: true,
 	MihomoUploadPath:    true,
+
+	CodexAppServerUploadPath: true,
+}
+
+// studioUploadPathRE 是创作工作空间的文件上传路径（studio.go handleStudioUpload）：
+// POST /admin/v1/workspaces/{id}/files，同样是裸二进制体。
+var studioUploadPathRE = regexp.MustCompile(`^/admin/v1/workspaces/[^/]+/files$`)
+
+// octetStreamPath 报告一条 POST 路径是否按裸二进制体处理。
+func octetStreamPath(path string) bool {
+	return octetStreamPaths[path] || studioUploadPathRE.MatchString(path)
 }
 
 // remoteIP 取审计与登录退避用的客户端 IP：经可信 Tunnel 入口到达的请求用闸门

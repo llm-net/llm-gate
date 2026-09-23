@@ -58,7 +58,7 @@ func TestQuotaUsesExistingOAuthRefreshOwner(t *testing.T) {
 	})
 	s := New(&config.Config{}, logging.New(io.Discard, slog.LevelDebug), st, nil, nil, router)
 	refreshDone := make(chan error, 1)
-	go func() { refreshDone <- s.RefreshAgent(context.Background(), "codex") }()
+	go func() { refreshDone <- s.RefreshAgent(context.Background(), a.ID) }()
 	<-started
 	m := agentquota.NewManager(st, s.FetchAgentQuota)
 	syncDone := make(chan agentquota.Snapshot, 1)
