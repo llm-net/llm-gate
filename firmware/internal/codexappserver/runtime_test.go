@@ -80,6 +80,8 @@ func fakeAppServer() int {
 			cwd, _ := os.Getwd()
 			send(map[string]any{"id": msg.ID, "result": map[string]any{
 				"home": os.Getenv("HOME"), "cwd": cwd, "path": os.Getenv("PATH"), "extra": os.Getenv("FAKE_EXTRA")}})
+		case "echo/args":
+			send(map[string]any{"id": msg.ID, "result": map[string]any{"args": os.Args[1:]}})
 		case "auth/present":
 			raw, err := os.ReadFile(filepath.Join(os.Getenv("CODEX_HOME"), "auth.json"))
 			send(map[string]any{"id": msg.ID, "result": map[string]any{"present": err == nil, "bytes": len(raw)}})
@@ -159,7 +161,8 @@ func newRuntimeManager(t *testing.T) (*Manager, string) {
 	root := t.TempDir()
 	comps := filepath.Join(root, "components")
 	m := NewManager(Options{DataDir: filepath.Join(root, "data"), Settings: newFakeSettings(), Engine: &fakeEngine{},
-		Keys: newSigner(t).keys, ComponentsDir: comps, ClientVersion: "test"})
+		Keys: newSigner(t).keys, ComponentsDir: comps, ClientVersion: "test",
+		ProbeSandbox: func() SandboxInfo { return SandboxInfo{UserNamespaces: true} }})
 	return m, comps
 }
 
@@ -568,5 +571,49 @@ func TestProbeSandbox(t *testing.T) {
 		func(string) (string, error) { return "/usr/bin/bwrap", nil })
 	if got != (SandboxInfo{SystemBwrap: true}) {
 		t.Errorf("系统 bwrap: got %+v", got)
+	}
+}
+
+// TestLaunchLegacyLandlock 钉住沙箱切换：只有 AppArmor 限制 userns 且有 Landlock 时实例带
+// features.use_legacy_landlock，自检读数同步标出。
+func TestLaunchLegacyLandlock(t *testing.T) {
+	cases := []struct {
+		name  string
+		probe SandboxInfo
+		want  []string
+	}{
+		{"userns 可用", SandboxInfo{UserNamespaces: true, Landlock: true}, []string{}},
+		{"AppArmor 限制且有 Landlock", SandboxInfo{AppArmorRestrictsUserNS: true, Landlock: true}, []string{"-c", legacyLandlockOverride}},
+		{"AppArmor 限制但无 Landlock", SandboxInfo{AppArmorRestrictsUserNS: true}, []string{}},
+	}
+	for _, c := range cases {
+		m, comps := newRuntimeManager(t)
+		m.opt.ProbeSandbox = func() SandboxInfo { return c.probe }
+		installFakeSlot(t, comps, "a")
+		p, err := m.Launch(LaunchOptions{})
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		if _, err := p.Initialize(ctx); err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		var got struct {
+			Args []string `json:"args"`
+		}
+		if err := p.Client.Call(ctx, "echo/args", nil, &got); err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		cancel()
+		p.Close()
+		if strings.Join(got.Args, " ") != strings.Join(c.want, " ") {
+			t.Errorf("%s: args=%q want %q", c.name, got.Args, c.want)
+		}
+		ctx, cancel = context.WithTimeout(context.Background(), 30*time.Second)
+		res := m.SelfCheck(ctx)
+		cancel()
+		if !res.OK || res.Sandbox.LegacyLandlock != (len(c.want) > 0) {
+			t.Errorf("%s: 自检 ok=%v legacy_landlock=%v", c.name, res.OK, res.Sandbox.LegacyLandlock)
+		}
 	}
 }

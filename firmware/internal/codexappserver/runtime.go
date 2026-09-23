@@ -13,6 +13,9 @@ package codexappserver
 //     config.toml 只按调用方给的字节写进去（0600），Close 时覆写再删整个目录。
 //   - 环境最小化：HOME / CODEX_HOME 指向实例目录，PATH 只有系统目录，RUST_LOG=error；stderr
 //     缺省丢弃。进程放进独立进程组，Close 时整组收尾（code-mode host、bwrap、子 shell）。
+//   - 沙箱：app-server 在 Linux 上缺省用 bubblewrap。AppArmor 限制非特权用户命名空间
+//     （Ubuntu 23.10+ 缺省）时 bwrap 建不出沙箱，内核有 Landlock 就让实例改走 Landlock
+//     （useLegacyLandlock），每次 Launch 现读前提。
 //   - 线程一律 ephemeral（调用方在 thread/start 里给 ephemeral: true）：会话 rollout 不落盘，
 //     提示词与模型输出不进磁盘（§15.1）。凭据写进实例目录只为让 app-server 自己读，本包不
 //     解析、不记录它。
@@ -192,7 +195,11 @@ func (m *Manager) Launch(opts LaunchOptions) (*Process, error) {
 		}
 	}
 
-	cmd := exec.Command(inst.Entrypoint)
+	var args []string
+	if useLegacyLandlock(m.opt.ProbeSandbox()) {
+		args = append(args, "-c", legacyLandlockOverride)
+	}
+	cmd := exec.Command(inst.Entrypoint, args...)
 	cmd.Dir = work
 	cmd.Env = append([]string{
 		"HOME=" + home,
@@ -329,16 +336,24 @@ func wipeHome(home string) {
 
 // ---- 自检 ----
 
-// SandboxInfo 是沙箱前提的读数：app-server 在 Linux 上优先 Landlock，没有就用 bubblewrap
-// （系统的或捆绑的），bubblewrap 需要非特权用户命名空间。UserNamespaces 是扣掉 AppArmor
-// 限制后的可用性，AppArmorRestrictsUserNS 单列限制本身。
+// SandboxInfo 是沙箱前提的读数：app-server 在 Linux 上缺省用 bubblewrap（系统的或捆绑的），
+// bubblewrap 需要非特权用户命名空间。UserNamespaces 是扣掉 AppArmor 限制后的可用性，
+// AppArmorRestrictsUserNS 单列限制本身；LegacyLandlock 表示实例改走 Landlock。
 type SandboxInfo struct {
 	UserNamespaces          bool   `json:"user_namespaces"`
 	AppArmorRestrictsUserNS bool   `json:"apparmor_restricts_userns"`
 	Landlock                bool   `json:"landlock"`
 	SystemBwrap             bool   `json:"system_bwrap"`
 	BundledBwrap            string `json:"bundled_bwrap,omitempty"`
+	LegacyLandlock          bool   `json:"legacy_landlock"`
 }
+
+// legacyLandlockOverride 让实例改走 Codex 的 Landlock 沙箱。Landlock 模式不支持
+// workspace-write（app-server 直接 panic）；设备上的实例只用 read-only 与 danger-full-access。
+const legacyLandlockOverride = "features.use_legacy_landlock=true"
+
+// useLegacyLandlock：AppArmor 挡住 bwrap（read-only 下命令一条都起不来）而内核有 Landlock 时改走它。
+func useLegacyLandlock(info SandboxInfo) bool { return info.AppArmorRestrictsUserNS && info.Landlock }
 
 // SelfCheckResult 是一次自检的读数。OK 只在布局齐全、入口自述版本可读、握手成功时为真。
 type SelfCheckResult struct {
@@ -367,7 +382,8 @@ func (m *Manager) SelfCheck(ctx context.Context) SelfCheckResult {
 }
 
 func (m *Manager) selfCheck(ctx context.Context) SelfCheckResult {
-	res := SelfCheckResult{Sandbox: probeSandbox()}
+	res := SelfCheckResult{Sandbox: m.opt.ProbeSandbox()}
+	res.Sandbox.LegacyLandlock = useLegacyLandlock(res.Sandbox)
 	inst, err := m.Installed()
 	if inst != nil {
 		res.Slot, res.Entrypoint, res.Missing = inst.Slot, inst.Entrypoint, inst.Missing

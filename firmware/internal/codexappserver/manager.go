@@ -83,6 +83,9 @@ type Options struct {
 	ComponentsDir string
 	// ClientVersion 写进 initialize 的 clientInfo.version（缺省 buildinfo.Version）。
 	ClientVersion string
+	// ProbeSandbox 读本机沙箱前提（缺省 probeSandbox）；Launch 据此决定实例是否改走
+	// Landlock（runtime.go useLegacyLandlock）。
+	ProbeSandbox func() SandboxInfo
 }
 
 // Manager 是管理器本体，并发安全。
@@ -125,6 +128,9 @@ func NewManager(opt Options) *Manager {
 	}
 	if opt.ClientVersion == "" {
 		opt.ClientVersion = buildinfo.Version
+	}
+	if opt.ProbeSandbox == nil {
+		opt.ProbeSandbox = probeSandbox
 	}
 	m := &Manager{opt: opt, logger: opt.Logger.With("srv", "codex-app-server"), running: map[*Process]struct{}{}}
 	m.cleanupTemp()
